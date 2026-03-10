@@ -1,0 +1,26 @@
+services:
+  lm-chat:
+    image: ghcr.io/chevron7locked/lm-chat:nightly
+    build: .
+    ports:
+      - "3001:3001"
+    volumes:
+      - lm-chat-data:/app/data
+    environment:
+      - LMSTUDIO_URL=http://host.docker.internal:1234
+      - LM_CHAT_AUTH=true
+      # - LM_CHAT_ADMIN_PASS=your-password  # optional: fixed admin password (random if unset)
+      # - LM_CHAT_SECRET=your-secret-here    # optional: fixed signing key
+      # - LMSTUDIO_TOKEN=your-token           # optional: default LM Studio API key
+      # - LM_CHAT_DEBUG=1                     # optional: start with debug logging
+    read_only: true
+    tmpfs:
+      - /tmp:size=10M,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+volumes:
+  lm-chat-data:

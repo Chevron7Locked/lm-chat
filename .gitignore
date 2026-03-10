@@ -1,0 +1,25 @@
+# Runtime data
+*.db
+*.db-shm
+*.db-wal
+*.log
+logs/
+
+# Python
+__pycache__/
+*.pyc
+
+# Security
+.lm_chat_secret
+.env
+.env.local
+
+# Internal
+docs/plans/
+docs/review/
+tests/
+test-screenshots/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,16 @@
+{
+  "name": "lm-chat",
+  "short_name": "lm-chat",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#091018",
+  "theme_color": "#091018",
+  "description": "Deeply-integrated chat UI for LM Studio",
+  "icons": [
+    {
+      "src": "/lm-chat-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+# Dev/test instance — separate port and data volume from prod
+# Usage: docker compose -f docker-compose.dev.yml up -d --build
+services:
+  lm-chat-dev:
+    image: ghcr.io/chevron7locked/lm-chat:dev
+    build: .
+    ports:
+      - "3002:3001"
+    volumes:
+      - lm-chat-dev-data:/app/data
+    environment:
+      - LMSTUDIO_URL=http://host.docker.internal:1234
+      - LM_CHAT_AUTH=true
+    read_only: true
+    tmpfs:
+      - /tmp:size=10M,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: "no"
+
+volumes:
+  lm-chat-dev-data:
