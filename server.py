@@ -3030,10 +3030,10 @@ if __name__ == "__main__":
                 admin_pass = secrets.token_urlsafe(12)
                 # Print credentials to stderr only — never to log files
                 print(f"\n{'='*50}", file=sys.stderr)
-                print(f"  Admin account created", file=sys.stderr)
+                print("  Admin account created", file=sys.stderr)
                 print(f"  Username: {admin_user}", file=sys.stderr)
                 print(f"  Password: {admin_pass}", file=sys.stderr)
-                print(f"  (set LM_CHAT_ADMIN_PASS to use your own)", file=sys.stderr)
+                print("  (set LM_CHAT_ADMIN_PASS to use your own)", file=sys.stderr)
                 print(f"{'='*50}\n", file=sys.stderr)
             else:
                 log.info(f"Admin account created: {admin_user}")

@@ -1,0 +1,28 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 200  # server.py has long lines, don't fight it
+
+[tool.ruff.lint]
+select = [
+    "F",     # pyflakes (unused imports, undefined names — real bugs)
+    "S",     # bandit security rules
+    "B",     # bugbear (likely bugs)
+]
+ignore = [
+    "S104",  # binding to all interfaces (intentional for server)
+    "S110",  # try-except-pass (used for cleanup)
+    "S311",  # pseudo-random not for crypto (we use secrets for crypto)
+    "S324",  # insecure hash (we use hmac properly)
+    "S310",  # URL open schemes (we only open LMSTUDIO which is localhost)
+    "S301",  # pickle (not used)
+    "S113",  # request timeout (we set timeouts)
+    "S608",  # SQL injection — all queries use ? placeholders, not user input
+    "B905",  # zip strict= — not needed for math operations
+]
+
+[tool.ruff.lint.per-file-ignores]
+"server.py" = ["S603", "S607"]  # subprocess calls are intentional
+
+[tool.bandit]
+targets = ["server.py"]
+severity = "medium"

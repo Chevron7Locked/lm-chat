@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint & Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tools
+        run: pip install ruff bandit
+
+      - name: Ruff lint
+        run: ruff check --output-format=github .
+
+      - name: Bandit security scan
+        run: bandit -r server.py -f json -o bandit-report.json || true && bandit -r server.py -ll
+
+      - name: Check for hardcoded secrets
+        run: |
+          # Fail if any obvious secret patterns exist
+          if grep -rn "password\s*=\s*['\"][^'\"]\+['\"]" server.py --include="*.py" | grep -v "get\|environ\|input\|prompt\|hash\|verify\|check\|SECRET_FILE\|arg\|parse"; then
+            echo "::error::Possible hardcoded password found"
+            exit 1
+          fi
