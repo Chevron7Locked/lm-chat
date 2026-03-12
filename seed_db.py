@@ -37,8 +37,8 @@ def main():
     if target == prod:
         if "--force" not in sys.argv:
             print(f"ERROR: refusing to overwrite production database ({PROD_DB})")
-            print(f"  seed_db.py writes to dev.db by default.")
-            print(f"  To seed prod, run: python seed_db.py --force")
+            print("  seed_db.py writes to dev.db by default.")
+            print("  To seed prod, run: python seed_db.py --force")
             sys.exit(1)
         print(f"WARNING: --force flag set, writing to production DB: {PROD_DB}")
 
