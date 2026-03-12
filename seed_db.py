@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Seed the dev database with realistic fake conversations."""
+"""Seed a dev database with realistic fake conversations.
+
+Writes to dev.db by default — never touches the production database.
+Use LM_CHAT_DB env var to override, but only with explicit --force flag.
+"""
 import sqlite3
 import time
 import uuid
 import os
+import sys
 
-DB_PATH = os.environ.get("LM_CHAT_DB", os.path.join(os.path.dirname(__file__), "chats.db"))
+PROD_DB = os.path.join(os.path.dirname(__file__), "chats.db")
+DEV_DB = os.path.join(os.path.dirname(__file__), "dev.db")
+DB_PATH = os.environ.get("LM_CHAT_DB", DEV_DB)
 
 def ts(hours_ago):
     return time.time() - (hours_ago * 3600)
@@ -24,18 +31,37 @@ def make_chat(db, title, folder, messages, hours_ago=1, pinned=0):
     return chat_id
 
 def main():
-    # Back up existing DB
+    # Safety: refuse to touch production DB without explicit --force
+    target = os.path.realpath(DB_PATH)
+    prod = os.path.realpath(PROD_DB)
+    if target == prod:
+        if "--force" not in sys.argv:
+            print(f"ERROR: refusing to overwrite production database ({PROD_DB})")
+            print(f"  seed_db.py writes to dev.db by default.")
+            print(f"  To seed prod, run: python seed_db.py --force")
+            sys.exit(1)
+        print(f"WARNING: --force flag set, writing to production DB: {PROD_DB}")
+
+    # Remove existing target DB (it's dev.db, safe to replace)
     if os.path.exists(DB_PATH):
-        backup = DB_PATH + ".bak"
-        os.replace(DB_PATH, backup)
-        print(f"Backed up existing DB to {backup}")
+        os.remove(DB_PATH)
+        # Clean up WAL/SHM files too
+        for suffix in ("-wal", "-shm"):
+            p = DB_PATH + suffix
+            if os.path.exists(p):
+                os.remove(p)
 
     # Use server's init_db to create schema (single source of truth)
-    import sys
     sys.path.insert(0, os.path.dirname(__file__))
-    os.environ.setdefault("LM_CHAT_AUTH", "false")  # avoid auth prompts
+    original_db = os.environ.get("LM_CHAT_DB")
+    os.environ["LM_CHAT_DB"] = DB_PATH
+    os.environ.setdefault("LM_CHAT_AUTH", "false")
     from server import init_db
     init_db()
+    if original_db is not None:
+        os.environ["LM_CHAT_DB"] = original_db
+    else:
+        del os.environ["LM_CHAT_DB"]
 
     db = sqlite3.connect(DB_PATH)
     db.execute("PRAGMA foreign_keys=ON")
