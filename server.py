@@ -3,12 +3,12 @@ lm-chat — lightweight web UI for LM Studio with MCP tool integration.
 Serves a PWA-ready single-page app, proxies to LM Studio, persists chats in SQLite.
 """
 
-import base64, hashlib, hmac, json, logging, math, os, re, secrets, signal, sqlite3, struct, sys, threading, time, uuid, urllib.request, urllib.error
+import base64, gzip, hashlib, hmac, html as html_mod, json, logging, math, os, re, secrets, signal, sqlite3, struct, sys, threading, time, uuid, urllib.request, urllib.error
 import http.cookies
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 LMSTUDIO = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_TOKEN = os.environ.get("LMSTUDIO_TOKEN", "")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -58,7 +58,7 @@ DEFAULT_INTEGRATIONS = [
     "mcp/paper-search",
 ]
 
-# ── Structured Logging with Rotation ──
+# --- Structured Logging with Rotation ---
 
 LOG_DIR = os.environ.get("LM_CHAT_LOGS", os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs"))
 LOG_MAX_BYTES = 5 * 1024 * 1024   # 5 MB per file
@@ -208,6 +208,9 @@ def init_db():
     db.execute("""CREATE INDEX IF NOT EXISTS idx_insights_user_cat
         ON user_insights(user_id, category)""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_messages_chat_role ON messages(chat_id, role)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_chats_user_id ON chats(user_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_message_id ON embeddings(message_id)")
     db.execute("""CREATE TABLE IF NOT EXISTS shared_chats (
         share_id TEXT PRIMARY KEY,
         chat_id TEXT NOT NULL,
@@ -246,7 +249,7 @@ def get_db():
     return db
 
 
-# ── Password helpers ──
+# --- Password helpers ---
 
 def hash_password(password):
     salt = os.urandom(16)
@@ -259,19 +262,20 @@ def verify_password(password, hash_hex, salt_hex):
     return hmac.compare_digest(h.hex(), hash_hex)
 
 
-# ── Session helpers ──
+# --- Session helpers ---
 
 def _hash_token(token):
     """Hash session token for storage (SHA-256). Token has 256 bits of entropy so fast hash is safe."""
     return hashlib.sha256(token.encode()).hexdigest()
 
-def create_session(db, user_id):
+def create_session(db, user_id, commit=True):
     token = secrets.token_hex(32)
     token_hash = _hash_token(token)
     expires = time.time() + SESSION_EXPIRY
     db.execute("INSERT INTO sessions (token,user_id,created_at,expires_at) VALUES (?,?,?,?)",
                (token_hash, user_id, time.time(), expires))
-    db.commit()
+    if commit:
+        db.commit()
     return token  # return plaintext to client; only hash is stored
 
 def get_session_user(db, token):
@@ -294,28 +298,10 @@ def get_session_user(db, token):
     return {"id": row[2], "username": row[3], "display_name": row[4], "is_admin": row[5], "totp_enabled": row[6] or 0}
 
 
-# ── Rate limiting (SQLite-backed) ──
+# --- Rate limiting (SQLite-backed) ---
 
 def check_rate_limit(ip):
-    db = get_db()
-    try:
-        db.execute("BEGIN IMMEDIATE")
-        now = time.time()
-        row = db.execute("SELECT attempts, first_attempt FROM rate_limits WHERE ip=?", (ip,)).fetchone()
-        if not row:
-            db.execute("COMMIT")
-            return True
-        count, first = row
-        if now - first > RATE_LIMIT_WINDOW:
-            db.execute("DELETE FROM rate_limits WHERE ip=?", (ip,))
-            db.execute("COMMIT")
-            return True
-        db.execute("COMMIT")
-        return count < RATE_LIMIT_MAX_ATTEMPTS
-    except Exception:
-        db.execute("ROLLBACK")
-        raise
-def record_failed_login(ip):
+    """Check rate limit AND record a failed attempt atomically. Returns True if allowed."""
     db = get_db()
     try:
         db.execute("BEGIN IMMEDIATE")
@@ -323,14 +309,26 @@ def record_failed_login(ip):
         row = db.execute("SELECT attempts, first_attempt FROM rate_limits WHERE ip=?", (ip,)).fetchone()
         if not row:
             db.execute("INSERT INTO rate_limits (ip, attempts, first_attempt) VALUES (?, 1, ?)", (ip, now))
-        elif now - row[1] > RATE_LIMIT_WINDOW:
+            db.execute("COMMIT")
+            return True
+        count, first = row
+        if now - first > RATE_LIMIT_WINDOW:
             db.execute("UPDATE rate_limits SET attempts=1, first_attempt=? WHERE ip=?", (now, ip))
-        else:
-            db.execute("UPDATE rate_limits SET attempts=attempts+1 WHERE ip=?", (ip,))
+            db.execute("COMMIT")
+            return True
+        if count >= RATE_LIMIT_MAX_ATTEMPTS:
+            db.execute("COMMIT")
+            return False
+        db.execute("UPDATE rate_limits SET attempts=attempts+1 WHERE ip=?", (ip,))
         db.execute("COMMIT")
+        return True
     except Exception:
-        db.execute("ROLLBACK")
+        try:
+            db.execute("ROLLBACK")
+        except Exception:
+            pass
         raise
+
 def clear_rate_limit(ip):
     db = get_db()
     db.execute("DELETE FROM rate_limits WHERE ip=?", (ip,))
@@ -342,7 +340,7 @@ def cleanup_expired_sessions(db):
     db.execute("DELETE FROM rate_limits WHERE first_attempt < ?", (now - RATE_LIMIT_WINDOW,))
     db.commit()
 
-# ── In-memory API rate limiter (token bucket) ──
+# --- In-memory API rate limiter (token bucket) ---
 
 class TokenBucketLimiter:
     """Per-key rate limiter using token bucket algorithm."""
@@ -399,7 +397,7 @@ def maybe_cleanup_sessions():
     except Exception:
         pass
 
-# ── Server-side TOTP setup storage (C3: secret never in client token) ──
+# --- Server-side TOTP setup storage (C3: secret never in client token) ---
 
 _pending_totp = {}
 _pending_totp_lock = threading.Lock()
@@ -433,7 +431,7 @@ def consume_totp_setup(setup_id):
     with _pending_totp_lock:
         _pending_totp.pop(setup_id, None)
 
-# ── Validation ──
+# --- Validation ---
 
 USERNAME_RE = re.compile(r'^[a-zA-Z0-9_]{3,32}$')
 
@@ -444,7 +442,7 @@ def validate_password(password):
     return isinstance(password, str) and len(password) >= 8
 
 
-# ── TOTP helpers (RFC 6238) ──
+# --- TOTP helpers (RFC 6238) ---
 
 def generate_totp_secret():
     """Generate 20-byte random secret, return as base32 (no padding)."""
@@ -510,7 +508,7 @@ def generate_qr_svg(data, module_size=6):
     """
     data_bytes = data.encode('utf-8') if isinstance(data, str) else data
 
-    # ── QR constants ──
+    # --- QR constants ---
     # (total_codewords, ec_codewords_per_block, num_blocks) for ECC Level L, versions 1-6
     VERSION_INFO = {
         1: (26, 7, 1), 2: (44, 10, 1), 3: (70, 15, 1),
@@ -539,7 +537,7 @@ def generate_qr_svg(data, module_size=6):
     total_cw, ec_per_block, num_blocks = VERSION_INFO[version]
     data_cw = DATA_CAPACITY[version]
 
-    # ── Byte mode encoding ──
+    # --- Byte mode encoding ---
     bits = []
     def add_bits(val, n):
         for i in range(n - 1, -1, -1):
@@ -567,7 +565,7 @@ def generate_qr_svg(data, module_size=6):
             byte = (byte << 1) | bits[i + j]
         data_codewords.append(byte)
 
-    # ── Reed-Solomon over GF(2^8) ──
+    # --- Reed-Solomon over GF(2^8) ---
     PP = 0x11D  # primitive polynomial x^8 + x^4 + x^3 + x^2 + 1
     gf_exp = [0] * 512
     gf_log = [0] * 256
@@ -632,7 +630,7 @@ def generate_qr_svg(data, module_size=6):
             if i < len(be):
                 final.append(be[i])
 
-    # ── Module placement ──
+    # --- Module placement ---
     # Initialize grid: None = unset, 0 = white, 1 = black
     grid = [[None] * size for _ in range(size)]
     reserved = [[False] * size for _ in range(size)]
@@ -739,7 +737,7 @@ def generate_qr_svg(data, module_size=6):
 
     place_data(grid, final)
 
-    # ── Masking ──
+    # --- Masking ---
     MASK_FNS = [
         lambda r, c: (r + c) % 2 == 0,
         lambda r, c: r % 2 == 0,
@@ -803,7 +801,7 @@ def generate_qr_svg(data, module_size=6):
             best_mask = mi
             best_grid = mg
 
-    # ── Format information ──
+    # --- Format information ---
     # ECC Level L = 01, mask pattern 3 bits
     format_data = (0b01 << 3) | best_mask  # 5 bits
     # BCH(15,5) encoding
@@ -831,7 +829,7 @@ def generate_qr_svg(data, module_size=6):
         r, c = FORMAT_V[i]
         best_grid[r][c] = bit
 
-    # ── SVG output ──
+    # --- SVG output ---
     quiet = 4  # quiet zone modules
     total = size + quiet * 2
     px = total * module_size
@@ -849,7 +847,7 @@ def generate_qr_svg(data, module_size=6):
     return '\n'.join(parts)
 
 
-# ── Context management ──
+# --- Context management ---
 
 def get_embedding(text, token=None):
     """Get embedding vector from LM Studio. Returns list of floats or None."""
@@ -873,7 +871,7 @@ def get_embedding(text, token=None):
 
 class Handler(BaseHTTPRequestHandler):
 
-    # ── Auth middleware ──
+    # --- Auth middleware ---
 
     def _parse_session_cookie(self):
         cookie_str = self.headers.get("Cookie", "")
@@ -951,6 +949,12 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_header("Set-Cookie", "lm_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0")
 
+    def _send_security_headers(self, csp=None, referrer="strict-origin-when-cross-origin"):
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", csp or CSP)
+        self.send_header("Referrer-Policy", referrer)
+
     def _json_response_with_cookie(self, code, data, cookie_token=None, clear_cookie=False):
         """Like _json_response but can set/clear cookie before end_headers."""
         if isinstance(data, str):
@@ -958,10 +962,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", CSP)
-        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self._send_security_headers()
         if cookie_token:
             self._set_session_cookie(cookie_token)
         if clear_cookie:
@@ -969,7 +970,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    # ── Routing ──
+    # --- Routing ---
 
     def do_GET(self):
         if self.path == "/" or self.path == "/index.html":
@@ -1063,9 +1064,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
         self.send_header("Access-Control-Max-Age", "86400")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", CSP)
+        self._send_security_headers()
         self.end_headers()
 
     def do_POST(self):
@@ -1174,7 +1173,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_error(404)
 
-    # ── Auth endpoints ──
+    # --- Auth endpoints ---
 
     def _auth_me(self):
         if not AUTH_ENABLED:
@@ -1216,7 +1215,7 @@ class Handler(BaseHTTPRequestHandler):
                 (user_id, username, pw_hash, salt, display_name, 1, time.time()),
             )
             db.execute("UPDATE chats SET user_id=? WHERE user_id IS NULL", (user_id,))
-            token = create_session(db, user_id)
+            token = create_session(db, user_id, commit=False)
             db.commit()
         except Exception:
             db.rollback()
@@ -1241,7 +1240,7 @@ class Handler(BaseHTTPRequestHandler):
             (username,),
         ).fetchone()
         if not row or not verify_password(password, row[2], row[3]):
-            record_failed_login(ip)
+
             return self._error(401, "invalid username or password")
         # Check if 2FA is enabled
         totp_row = db.execute("SELECT totp_enabled FROM users WHERE id=?", (row[0],)).fetchone()
@@ -1255,6 +1254,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json_response_with_cookie(200, json.dumps({"user": user}).encode(), cookie_token=token)
 
     def _auth_logout(self):
+        if not self._check_csrf():
+            return
         token = self._parse_session_cookie()
         if token:
             db = get_db()
@@ -1298,19 +1299,27 @@ class Handler(BaseHTTPRequestHandler):
         if target_id == user["id"]:
             return self._error(400, "cannot delete yourself")
         db = get_db()
-        db.execute("BEGIN IMMEDIATE")
-        target = db.execute("SELECT id FROM users WHERE id=?", (target_id,)).fetchone()
-        if not target:
-            db.rollback()
-            return self._error(404, "user not found")
-        # Delete user's chats and messages
-        chat_ids = [r[0] for r in db.execute("SELECT id FROM chats WHERE user_id=?", (target_id,)).fetchall()]
-        for cid in chat_ids:
-            db.execute("DELETE FROM messages WHERE chat_id=?", (cid,))
-        db.execute("DELETE FROM chats WHERE user_id=?", (target_id,))
-        db.execute("DELETE FROM sessions WHERE user_id=?", (target_id,))
-        db.execute("DELETE FROM users WHERE id=?", (target_id,))
-        db.commit()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            target = db.execute("SELECT id FROM users WHERE id=?", (target_id,)).fetchone()
+            if not target:
+                db.rollback()
+                return self._error(404, "user not found")
+            chat_ids = [r[0] for r in db.execute("SELECT id FROM chats WHERE user_id=?", (target_id,)).fetchall()]
+            for cid in chat_ids:
+                db.execute("DELETE FROM messages WHERE chat_id=?", (cid,))
+            db.execute("DELETE FROM chats WHERE user_id=?", (target_id,))
+            db.execute("DELETE FROM shared_chats WHERE user_id=?", (target_id,))
+            db.execute("DELETE FROM user_settings WHERE user_id=?", (target_id,))
+            db.execute("DELETE FROM sessions WHERE user_id=?", (target_id,))
+            db.execute("DELETE FROM users WHERE id=?", (target_id,))
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            return self._error(500, "failed to delete user")
         self._json_response(200, json.dumps({"ok": True}).encode())
     def _auth_change_password(self, body):
         user = self._require_auth()
@@ -1357,7 +1366,7 @@ class Handler(BaseHTTPRequestHandler):
         users = [{"id": r[0], "username": r[1], "display_name": r[2], "is_admin": r[3], "created_at": r[4]} for r in rows]
         self._json_response(200, json.dumps(users).encode())
 
-    # ── TOTP 2FA ──
+    # --- TOTP 2FA ---
 
     def _totp_setup(self):
         """Generate TOTP secret and return QR SVG. Does NOT enable 2FA yet."""
@@ -1433,11 +1442,11 @@ class Handler(BaseHTTPRequestHandler):
         db = get_db()
         row = db.execute("SELECT totp_secret,username,display_name,is_admin,last_totp_counter FROM users WHERE id=?", (user_id,)).fetchone()
         if not row:
-            record_failed_login(ip)
+
             return self._error(401, "invalid or reused code")
         counter = verify_totp(row[0], code)
         if counter is None or counter <= (row[4] or 0):
-            record_failed_login(ip)
+
             return self._error(401, "invalid or reused code")
         db.execute("UPDATE users SET last_totp_counter=? WHERE id=?", (counter, user_id))
         db.commit()
@@ -1446,7 +1455,7 @@ class Handler(BaseHTTPRequestHandler):
         user = {"id": user_id, "username": row[1], "display_name": row[2], "is_admin": row[3]}
         self._json_response_with_cookie(200, json.dumps({"user": user}).encode(), cookie_token=token)
 
-    # ── User Settings API (H4: server-side secrets) ──
+    # --- User Settings API (H4: server-side secrets) ---
 
     ALLOWED_SETTINGS = {"lm_apikey", "lm_url", "remote_mcps"}
 
@@ -1571,7 +1580,7 @@ class Handler(BaseHTTPRequestHandler):
                 result.append(item)
         return result
 
-    # ── Chat API ──
+    # --- Chat API ---
 
     def _handle_chat(self, body):
         user = self._require_auth()
@@ -1729,14 +1738,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
         self.send_header("X-Accel-Buffering", "no")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", CSP)
-        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self._send_security_headers()
         self.end_headers()
 
         # Collect data for persistence
         content_parts = []
+        reasoning_parts = []
         tool_calls = []
         current_tool = None
         response_id = None
@@ -1767,6 +1774,8 @@ class Handler(BaseHTTPRequestHandler):
 
                     if event_type == "message.delta":
                         content_parts.append(data.get("content") or "")
+                    elif event_type == "reasoning.delta":
+                        reasoning_parts.append(data.get("content") or "")
                     elif event_type == "tool_call.start":
                         current_tool = {
                             "id": data.get("id", ""),
@@ -1805,22 +1814,25 @@ class Handler(BaseHTTPRequestHandler):
 
         # Only persist complete responses (skip if client disconnected mid-stream)
         chat_id = body.get("chat_id")
-        if chat_id and stream_complete:
+        if chat_id and stream_complete and not is_incognito:
             db = get_db()
-            content = "".join(content_parts)
+            reasoning = "".join(reasoning_parts).strip()
+            content = ("".join(content_parts))
+            if reasoning:
+                content = f"<think>{reasoning}</think>{content}"
             self._persist_chat_messages(
                 db, chat_id, body.get("input", ""), content, tool_calls,
                 response_id, stream_usage,
             )
 
             # Index embeddings in background thread (truly non-blocking)
-            def _index_embeddings(cid, uid):
+            _embed_token = self._get_lmstudio_token(user["id"])
+            def _index_embeddings(cid, tok2):
                 try:
                     db2 = get_db()
-                    tok2 = self._get_lmstudio_token(uid)
                     for role_to_embed in ("user", "assistant"):
                         rows = db2.execute(
-                            "SELECT id, content FROM messages WHERE chat_id=? AND role=? AND id NOT IN (SELECT message_id FROM embeddings) ORDER BY id DESC LIMIT 2",
+                            "SELECT m.id, m.content FROM messages m LEFT JOIN embeddings e ON m.id = e.message_id WHERE m.chat_id=? AND m.role=? AND e.message_id IS NULL ORDER BY m.id DESC LIMIT 2",
                             (cid, role_to_embed)
                         ).fetchall()
                         for mid, emb_content in rows:
@@ -1832,7 +1844,7 @@ class Handler(BaseHTTPRequestHandler):
                     db2.commit()
                 except Exception:
                     log.debug("Background embedding indexing failed", exc_info=True)
-            threading.Thread(target=_index_embeddings, args=(chat_id, user["id"]), daemon=True).start()
+            threading.Thread(target=_index_embeddings, args=(chat_id, _embed_token), daemon=True).start()
     def _create_chat(self, body):
         user = self._require_auth()
         if not user:
@@ -1957,7 +1969,8 @@ class Handler(BaseHTTPRequestHandler):
             placeholders = ",".join("?" * len(to_delete))
             db.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", to_delete)
 
-        db.execute("UPDATE chats SET response_id=NULL, updated_at=? WHERE id=?", (time.time(), chat_id))
+        if to_delete:
+            db.execute("UPDATE chats SET response_id=NULL, updated_at=? WHERE id=?", (time.time(), chat_id))
         db.commit()
         self._json_response(200, json.dumps({"user_content": user_content}).encode())
 
@@ -2074,16 +2087,25 @@ class Handler(BaseHTTPRequestHandler):
             half = len(db_messages) // 2
 
             # Single transaction: update summary + delete compacted messages
-            db.execute("BEGIN IMMEDIATE")
-            db.execute(
-                "UPDATE chats SET summary=?, summary_up_to=? WHERE id=?",
-                (summary, last_id, chat_id),
-            )
-            ids_to_delete = [m["id"] for m in db_messages[:half]]
-            if ids_to_delete:
-                placeholders = ",".join("?" * len(ids_to_delete))
-                db.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", ids_to_delete)
-            db.commit()
+            try:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute(
+                    "UPDATE chats SET summary=?, summary_up_to=? WHERE id=?",
+                    (summary, last_id, chat_id),
+                )
+                ids_to_delete = [m["id"] for m in db_messages[:half]]
+                if ids_to_delete:
+                    placeholders = ",".join("?" * len(ids_to_delete))
+                    db.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", ids_to_delete)
+                db.commit()
+            except Exception as e:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                log.error(f"Compact failed: {e}")
+                self._error(500, "compact failed")
+                return
 
             # Distill insights from messages being compacted (non-blocking, separate)
             try:
@@ -2155,7 +2177,7 @@ class Handler(BaseHTTPRequestHandler):
         db.commit()
         self._json_response(200, json.dumps({"ok": True}).encode())
 
-    # ── Share endpoints ──
+    # --- Share endpoints ---
 
     def _share_chat(self, chat_id):
         user = self._require_auth()
@@ -2230,10 +2252,7 @@ class Handler(BaseHTTPRequestHandler):
         data = html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'none'")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
+        self._send_security_headers(csp="default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'none'", referrer="no-referrer")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(data)
@@ -2247,10 +2266,7 @@ class Handler(BaseHTTPRequestHandler):
         data = html.encode("utf-8")
         self.send_response(404)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
+        self._send_security_headers(csp="default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'", referrer="no-referrer")
         self.end_headers()
         self.wfile.write(data)
 
@@ -2258,22 +2274,22 @@ class Handler(BaseHTTPRequestHandler):
         from datetime import datetime
         date_str = datetime.fromtimestamp(created_at).strftime("%B %d, %Y")
         # HTML-escape the title
-        safe_title = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+        safe_title = html_mod.escape(title)
         msg_html = []
         for m in messages:
             role = m.get("role", "")
             content = m.get("content", "") or ""
             # HTML escape content
-            safe = content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            safe = html_mod.escape(content)
             safe = safe.replace("\n\n", "</p><p>").replace("\n", "<br>")
             if role == "user":
                 msg_html.append(f'<div class="msg user"><div class="role">You</div><div class="content"><p>{safe}</p></div></div>')
             elif role == "assistant":
                 msg_html.append(f'<div class="msg asst"><div class="role">Assistant</div><div class="content"><p>{safe}</p></div></div>')
             elif role == "tool":
-                name = (m.get("name") or "tool").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+                name = html_mod.escape(m.get("name") or "tool")
                 output = m.get("output", "") or ""
-                safe_output = output.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                safe_output = html_mod.escape(output)
                 if safe_output:
                     safe_output = safe_output.replace("\n\n", "</p><p>").replace("\n", "<br>")
                     msg_html.append(f'<div class="msg tool"><div class="role">Tool: {name}</div><div class="content tool-out"><p>{safe_output}</p></div></div>')
@@ -2387,7 +2403,7 @@ a{{color:#C4863C}}
             results.append({"message_id": mid, "score": 1.0, "content": (content or "")[:200], "role": role, "chat_id": chat_id, "chat_title": title})
         self._json_response(200, json.dumps({"results": results, "mode": "text"}).encode())
 
-    # ── Helpers ──
+    # --- Helpers ---
 
     def _get_lmstudio_token(self, user_id=None):
         """Get LM Studio auth token from server-side user settings, fall back to env var.
@@ -2460,7 +2476,7 @@ a{{color:#C4863C}}
                 convo_text.append(f"{role}: {text}")
         return "\n".join(convo_text)[:max_chars]
 
-    # ── Memory: Insight scoring and retrieval ──
+    # --- Memory: Insight scoring and retrieval ---
 
     CATEGORY_WEIGHTS = {
         "identity": 2.0, "preference": 2.0, "opinion": 1.5,
@@ -2525,7 +2541,7 @@ a{{color:#C4863C}}
         """, [time.time()] + insight_ids)
         db.commit()
 
-    # ── Memory: Insight parsing ──
+    # --- Memory: Insight parsing ---
 
     VALID_INSIGHT_CATEGORIES = {"identity", "preference", "skill", "project", "opinion", "context"}
 
@@ -2560,7 +2576,7 @@ a{{color:#C4863C}}
             db.commit()
         return new_insights
 
-    # ── Memory: Insight distillation ──
+    # --- Memory: Insight distillation ---
 
     DISTILL_PROMPT = """You are a personal context system. Given this conversation, distill NEW insights about the user.
 
@@ -2658,7 +2674,7 @@ Distill insights (or respond "none" if nothing new):"""
         log.debug(f"memory: distilled {len(new_insights)} insights from chat {chat_id}")
         self._json_response(200, json.dumps({"insights": new_insights}).encode())
 
-    # ── Memory: CRUD endpoints ──
+    # --- Memory: CRUD endpoints ---
 
     def _list_insights(self):
         """GET /api/insights — list all insights for current user."""
@@ -2690,7 +2706,7 @@ Distill insights (or respond "none" if nothing new):"""
         if not content:
             return self._error(400, "content required")
         category = body.get("category", "context")
-        if category not in ("identity", "preference", "skill", "project", "opinion", "context"):
+        if category not in self.VALID_INSIGHT_CATEGORIES:
             category = "context"
         now = time.time()
         insight_id = uuid.uuid4().hex[:12]
@@ -2720,8 +2736,7 @@ Distill insights (or respond "none" if nothing new):"""
             updates.append("content=?")
             params.append((body["content"] or "").strip())
         if "category" in body:
-            valid_cats = ("identity", "preference", "skill", "project", "opinion", "context")
-            cat = body["category"] if body["category"] in valid_cats else "context"
+            cat = body["category"] if body["category"] in self.VALID_INSIGHT_CATEGORIES else "context"
             updates.append("category=?")
             params.append(cat)
         if not updates:
@@ -2866,7 +2881,7 @@ Curated list:"""
 
         dropped, merged, kept = 0, 0, 0
         now = time.time()
-        valid_categories = {"identity", "preference", "skill", "project", "opinion", "context"}
+        valid_categories = self.VALID_INSIGHT_CATEGORIES
 
         old_ids = [r[0] for r in rows]
 
@@ -2970,29 +2985,39 @@ Curated list:"""
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", CSP)
-        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self._send_security_headers()
         self.end_headers()
         self.wfile.write(data)
+
+    _file_cache = {}  # {filename: (raw_bytes, gzipped_bytes, mtime)}
 
     def _serve_file(self, filename, content_type):
         path = os.path.join(os.path.dirname(__file__), filename)
         try:
-            with open(path, "rb") as f:
-                data = f.read()
-            self.send_response(200)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("X-Frame-Options", "DENY")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Content-Security-Policy", CSP)
-            self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
-            self.end_headers()
-            self.wfile.write(data)
+            st = os.stat(path)
         except FileNotFoundError:
             self.send_error(404)
+            return
+        cached = self._file_cache.get(filename)
+        if cached and cached[2] == st.st_mtime:
+            raw, gz = cached[0], cached[1]
+        else:
+            with open(path, "rb") as f:
+                raw = f.read()
+            gz = gzip.compress(raw, compresslevel=6)
+            self._file_cache[filename] = (raw, gz, st.st_mtime)
+        accept_enc = self.headers.get("Accept-Encoding", "")
+        use_gz = "gzip" in accept_enc and len(gz) < len(raw)
+        data = gz if use_gz else raw
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
+        if use_gz:
+            self.send_header("Content-Encoding", "gzip")
+        self._send_security_headers()
+        self.end_headers()
+        self.wfile.write(data)
 
     def _proxy_get(self, path, user_id=None):
         headers = {}

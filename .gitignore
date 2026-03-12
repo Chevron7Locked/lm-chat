@@ -20,6 +20,11 @@ docs/review/
 tests/
 test-screenshots/
 
+# Dev artifacts
+sim-*.png
+*.db.bak
+feature-checklist.txt
+
 # OS
 .DS_Store
 Thumbs.db
