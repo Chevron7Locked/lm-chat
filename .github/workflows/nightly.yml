@@ -7,6 +7,10 @@ on:
     tags-ignore:
       - 'v*'
 
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   packages: write
 
@@ -39,6 +43,8 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.img.outputs.name }}:nightly
+          tags: |
+            ${{ steps.img.outputs.name }}:nightly
+            ${{ steps.img.outputs.name }}:sha-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

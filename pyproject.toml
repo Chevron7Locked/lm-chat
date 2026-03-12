@@ -1,28 +1,33 @@
 [tool.ruff]
 target-version = "py312"
-line-length = 200  # server.py has long lines, don't fight it
+line-length = 220
 
 [tool.ruff.lint]
 select = [
-    "F",     # pyflakes (unused imports, undefined names — real bugs)
-    "S",     # bandit security rules
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes (undefined names, unused imports)
+    "UP",    # pyupgrade (modernize syntax)
     "B",     # bugbear (likely bugs)
+    "S",     # bandit security rules (via ruff — replaces standalone bandit)
 ]
 ignore = [
-    "S104",  # binding to all interfaces (intentional for server)
-    "S110",  # try-except-pass (used for cleanup)
-    "S311",  # pseudo-random not for crypto (we use secrets for crypto)
-    "S324",  # insecure hash (we use hmac properly)
-    "S310",  # URL open schemes (we only open LMSTUDIO which is localhost)
-    "S301",  # pickle (not used)
-    "S113",  # request timeout (we set timeouts)
-    "S608",  # SQL injection — all queries use ? placeholders, not user input
-    "B905",  # zip strict= — not needed for math operations
+    "E401",  # multiple imports on one line (existing style)
+    "E501",  # line too long (single-file server, not fighting it)
+    "E701",  # multiple statements on one line (existing style)
+    "S104",  # binding to all interfaces (intentional — Docker server)
+    "S110",  # try-except-pass (used for DB migration checks)
+    "S113",  # request without timeout (we always set timeouts)
+    "S310",  # audit urlopen schemes (all calls go to LMSTUDIO localhost)
+    "S311",  # pseudo-random (we use secrets module for crypto)
+    "S324",  # insecure hash (we use hmac, not raw md5/sha1)
+    "S608",  # SQL injection (all dynamic queries use ? placeholders)
+    "B905",  # zip strict= (dot product math, lengths always match)
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "server.py" = ["S603", "S607"]  # subprocess calls are intentional
 
-[tool.bandit]
-targets = ["server.py"]
-severity = "medium"
+[tool.codespell]
+skip = ".git*,*.min.js,*.min.css,*.svg"
+ignore-words-list = "totalin"

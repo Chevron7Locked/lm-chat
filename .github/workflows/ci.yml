@@ -6,12 +6,16 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   lint:
-    name: Lint & Security
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -22,10 +26,39 @@ jobs:
           python-version: "3.12"
 
       - name: Install tools
-        run: pip install ruff bandit
+        run: pip install ruff==0.15.5 codespell==2.4.2
 
       - name: Ruff lint
         run: ruff check --output-format=github .
 
-      - name: Bandit security scan
-        run: bandit -r server.py -ll --skip B104,B310,B608
+      - name: Codespell
+        run: codespell server.py index.html
+
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Server imports cleanly
+        run: python -c "from server import Handler, init_db; print('imports ok')"
+
+      - name: Server starts and responds
+        run: |
+          LM_CHAT_AUTH=false python server.py &
+          SERVER_PID=$!
+          sleep 2
+          # Health check
+          STATUS=$(python -c "import urllib.request, json; r=urllib.request.urlopen('http://localhost:3001/api/health', timeout=5); d=json.loads(r.read()); print(d['ok'])")
+          echo "Health: $STATUS"
+          [ "$STATUS" = "True" ] || exit 1
+          # Serves frontend
+          HTTP_CODE=$(python -c "import urllib.request; r=urllib.request.urlopen('http://localhost:3001/', timeout=5); print(r.status)")
+          echo "Frontend: $HTTP_CODE"
+          [ "$HTTP_CODE" = "200" ] || exit 1
+          kill $SERVER_PID
