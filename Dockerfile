@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 LABEL org.opencontainers.image.title="lm-chat" \
       org.opencontainers.image.description="Deeply-integrated chat UI for LM Studio" \
