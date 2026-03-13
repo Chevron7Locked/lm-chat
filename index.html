@@ -56,27 +56,27 @@
                 outline-offset: 2px;
             }
             :root {
-                /* Colors — deep navy + warm amber, rich complements */
-                --bg: #0c1017;
-                --sidebar: #090d13;
-                --surface: #141c26;
-                --surface-raised: #1c2736;
-                --hover: rgba(255, 255, 255, 0.06);
-                --border: rgba(255, 255, 255, 0.07);
-                --border-active: rgba(196, 134, 60, 0.25);
-                --text: #e4e9ee;
-                --dim: #8899ab;
-                --faint: #506070;
-                --accent: #c8903e;
-                --accent-hover: #daa050;
-                --accent-glow: rgba(200, 144, 62, 0.15);
-                --green: #4ec9a8;
-                --code-bg: #0a0e14;
-                --err-bg: #1c1018;
-                --err-border: #3a2030;
-                --err-text: #e8a0a0;
-                --ok-bg: #0e1418;
-                --ok-border: #1a2a35;
+                /* Colors — OKLCH: deep navy + warm amber (verified sRGB→OKLCH conversion) */
+                --bg: oklch(0.172 0.016 261.5);
+                --sidebar: oklch(0.158 0.015 258.2);
+                --surface: oklch(0.223 0.023 254.3);
+                --surface-raised: oklch(0.270 0.032 256.3);
+                --hover: oklch(0.99 0 0 / 0.06);
+                --border: oklch(0.99 0 0 / 0.09);
+                --border-active: oklch(0.693 0.119 73.7 / 0.35);
+                --text: oklch(0.932 0.009 248.1);
+                --dim: oklch(0.676 0.033 249.9);
+                --faint: oklch(0.528 0.035 242.5);
+                --accent: oklch(0.693 0.119 73.7);
+                --accent-hover: oklch(0.746 0.119 72.9);
+                --accent-glow: oklch(0.693 0.119 73.7 / 0.15);
+                --green: oklch(0.758 0.120 172.2);
+                --code-bg: oklch(0.162 0.014 258.4);
+                --err-bg: oklch(0.193 0.025 339.7);
+                --err-border: oklch(0.284 0.047 342.9);
+                --err-text: oklch(0.776 0.086 19.2);
+                --ok-bg: oklch(0.187 0.012 237.5);
+                --ok-border: oklch(0.276 0.030 239.3);
                 /* Spacing — tighter 4px grid */
                 --sp-1: 2px;
                 --sp-2: 4px;
