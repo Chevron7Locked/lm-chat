@@ -1,0 +1,3 @@
+# GitHub language detection — show both Python and HTML
+index.html linguist-language=HTML
+server.py linguist-language=Python
