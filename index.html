@@ -7556,6 +7556,10 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 return el.outerHTML;
             }
             function md(text) {
+                // Strip followup comments before rendering (extracted separately in finishStream).
+                // First: complete comment. Second: partial comment still being emitted mid-stream.
+                text = text.replace(/<!--followups:?\s*\[.*?\]\s*-->\s*$/s, "");
+                text = text.replace(/<!--followups:?[\s\S]*$/s, "");
                 let h = esc(text);
                 h = h.replace(
                     /```(\w*)\n([\s\S]*?)```/g,
