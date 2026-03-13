@@ -8,7 +8,7 @@ import http.cookies
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 LMSTUDIO = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_TOKEN = os.environ.get("LMSTUDIO_TOKEN", "")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -3049,9 +3049,75 @@ Curated list:"""
         log.debug(f"HTTP {args[0]}")
 
 
+def _pid_file():
+    """Return PID file path next to the database."""
+    return os.path.join(os.path.dirname(DB_PATH) or ".", ".lm_chat.pid")
+
+def _kill_stale_server():
+    """If a previous lm-chat is still on our port, kill it."""
+    pidfile = _pid_file()
+    # Check PID file first
+    if os.path.exists(pidfile):
+        try:
+            old_pid = int(open(pidfile).read().strip())
+            if old_pid != os.getpid():
+                os.kill(old_pid, signal.SIGTERM)
+                log.info(f"Stopped previous lm-chat (PID {old_pid})")
+                for _ in range(20):  # wait up to 2s
+                    time.sleep(0.1)
+                    try:
+                        os.kill(old_pid, 0)
+                    except OSError:
+                        break
+                else:
+                    os.kill(old_pid, signal.SIGKILL)
+                    log.warning(f"Force-killed stale lm-chat (PID {old_pid})")
+        except (ValueError, OSError):
+            pass  # stale file, process already gone
+    # Fallback: check if anything is on our port (covers non-PID-file cases)
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.settimeout(1)
+        s.connect(("127.0.0.1", PORT))
+        s.close()
+        # Something is listening — try to identify and kill it
+        try:
+            import subprocess
+            out = subprocess.check_output(["lsof", "-ti", f":{PORT}"], text=True).strip()
+            for pid_str in out.splitlines():
+                pid = int(pid_str)
+                if pid != os.getpid():
+                    os.kill(pid, signal.SIGTERM)
+                    log.info(f"Stopped process {pid} on port {PORT}")
+                    time.sleep(0.5)
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+            log.warning(f"Port {PORT} is in use but couldn't identify the process — start may fail")
+    except (ConnectionRefusedError, OSError):
+        pass  # port is free
+    finally:
+        s.close()
+
+def _write_pid():
+    """Write current PID to file."""
+    try:
+        with open(_pid_file(), "w") as f:
+            f.write(str(os.getpid()))
+    except OSError:
+        pass
+
+def _remove_pid():
+    """Remove PID file on shutdown."""
+    try:
+        os.remove(_pid_file())
+    except OSError:
+        pass
+
 if __name__ == "__main__":
     init_db()
+    _kill_stale_server()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    _write_pid()
     log.info(f"lm-chat running on http://localhost:{PORT}")
     log.info(f"Proxying to LM Studio at {LMSTUDIO}")
     log.info(f"Chat DB: {DB_PATH}")
@@ -3111,4 +3177,5 @@ if __name__ == "__main__":
         pass
     finally:
         server.server_close()
+        _remove_pid()
         log.info("Server stopped.")

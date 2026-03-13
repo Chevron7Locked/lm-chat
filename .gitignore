@@ -13,6 +13,7 @@ __pycache__/
 
 # Security
 .lm_chat_secret
+.lm_chat.pid
 .env
 .env.local
 
