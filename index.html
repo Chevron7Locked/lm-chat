@@ -77,17 +77,17 @@
                 --err-text: oklch(0.776 0.086 19.2);
                 --ok-bg: oklch(0.187 0.012 237.5);
                 --ok-border: oklch(0.276 0.030 239.3);
-                /* Spacing — tighter 4px grid */
-                --sp-1: 2px;
-                --sp-2: 4px;
-                --sp-3: 6px;
-                --sp-4: 8px;
-                --sp-5: 10px;
-                --sp-6: 12px;
-                --sp-7: 16px;
-                --sp-8: 20px;
-                --sp-9: 28px;
-                --sp-10: 40px;
+                /* Spacing — rem scale */
+                --sp-1: 0.125rem;
+                --sp-2: 0.25rem;
+                --sp-3: 0.375rem;
+                --sp-4: 0.5rem;
+                --sp-5: 0.625rem;
+                --sp-6: 0.75rem;
+                --sp-7: 1rem;
+                --sp-8: 1.25rem;
+                --sp-9: 1.75rem;
+                --sp-10: 2.5rem;
                 /* Type — rem scale, respects browser font-size preferences */
                 --text-xs: 0.75rem;
                 --text-sm: 0.8125rem;
@@ -129,7 +129,7 @@
 
             /* Sidebar */
             #sidebar {
-                width: 220px;
+                width: 13.75rem;
                 height: 100%;
                 background: var(--sidebar);
                 display: flex;
@@ -144,17 +144,17 @@
             }
             body.sb-closed #sidebar {
                 transform: translateX(-220px);
-                margin-right: -220px;
+                margin-right: -13.75rem;
             }
             .sb-top {
-                padding: 12px 12px 10px;
+                padding: var(--sp-6) var(--sp-6) var(--sp-5);
                 display: flex;
                 gap: var(--sp-3);
                 align-items: center;
             }
             #new-chat {
                 flex: 1;
-                padding: 8px 10px;
+                padding: var(--sp-4) var(--sp-5);
                 background: none;
                 border: none;
                 color: var(--dim);
@@ -164,7 +164,7 @@
                 text-align: left;
                 display: flex;
                 align-items: center;
-                gap: 8px;
+                gap: var(--sp-4);
                 font-family: inherit;
                 transition:
                     background 0.15s,
@@ -184,7 +184,7 @@
                 color: var(--dim);
                 font-size: var(--text-xl);
                 cursor: pointer;
-                padding: 4px 6px;
+                padding: var(--sp-2) var(--sp-3);
                 border-radius: 6px;
                 transition:
                     background 0.12s,
@@ -195,7 +195,7 @@
                 color: var(--text);
             }
             #chat-search-wrap {
-                padding: 0 12px 12px;
+                padding: 0 var(--sp-6) var(--sp-6);
                 position: relative;
             }
             #chat-search {
@@ -204,7 +204,7 @@
                 color: var(--text);
                 border: 1px solid var(--border);
                 border-radius: var(--r-md);
-                padding: 7px 28px 7px 10px;
+                padding: 0.4375rem var(--sp-9) 0.4375rem var(--sp-5);
                 font-size: var(--text-sm);
                 font-family: inherit;
                 outline: none;
@@ -219,7 +219,7 @@
             }
             #chat-search-clear {
                 position: absolute;
-                right: 18px;
+                right: 1.125rem;
                 top: 50%;
                 transform: translateY(-50%);
                 background: none;
@@ -228,14 +228,14 @@
                 font-size: var(--text-lg);
                 cursor: pointer;
                 display: none;
-                padding: 0 4px;
+                padding: 0 var(--sp-2);
             }
             #chat-search-clear:hover {
                 color: var(--text);
             }
             #chat-no-match {
                 display: none;
-                padding: 8px 12px;
+                padding: var(--sp-4) var(--sp-6);
                 font-size: var(--text-xs);
                 color: var(--faint);
             }
@@ -243,19 +243,19 @@
                 flex: 1;
                 overflow-y: auto;
                 overflow-x: hidden;
-                padding: 4px 8px 0;
+                padding: var(--sp-2) var(--sp-4) 0;
             }
             #search-mode {
                 font-size: 0.6875rem;
                 color: var(--faint);
-                padding: 4px 0 8px 14px;
+                padding: var(--sp-2) 0 var(--sp-4) 0.875rem;
                 cursor: pointer;
             }
             #search-mode:hover {
                 color: var(--text);
             }
             .sr {
-                padding: 6px 10px;
+                padding: var(--sp-3) var(--sp-5);
                 border-radius: var(--r-md);
                 cursor: pointer;
                 font-size: var(--text-xs);
@@ -268,7 +268,7 @@
             .sr .sr-title {
                 color: var(--text);
                 font-size: var(--text-sm);
-                margin-bottom: 2px;
+                margin-bottom: var(--sp-1);
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
@@ -286,7 +286,7 @@
                 float: right;
             }
             .ci {
-                padding: 7px 10px;
+                padding: 0.4375rem var(--sp-5);
                 border-radius: var(--r-md);
                 cursor: pointer;
                 font-size: var(--text-sm);
@@ -323,7 +323,7 @@
                 color: var(--faint);
                 font-size: var(--text-xs);
                 cursor: pointer;
-                padding: 0 2px;
+                padding: 0 var(--sp-1);
                 flex-shrink: 0;
                 opacity: 0;
                 transition: opacity 0.15s;
@@ -345,7 +345,7 @@
                 color: var(--faint);
                 font-size: var(--text-lg);
                 cursor: pointer;
-                padding: 0 2px;
+                padding: 0 var(--sp-1);
                 flex-shrink: 0;
             }
             .ci:hover .del {
@@ -356,14 +356,14 @@
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
                 color: var(--faint);
-                padding: 20px 10px 6px;
+                padding: var(--sp-8) var(--sp-5) var(--sp-3);
                 font-weight: 600;
             }
             .folder-hdr {
                 cursor: pointer;
                 display: flex;
                 align-items: center;
-                gap: 4px;
+                gap: var(--sp-2);
             }
             .folder-hdr:hover {
                 color: var(--dim);
@@ -381,7 +381,7 @@
                 opacity: 0.6;
             }
             .sb-foot {
-                padding: 10px 12px;
+                padding: var(--sp-5) var(--sp-6);
                 font-size: var(--text-xs);
                 color: var(--faint);
                 border-top: 1px solid var(--border);
@@ -418,7 +418,7 @@
                 border: none;
                 color: var(--dim);
                 cursor: pointer;
-                padding: 6px;
+                padding: var(--sp-3);
                 display: none;
                 border-radius: var(--r-md);
                 transition:
@@ -430,8 +430,8 @@
                 color: var(--text);
             }
             #open-sb svg {
-                width: 20px;
-                height: 20px;
+                width: var(--sp-8);
+                height: var(--sp-8);
                 display: block;
             }
             body.sb-closed #open-sb {
@@ -443,7 +443,7 @@
                 font-size: var(--text-md);
                 font-weight: 600;
                 color: var(--text);
-                padding: 4px 0;
+                padding: var(--sp-2) 0;
                 user-select: none;
                 display: flex;
                 align-items: center;
@@ -462,7 +462,7 @@
                 border-left: 4px solid transparent;
                 border-right: 4px solid transparent;
                 border-top: 5px solid var(--dim);
-                margin-left: 4px;
+                margin-left: var(--sp-2);
                 flex-shrink: 0;
             }
             #top-model-dd {
@@ -470,14 +470,14 @@
                 position: absolute;
                 top: 100%;
                 left: 0;
-                margin-top: 10px;
+                margin-top: var(--sp-5);
                 background: var(--surface-raised);
                 border: 1px solid var(--border);
                 border-radius: var(--r-lg);
-                padding: 6px;
+                padding: var(--sp-3);
                 z-index: 50;
-                min-width: 280px;
-                max-height: 320px;
+                min-width: 17.5rem;
+                max-height: 20rem;
                 overflow-y: auto;
                 box-shadow:
                     0 12px 40px rgba(0, 0, 0, 0.35),
@@ -492,13 +492,13 @@
             .mdd-item {
                 display: flex;
                 flex-direction: column;
-                gap: 2px;
+                gap: var(--sp-1);
                 width: 100%;
                 text-align: left;
                 background: none;
                 border: none;
                 color: var(--text);
-                padding: 7px 10px;
+                padding: 0.4375rem var(--sp-5);
                 font-family: inherit;
                 cursor: pointer;
                 border-radius: var(--r-md);
@@ -534,17 +534,17 @@
             .mdd-cap {
                 display: inline-flex;
                 align-items: center;
-                gap: 3px;
+                gap: 0.1875rem;
                 opacity: 0.7;
             }
             .mdd-cap svg {
-                width: 12px;
-                height: 12px;
+                width: var(--sp-6);
+                height: var(--sp-6);
                 flex-shrink: 0;
             }
             .mdd-status {
                 font-size: 0.625rem;
-                padding: 1px 6px;
+                padding: 1px var(--sp-3);
                 border-radius: var(--r-sm);
                 font-weight: 600;
                 letter-spacing: 0.3px;
@@ -557,22 +557,22 @@
             .mdd-empty {
                 font-size: var(--text-sm);
                 color: var(--faint);
-                padding: 16px 14px;
+                padding: var(--sp-7) 0.875rem;
                 text-align: center;
             }
             .topbar-r {
                 margin-left: auto;
                 display: flex;
                 align-items: center;
-                gap: 2px;
+                gap: var(--sp-1);
             }
             .tb {
                 background: none;
                 border: none;
                 color: var(--dim);
                 cursor: pointer;
-                width: 32px;
-                height: 32px;
+                width: 2rem;
+                height: 2rem;
                 border-radius: var(--r-md);
                 display: flex;
                 align-items: center;
@@ -598,7 +598,7 @@
                 align-items: center;
                 justify-content: center;
                 gap: var(--sp-2);
-                padding: 4px 0;
+                padding: var(--sp-2) 0;
                 font-size: var(--text-sm);
                 color: #a78bfa;
                 background: rgba(167, 139, 250, 0.08);
@@ -606,8 +606,8 @@
                 letter-spacing: 0.3px;
             }
             .incognito-bar svg {
-                width: 12px;
-                height: 12px;
+                width: var(--sp-6);
+                height: var(--sp-6);
             }
             body.incognito .incognito-bar {
                 display: flex;
@@ -616,8 +616,8 @@
                 background: color-mix(in srgb, var(--bg) 97%, #a78bfa);
             }
             .tb svg {
-                width: 18px;
-                height: 18px;
+                width: 1.125rem;
+                height: 1.125rem;
                 flex-shrink: 0;
             }
 
@@ -630,9 +630,9 @@
                 scrollbar-gutter: stable;
             }
             #msgs {
-                max-width: 768px;
+                max-width: 48rem;
                 margin: 0 auto;
-                padding: 16px 24px 24px;
+                padding: var(--sp-7) 1.5rem 1.5rem;
                 min-height: 100%;
                 display: flex;
                 flex-direction: column;
@@ -644,7 +644,7 @@
             }
             .welcome {
                 text-align: center;
-                padding: 24px;
+                padding: 1.5rem;
                 color: var(--dim);
                 display: flex;
                 flex-direction: column;
@@ -662,12 +662,12 @@
             .welcome p {
                 font-size: var(--text-md);
                 line-height: 1.6;
-                max-width: 360px;
+                max-width: 22.5rem;
                 margin: 0 auto;
                 color: var(--faint);
             }
             .welcome .w-hint {
-                margin-top: 36px;
+                margin-top: 2.25rem;
                 font-size: var(--text-sm);
                 color: var(--faint);
                 display: flex;
@@ -678,7 +678,7 @@
             .welcome .w-hint kbd {
                 background: var(--surface);
                 border: 1px solid var(--border);
-                padding: 2px 7px;
+                padding: var(--sp-1) 0.4375rem;
                 border-radius: var(--r-sm);
                 font-size: var(--text-sm);
                 font-family: "SF Mono", Menlo, monospace;
@@ -693,9 +693,9 @@
                 flex-wrap: nowrap;
                 gap: var(--sp-3);
                 justify-content: center;
-                max-width: 768px;
+                max-width: 48rem;
                 margin: 0 auto;
-                padding: 0 24px var(--sp-3);
+                padding: 0 1.5rem var(--sp-3);
                 overflow-x: auto;
                 scrollbar-width: none;
             }
@@ -709,11 +709,11 @@
                 background: var(--surface);
                 border: 1px solid var(--border);
                 border-radius: var(--r-full);
-                padding: 6px 14px;
+                padding: var(--sp-3) 0.875rem;
                 cursor: pointer;
                 display: flex;
                 align-items: center;
-                gap: 6px;
+                gap: var(--sp-3);
                 transition: all 0.15s;
                 font-family: inherit;
                 color: var(--dim);
@@ -733,8 +733,8 @@
                 align-items: center;
             }
             .starter-icon svg {
-                width: 16px;
-                height: 16px;
+                width: var(--sp-7);
+                height: var(--sp-7);
                 flex-shrink: 0;
                 opacity: 0.6;
             }
@@ -748,12 +748,12 @@
             .m-user {
                 display: flex;
                 justify-content: flex-end;
-                margin-bottom: 20px;
+                margin-bottom: var(--sp-8);
                 position: relative;
             }
             .m-user .bub {
                 background: var(--surface);
-                padding: 10px 14px;
+                padding: var(--sp-5) 0.875rem;
                 border-radius: 18px 18px 4px 18px;
                 max-width: 75%;
                 word-break: break-word;
@@ -763,24 +763,24 @@
             }
 
             .m-asst {
-                margin-bottom: 20px;
+                margin-bottom: var(--sp-8);
             }
             .m-asst .bub {
                 font-size: var(--text-md);
                 line-height: 1.6;
             }
             .m-asst .bub p {
-                margin-bottom: 10px;
+                margin-bottom: var(--sp-5);
             }
             .m-asst .bub p:last-child {
                 margin-bottom: 0;
             }
             .m-asst .bub pre {
                 background: var(--code-bg);
-                padding: 10px 12px;
+                padding: var(--sp-5) var(--sp-6);
                 border-radius: var(--r-md);
                 overflow-x: auto;
-                margin: 8px 0;
+                margin: var(--sp-4) 0;
                 font-size: var(--text-base);
                 line-height: 1.5;
                 position: relative;
@@ -788,13 +788,13 @@
             }
             .m-asst .bub pre .copy-btn {
                 position: absolute;
-                top: 6px;
-                right: 6px;
+                top: var(--sp-3);
+                right: var(--sp-3);
                 background: rgba(255, 255, 255, 0.1);
                 border: none;
                 color: var(--dim);
                 font-size: var(--text-sm);
-                padding: 3px 8px;
+                padding: 0.1875rem var(--sp-4);
                 border-radius: var(--r-sm);
                 cursor: pointer;
                 opacity: 0;
@@ -810,8 +810,8 @@
             .m-asst .bub pre[data-lang]::before {
                 content: attr(data-lang);
                 position: absolute;
-                top: 6px;
-                right: 10px;
+                top: var(--sp-3);
+                right: var(--sp-5);
                 font-size: var(--text-xs);
                 color: var(--dim);
                 text-transform: uppercase;
@@ -820,7 +820,7 @@
                 opacity: 0.6;
             }
             .m-asst .bub pre[data-lang] {
-                padding-top: 28px;
+                padding-top: var(--sp-9);
             }
             .m-asst .bub code {
                 font-family: "SF Mono", Menlo, monospace;
@@ -828,7 +828,7 @@
             }
             .m-asst .bub code:not(pre code) {
                 background: var(--code-bg);
-                padding: 2px 5px;
+                padding: var(--sp-1) 0.3125rem;
                 border-radius: var(--r-sm);
             }
             .m-asst .bub strong {
@@ -839,34 +839,34 @@
             }
             .m-asst .bub ul,
             .m-asst .bub ol {
-                padding-left: 20px;
-                margin: 8px 0;
+                padding-left: var(--sp-8);
+                margin: var(--sp-4) 0;
             }
             .m-asst .bub li {
-                margin-bottom: 4px;
+                margin-bottom: var(--sp-2);
             }
             .m-asst .bub blockquote {
                 border-left: 3px solid var(--border);
-                padding-left: 12px;
+                padding-left: var(--sp-6);
                 color: var(--dim);
-                margin: 8px 0;
+                margin: var(--sp-4) 0;
             }
             .m-asst .bub h1,
             .m-asst .bub h2,
             .m-asst .bub h3 {
-                margin: 16px 0 8px;
+                margin: var(--sp-7) 0 var(--sp-4);
                 font-weight: 600;
             }
             .m-asst .bub table {
                 border-collapse: collapse;
-                margin: 12px 0;
+                margin: var(--sp-6) 0;
                 width: 100%;
                 font-size: var(--text-base);
             }
             .m-asst .bub th,
             .m-asst .bub td {
                 border: 1px solid var(--border);
-                padding: 6px 10px;
+                padding: var(--sp-3) var(--sp-5);
                 text-align: left;
             }
             .m-asst .bub th {
@@ -889,13 +889,13 @@
                 display: flex;
                 gap: var(--sp-2);
                 flex-wrap: wrap;
-                padding: 2px 0 6px 0;
+                padding: var(--sp-1) 0 var(--sp-3) 0;
             }
             .followup-chip {
                 background: var(--surface);
                 border: 1px solid var(--border);
                 color: var(--dim);
-                padding: 5px 12px;
+                padding: 0.3125rem var(--sp-6);
                 border-radius: var(--r-xl);
                 font-size: var(--text-sm);
                 font-family: inherit;
@@ -914,14 +914,14 @@
                 display: contents;
             }
             .m-think {
-                margin-bottom: 12px;
+                margin-bottom: var(--sp-6);
                 animation: ddIn var(--dur) var(--ease);
             }
             .m-think .bub {
                 font-size: var(--text-base);
                 color: var(--dim);
                 border-left: 2px solid rgba(196, 134, 60, 0.3);
-                padding: 8px 12px;
+                padding: var(--sp-4) var(--sp-6);
                 font-style: italic;
                 line-height: 1.5;
                 background: rgba(196, 134, 60, 0.03);
@@ -931,7 +931,7 @@
                 font-size: var(--text-xs);
                 color: var(--faint);
                 cursor: pointer;
-                margin-bottom: 4px;
+                margin-bottom: var(--sp-2);
                 user-select: none;
                 transition: color 0.15s;
                 letter-spacing: 0.2px;
@@ -957,7 +957,7 @@
                 mask-image: linear-gradient(to bottom, #000 40%, transparent);
             }
             .think-body.open {
-                max-height: 400px;
+                max-height: 25rem;
                 overflow-y: auto;
                 opacity: 1;
                 -webkit-mask-image: none;
@@ -965,7 +965,7 @@
             }
 
             .m-tool {
-                margin-bottom: 12px;
+                margin-bottom: var(--sp-6);
                 animation: ddIn var(--dur) var(--ease);
             }
             .m-tool .t-toggle {
@@ -984,11 +984,11 @@
                 opacity: 0.55;
                 font-size: var(--text-sm);
                 font-style: italic;
-                margin-left: 2px;
+                margin-left: var(--sp-1);
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-                max-width: 400px;
+                max-width: 25rem;
             }
             .m-tool .t-toggle:hover {
                 color: var(--dim);
@@ -1003,8 +1003,8 @@
             }
             .m-tool .t-dots {
                 display: inline-flex;
-                gap: 2px;
-                margin-left: 2px;
+                gap: var(--sp-1);
+                margin-left: var(--sp-1);
             }
             .m-tool .t-dots i {
                 width: 4px;
@@ -1022,8 +1022,8 @@
             .m-tool .t-body {
                 display: none;
                 border-left: 2px solid var(--border);
-                padding: 6px 12px;
-                margin-top: 4px;
+                padding: var(--sp-3) var(--sp-6);
+                margin-top: var(--sp-2);
                 font-size: var(--text-xs);
                 color: var(--faint);
                 max-height: 60vh;
@@ -1044,15 +1044,15 @@
                 font-size: var(--text-sm);
                 line-height: 1.5;
                 white-space: pre-wrap;
-                margin-top: 6px;
-                padding-top: 6px;
+                margin-top: var(--sp-3);
+                padding-top: var(--sp-3);
                 border-top: 1px solid var(--border);
                 color: var(--dim);
             }
 
             .m-user .edit-btn {
                 position: absolute;
-                left: -32px;
+                left: -2rem;
                 top: 50%;
                 transform: translateY(-50%);
                 background: none;
@@ -1062,7 +1062,7 @@
                 cursor: pointer;
                 opacity: 0;
                 transition: opacity 0.15s;
-                padding: 4px;
+                padding: var(--sp-2);
             }
             .m-user:hover .edit-btn {
                 opacity: 1;
@@ -1080,22 +1080,22 @@
                 color: var(--text);
                 border: 1px solid var(--accent);
                 border-radius: var(--r-lg);
-                padding: 10px 14px;
+                padding: var(--sp-5) 0.875rem;
                 font-size: var(--text-lg);
                 line-height: 1.5;
                 font-family: inherit;
                 resize: vertical;
-                min-height: 60px;
+                min-height: 3.75rem;
                 outline: none;
             }
             .m-user .edit-btns {
                 display: flex;
                 gap: var(--sp-2);
                 justify-content: flex-end;
-                margin-top: 6px;
+                margin-top: var(--sp-3);
             }
             .m-user .edit-btns button {
-                padding: 5px 14px;
+                padding: 0.3125rem 0.875rem;
                 border-radius: var(--r-md);
                 border: none;
                 font-size: var(--text-base);
@@ -1112,19 +1112,19 @@
             .regen-wrap {
                 display: flex;
                 justify-content: center;
-                margin-bottom: 16px;
+                margin-bottom: var(--sp-7);
             }
             .regen-btn {
                 background: none;
                 border: 1px solid var(--border);
                 color: var(--dim);
                 font-size: var(--text-xs);
-                padding: 5px 14px;
+                padding: 0.3125rem 0.875rem;
                 border-radius: var(--r-lg);
                 cursor: pointer;
                 display: flex;
                 align-items: center;
-                gap: 5px;
+                gap: 0.3125rem;
                 transition:
                     background 0.15s,
                     color 0.15s,
@@ -1140,11 +1140,11 @@
             #conn-status {
                 display: flex;
                 align-items: center;
-                gap: 5px;
+                gap: 0.3125rem;
                 font-size: var(--text-xs);
                 color: var(--faint);
                 cursor: default;
-                padding: 2px 6px;
+                padding: var(--sp-1) var(--sp-3);
                 border-radius: var(--r-md);
             }
             .status-dot {
@@ -1182,18 +1182,18 @@
                 font-size: var(--text-sm);
                 color: var(--faint);
                 text-align: right;
-                padding: 2px 0 0;
+                padding: var(--sp-1) 0 0;
                 line-height: 1.3;
             }
             .live-stats {
                 font-size: var(--text-sm);
                 color: var(--faint);
                 text-align: right;
-                padding: 2px 0 0;
+                padding: var(--sp-1) 0 0;
             }
 
             .m-err {
-                margin-bottom: 20px;
+                margin-bottom: var(--sp-8);
             }
             .m-err .bub {
                 background: linear-gradient(
@@ -1203,21 +1203,21 @@
                 );
                 border: 1px solid var(--err-border);
                 color: var(--err-text);
-                padding: 12px 16px;
+                padding: var(--sp-6) var(--sp-7);
                 border-radius: var(--r-lg);
                 font-size: var(--text-md);
             }
 
             #scroll-bottom {
                 position: absolute;
-                bottom: 100px;
+                bottom: 6.25rem;
                 left: 50%;
                 transform: translateX(-50%) translateY(10px);
                 background: var(--surface);
                 border: 1px solid var(--border);
                 color: var(--dim);
-                width: 32px;
-                height: 32px;
+                width: 2rem;
+                height: 2rem;
                 border-radius: var(--r-full);
                 cursor: pointer;
                 display: flex;
@@ -1241,14 +1241,14 @@
                 color: var(--text);
             }
             #scroll-bottom svg {
-                width: 16px;
-                height: 16px;
+                width: var(--sp-7);
+                height: var(--sp-7);
             }
             #thinking {
                 display: none;
-                max-width: 900px;
+                max-width: 56.25rem;
                 margin: 0 auto;
-                padding: 0 28px 14px;
+                padding: 0 var(--sp-9) 0.875rem;
                 align-items: center;
                 gap: var(--sp-4);
                 color: var(--dim);
@@ -1259,7 +1259,7 @@
             }
             .dots {
                 display: flex;
-                gap: 3px;
+                gap: 0.1875rem;
             }
             .dots i {
                 width: 6px;
@@ -1300,17 +1300,17 @@
             /* Input */
             #input-area {
                 flex-shrink: 0;
-                max-width: 768px;
+                max-width: 48rem;
                 width: 100%;
                 margin: 0 auto;
-                padding: 0 24px var(--sp-6);
+                padding: 0 1.5rem var(--sp-6);
                 padding-bottom: max(var(--sp-6), var(--sab));
                 position: relative;
             }
             #attachments {
                 display: flex;
                 gap: var(--sp-3);
-                padding: 0 12px;
+                padding: 0 var(--sp-6);
                 flex-wrap: wrap;
             }
             #attachments:empty {
@@ -1322,22 +1322,22 @@
                 overflow: hidden;
                 border: 1px solid var(--border);
                 background: var(--surface);
-                max-height: 80px;
+                max-height: 5rem;
             }
             .att img {
-                height: 80px;
+                height: 5rem;
                 width: auto;
                 display: block;
                 object-fit: cover;
             }
             .att .att-file {
-                padding: 8px 12px;
+                padding: var(--sp-4) var(--sp-6);
                 font-size: var(--text-xs);
                 color: var(--dim);
                 display: flex;
                 align-items: center;
                 gap: var(--sp-2);
-                max-width: 200px;
+                max-width: 12.5rem;
             }
             .att .att-file span {
                 overflow: hidden;
@@ -1346,10 +1346,10 @@
             }
             .att .att-x {
                 position: absolute;
-                top: 2px;
-                right: 2px;
-                width: 18px;
-                height: 18px;
+                top: var(--sp-1);
+                right: var(--sp-1);
+                width: 1.125rem;
+                height: 1.125rem;
                 border-radius: var(--r-full);
                 background: rgba(0, 0, 0, 0.7);
                 color: #fff;
@@ -1366,7 +1366,7 @@
                 display: flex;
                 align-items: center;
                 color: var(--faint);
-                padding: 6px;
+                padding: var(--sp-3);
                 transition: color 0.15s;
             }
             #attach-btn:hover {
@@ -1379,7 +1379,7 @@
                 background: none;
                 border: none;
                 color: var(--faint);
-                padding: 4px;
+                padding: var(--sp-2);
                 cursor: pointer;
                 transition: color 0.15s;
                 flex-shrink: 0;
@@ -1397,9 +1397,9 @@
                 background: var(--surface-raised);
                 border: 1px solid var(--border);
                 border-radius: 10px;
-                padding: 4px;
-                margin-bottom: 6px;
-                max-height: 220px;
+                padding: var(--sp-2);
+                margin-bottom: var(--sp-3);
+                max-height: 13.75rem;
                 overflow-y: auto;
                 box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18);
             }
@@ -1415,7 +1415,7 @@
                 background: none;
                 border: none;
                 color: var(--text);
-                padding: 8px 12px;
+                padding: var(--sp-4) var(--sp-6);
                 font-size: var(--text-base);
                 cursor: pointer;
                 border-radius: 6px;
@@ -1429,7 +1429,7 @@
             #slash-menu .sc-cmd {
                 color: var(--accent);
                 font-weight: 600;
-                min-width: 80px;
+                min-width: 5rem;
                 font-size: var(--text-base);
             }
             #slash-menu .sc-desc {
@@ -1443,7 +1443,7 @@
                 background: var(--surface);
                 border: 1px solid var(--border);
                 border-radius: var(--r-xl);
-                padding: 6px 12px 6px 12px;
+                padding: var(--sp-3) var(--sp-6) var(--sp-3) var(--sp-6);
                 transition:
                     border-color 0.25s,
                     box-shadow 0.25s;
@@ -1459,18 +1459,18 @@
                 border: none;
                 font-size: var(--text-md);
                 resize: none;
-                max-height: 160px;
+                max-height: 10rem;
                 line-height: 1.5;
                 outline: none;
-                padding: 4px 0;
+                padding: var(--sp-2) 0;
                 font-family: inherit;
             }
             #input::placeholder {
                 color: var(--faint);
             }
             #send {
-                width: 28px;
-                height: 28px;
+                width: var(--sp-9);
+                height: var(--sp-9);
                 border-radius: var(--r-full);
                 border: none;
                 background: var(--accent);
@@ -1495,20 +1495,20 @@
                 cursor: default;
             }
             #send svg {
-                width: 14px;
-                height: 14px;
+                width: 0.875rem;
+                height: 0.875rem;
             }
             #send.stop {
                 background: #c05050;
             }
             #send.stop svg {
-                width: 12px;
-                height: 12px;
+                width: var(--sp-6);
+                height: var(--sp-6);
             }
 
             /* Settings */
             .sg {
-                margin-bottom: 12px;
+                margin-bottom: var(--sp-6);
             }
             .sg-row {
                 display: flex;
@@ -1522,7 +1522,7 @@
                 display: block;
                 font-size: var(--text-xs);
                 color: var(--dim);
-                margin-bottom: 4px;
+                margin-bottom: var(--sp-2);
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
                 font-weight: 600;
@@ -1535,7 +1535,7 @@
                 color: var(--text);
                 border: 1px solid var(--border);
                 border-radius: 6px;
-                padding: 6px 8px;
+                padding: var(--sp-3) var(--sp-4);
                 font-size: var(--text-xs);
                 font-family: inherit;
                 outline: none;
@@ -1546,7 +1546,7 @@
                 box-shadow: 0 0 0 2px var(--accent-glow);
             }
             .sg textarea {
-                height: 160px;
+                height: 10rem;
                 resize: vertical;
             }
             .mci {
@@ -1554,7 +1554,7 @@
                 align-items: center;
                 gap: var(--sp-3);
                 flex-wrap: wrap;
-                padding: 8px 10px;
+                padding: var(--sp-4) var(--sp-5);
                 background: var(--surface);
                 border-radius: var(--r-md);
                 font-size: var(--text-sm);
@@ -1573,24 +1573,24 @@
             .mci-tag {
                 background: rgba(196, 134, 60, 0.12);
                 color: var(--accent);
-                padding: 2px 7px;
+                padding: var(--sp-1) 0.4375rem;
                 border-radius: var(--r-sm);
                 font-size: var(--text-xs);
                 font-weight: 600;
                 letter-spacing: 0.3px;
             }
             #s-preset {
-                margin-bottom: 6px;
+                margin-bottom: var(--sp-3);
             }
             .var-help {
                 font-size: var(--text-xs);
                 color: var(--faint);
-                margin-top: 4px;
+                margin-top: var(--sp-2);
                 line-height: 1.5;
             }
             .var-help code {
                 background: var(--surface);
-                padding: 1px 4px;
+                padding: 1px var(--sp-2);
                 border-radius: 3px;
                 font-size: 0.5625rem;
                 color: var(--dim);
@@ -1599,12 +1599,12 @@
                 display: flex;
                 align-items: center;
                 gap: var(--sp-4);
-                padding: 6px 0;
+                padding: var(--sp-3) 0;
                 font-size: var(--text-md);
             }
             .mcp-i input {
-                width: 18px;
-                height: 18px;
+                width: 1.125rem;
+                height: 1.125rem;
                 accent-color: var(--accent);
                 flex-shrink: 0;
             }
@@ -1612,15 +1612,15 @@
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                padding: 4px 0;
+                padding: var(--sp-2) 0;
             }
             .toggle-row span {
                 font-size: var(--text-xs);
             }
             .sw {
                 position: relative;
-                width: 36px;
-                height: 20px;
+                width: 2.25rem;
+                height: var(--sp-8);
                 flex-shrink: 0;
             }
             .sw input {
@@ -1639,10 +1639,10 @@
             .sw .slider:before {
                 content: "";
                 position: absolute;
-                width: 16px;
-                height: 16px;
-                left: 2px;
-                bottom: 2px;
+                width: var(--sp-7);
+                height: var(--sp-7);
+                left: var(--sp-1);
+                bottom: var(--sp-1);
                 background: #fff;
                 border-radius: var(--r-full);
                 transition: transform var(--dur) var(--ease);
@@ -1658,20 +1658,20 @@
             }
             .danger {
                 width: 100%;
-                padding: 10px;
+                padding: var(--sp-5);
                 background: #4a1525;
                 color: #e8a0a0;
                 border: none;
                 border-radius: var(--r-md);
                 cursor: pointer;
                 font-size: var(--text-base);
-                margin-top: 12px;
+                margin-top: var(--sp-6);
             }
             .mem-item {
                 display: flex;
                 align-items: flex-start;
                 gap: var(--sp-3);
-                padding: 8px 10px;
+                padding: var(--sp-4) var(--sp-5);
                 border-radius: var(--r-md);
                 font-size: var(--text-base);
                 line-height: 1.4;
@@ -1681,13 +1681,13 @@
             }
             .mem-cat {
                 font-size: 0.5625rem;
-                padding: 2px 6px;
+                padding: var(--sp-1) var(--sp-3);
                 border-radius: var(--r-sm);
                 font-weight: 700;
                 text-transform: uppercase;
                 letter-spacing: 0.4px;
                 flex-shrink: 0;
-                margin-top: 2px;
+                margin-top: var(--sp-1);
             }
             .mem-cat.identity {
                 background: rgba(110, 236, 216, 0.1);
@@ -1724,7 +1724,7 @@
                 color: var(--faint);
                 cursor: pointer;
                 font-size: var(--text-md);
-                padding: 0 2px;
+                padding: 0 var(--sp-1);
                 opacity: 0;
                 transition: opacity 0.15s;
                 flex-shrink: 0;
@@ -1739,7 +1739,7 @@
                 background: var(--surface);
                 border: 1px solid var(--border);
                 color: var(--dim);
-                padding: 6px 12px;
+                padding: var(--sp-3) var(--sp-6);
                 border-radius: 6px;
                 font-size: var(--text-sm);
                 cursor: pointer;
@@ -1767,10 +1767,10 @@
                 background: var(--surface-raised);
                 border: 1px solid var(--border);
                 border-radius: var(--r-lg);
-                padding: 20px 24px;
+                padding: var(--sp-8) 1.5rem;
                 z-index: 110;
-                min-width: 280px;
-                max-width: 340px;
+                min-width: 17.5rem;
+                max-width: 21.25rem;
                 box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
             }
             #kb-modal.open {
@@ -1778,14 +1778,14 @@
             }
             #kb-modal h3 {
                 font-size: var(--text-md);
-                margin-bottom: 14px;
+                margin-bottom: 0.875rem;
                 font-weight: 600;
             }
             .kb-row {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                padding: 5px 0;
+                padding: 0.3125rem 0;
                 font-size: var(--text-base);
             }
             .kb-row span:first-child {
@@ -1796,7 +1796,7 @@
                 font-family: "SF Mono", Menlo, monospace;
                 font-size: var(--text-sm);
                 background: var(--surface);
-                padding: 2px 7px;
+                padding: var(--sp-1) 0.4375rem;
                 border-radius: var(--r-sm);
             }
             #kb-overlay {
@@ -1819,13 +1819,13 @@
                 position: absolute;
                 right: 0;
                 top: 100%;
-                margin-top: 6px;
+                margin-top: var(--sp-3);
                 background: var(--surface-raised);
                 border: 1px solid var(--border);
                 border-radius: 10px;
-                padding: 4px;
+                padding: var(--sp-2);
                 z-index: 50;
-                min-width: 140px;
+                min-width: 8.75rem;
                 box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
             }
             .export-dd.open {
@@ -1839,7 +1839,7 @@
                 background: none;
                 border: none;
                 color: var(--text);
-                padding: 8px 12px;
+                padding: var(--sp-4) var(--sp-6);
                 font-size: var(--text-base);
                 cursor: pointer;
                 border-radius: 6px;
@@ -1863,9 +1863,9 @@
                 background: var(--surface-raised);
                 border: 1px solid var(--border);
                 border-radius: var(--r-lg);
-                padding: 20px;
+                padding: var(--sp-8);
                 width: 90%;
-                max-width: 480px;
+                max-width: 30rem;
             }
             .share-content h3 {
                 font-size: var(--text-lg);
@@ -1877,7 +1877,7 @@
                 display: flex;
                 align-items: center;
                 gap: var(--sp-3);
-                padding: 6px 0;
+                padding: var(--sp-3) 0;
                 font-size: var(--text-base);
             }
             .model-item .mi-name {
@@ -1892,7 +1892,7 @@
             }
             .model-item .mi-status {
                 font-size: var(--text-xs);
-                padding: 2px 6px;
+                padding: var(--sp-1) var(--sp-3);
                 border-radius: var(--r-sm);
                 flex-shrink: 0;
                 font-weight: 500;
@@ -1910,21 +1910,21 @@
                 font-size: var(--text-sm);
                 color: var(--dim);
                 background: var(--surface);
-                padding: 2px 6px;
+                padding: var(--sp-1) var(--sp-3);
                 border-radius: var(--r-sm);
                 flex-shrink: 0;
             }
             .model-empty {
                 font-size: var(--text-xs);
                 color: var(--faint);
-                padding: 4px 0;
+                padding: var(--sp-2) 0;
             }
             .cap-icon {
                 display: inline-block;
-                width: 18px;
-                height: 18px;
+                width: 1.125rem;
+                height: 1.125rem;
                 vertical-align: middle;
-                margin-left: 6px;
+                margin-left: var(--sp-3);
                 opacity: 0.85;
                 transition: opacity 0.15s;
                 flex-shrink: 0;
@@ -1953,8 +1953,8 @@
                 }
                 #open-sb {
                     display: block !important;
-                    min-width: 44px;
-                    min-height: 44px;
+                    min-width: 2.75rem;
+                    min-height: 2.75rem;
                     display: flex !important;
                     align-items: center;
                     justify-content: center;
@@ -1963,9 +1963,9 @@
                 /* Top bar — two rows on mobile */
                 #topbar {
                     position: relative;
-                    padding: 10px 16px 0;
-                    padding-top: max(10px, var(--sat));
-                    gap: var(--sp-2) 10px;
+                    padding: var(--sp-5) var(--sp-7) 0;
+                    padding-top: max(var(--sp-5), var(--sat));
+                    gap: var(--sp-2) var(--sp-5);
                     border-bottom: none;
                     flex-wrap: wrap;
                 }
@@ -1977,12 +1977,12 @@
                     width: 100%;
                     font-size: var(--text-sm);
                     font-weight: 600;
-                    padding: 6px 0 8px;
+                    padding: var(--sp-3) 0 var(--sp-4);
                     border-top: none;
                     margin-top: 0;
                 }
                 #model-sel-wrap::after {
-                    margin-left: 2px;
+                    margin-left: var(--sp-1);
                 }
                 #top-model-dd {
                     min-width: 0;
@@ -1991,13 +1991,13 @@
                     max-height: 50vh;
                 }
                 .mdd-item {
-                    padding: 12px 16px;
+                    padding: var(--sp-6) var(--sp-7);
                 }
                 #conn-status {
                     order: 11;
                     position: absolute;
-                    right: 16px;
-                    bottom: 10px;
+                    right: var(--sp-7);
+                    bottom: var(--sp-5);
                 }
                 .topbar-r {
                     margin-left: auto;
@@ -2008,37 +2008,37 @@
                     display: none;
                 }
                 .tb {
-                    width: 38px;
-                    height: 38px;
+                    width: 2.375rem;
+                    height: 2.375rem;
                     border-radius: 10px;
                 }
                 .tb svg {
-                    width: 18px;
-                    height: 18px;
+                    width: 1.125rem;
+                    height: 1.125rem;
                 }
                 #open-sb svg {
-                    width: 20px;
-                    height: 20px;
+                    width: var(--sp-8);
+                    height: var(--sp-8);
                 }
                 .cap-icon {
-                    width: 15px !important;
-                    height: 15px !important;
+                    width: 0.9375rem !important;
+                    height: 0.9375rem !important;
                 }
                 .status-dot {
-                    width: 7px !important;
-                    height: 7px !important;
+                    width: 0.4375rem !important;
+                    height: 0.4375rem !important;
                 }
 
                 /* Messages — full width, larger text */
                 #msgs {
-                    padding: 16px 20px 8px;
+                    padding: var(--sp-7) var(--sp-8) var(--sp-4);
                     max-width: 100%;
                 }
                 .m-user .bub {
                     max-width: 88%;
                     font-size: var(--text-lg);
                     line-height: 1.6;
-                    padding: 14px 18px;
+                    padding: 0.875rem 1.125rem;
                     border-radius: 20px 20px 6px 20px;
                 }
                 .m-asst .bub {
@@ -2048,15 +2048,15 @@
                 .m-asst .bub pre {
                     font-size: var(--text-base);
                     border-radius: var(--r-lg);
-                    padding: 14px 16px;
+                    padding: 0.875rem var(--sp-7);
                 }
                 .m-user,
                 .m-asst {
-                    margin-bottom: 20px;
+                    margin-bottom: var(--sp-8);
                 }
                 .fork-btn {
-                    width: 28px;
-                    height: 28px;
+                    width: var(--sp-9);
+                    height: var(--sp-9);
                 }
                 .m-user .edit-btn {
                     opacity: 0.4;
@@ -2070,35 +2070,35 @@
 
                 /* Input area — flush to bottom edge */
                 #input-area {
-                    padding: 6px 10px;
-                    padding-bottom: max(6px, env(safe-area-inset-bottom, 6px));
+                    padding: var(--sp-3) var(--sp-5);
+                    padding-bottom: max(var(--sp-3), env(safe-area-inset-bottom, var(--sp-3)));
                     max-width: 100%;
                     background: var(--bg);
                 }
                 #input-box {
                     border-radius: var(--r-xl);
-                    padding: 6px 10px 6px 6px;
+                    padding: var(--sp-3) var(--sp-5) var(--sp-3) var(--sp-3);
                     gap: var(--sp-2);
-                    min-height: 44px;
+                    min-height: 2.75rem;
                     align-items: center;
                 }
                 #input {
                     font-size: 1rem;
-                    min-height: 28px;
-                    padding: 4px 4px;
+                    min-height: var(--sp-9);
+                    padding: var(--sp-2) var(--sp-2);
                 }
                 #send {
-                    width: 36px;
-                    height: 36px;
+                    width: 2.25rem;
+                    height: 2.25rem;
                     border-radius: var(--r-lg);
                 }
                 #send svg {
-                    width: 16px;
-                    height: 16px;
+                    width: var(--sp-7);
+                    height: var(--sp-7);
                 }
                 #send.stop svg {
-                    width: 14px;
-                    height: 14px;
+                    width: 0.875rem;
+                    height: 0.875rem;
                 }
                 #model-pill {
                     display: none;
@@ -2107,21 +2107,21 @@
                     display: flex;
                 }
                 #attach-btn {
-                    padding: 8px;
+                    padding: var(--sp-4);
                 }
                 #attach-btn svg {
-                    width: 22px;
-                    height: 22px;
+                    width: 1.375rem;
+                    height: 1.375rem;
                 }
 
                 /* Welcome screen — centered, compact */
                 .welcome {
-                    padding: 20px 20px 10px;
+                    padding: var(--sp-8) var(--sp-8) var(--sp-5);
                 }
                 .welcome img {
-                    width: 48px !important;
-                    height: 48px !important;
-                    margin-bottom: 6px !important;
+                    width: 3rem !important;
+                    height: 3rem !important;
+                    margin-bottom: var(--sp-3) !important;
                 }
                 .welcome h2 {
                     font-size: var(--text-2xl);
@@ -2130,7 +2130,7 @@
                 .welcome p {
                     font-size: var(--text-base);
                     line-height: 1.6;
-                    margin-bottom: 2px;
+                    margin-bottom: var(--sp-1);
                 }
                 .welcome .w-hint {
                     display: none;
@@ -2140,13 +2140,13 @@
                     flex-wrap: wrap;
                     gap: var(--sp-2);
                     max-width: 100%;
-                    padding: 0 12px var(--sp-2);
+                    padding: 0 var(--sp-6) var(--sp-2);
                     margin: 0 auto;
                     justify-content: center;
                 }
                 .starter-card {
                     font-size: var(--text-xs);
-                    padding: 7px 12px;
+                    padding: 0.4375rem var(--sp-6);
                     border-radius: var(--r-full);
                     gap: var(--sp-2);
                     justify-content: center;
@@ -2164,24 +2164,24 @@
                     font-size: var(--text-xs);
                 }
                 .starter-icon svg {
-                    width: 13px;
-                    height: 13px;
+                    width: 0.8125rem;
+                    height: 0.8125rem;
                 }
 
                 /* Slash menu — spacious touch targets */
                 #slash-menu {
                     border-radius: 14px;
-                    padding: 6px;
-                    margin-bottom: 8px;
+                    padding: var(--sp-3);
+                    margin-bottom: var(--sp-4);
                 }
                 #slash-menu button {
-                    padding: 12px 16px;
+                    padding: var(--sp-6) var(--sp-7);
                     font-size: var(--text-lg);
                     border-radius: 10px;
                 }
                 #slash-menu .sc-cmd {
                     font-size: var(--text-lg);
-                    min-width: 90px;
+                    min-width: 5.625rem;
                 }
                 #slash-menu .sc-desc {
                     font-size: var(--text-base);
@@ -2189,10 +2189,10 @@
 
                 /* Chat items in sidebar */
                 .ci {
-                    padding: 10px 12px;
+                    padding: var(--sp-5) var(--sp-6);
                     border-radius: 10px;
                     font-size: var(--text-md);
-                    min-height: 44px;
+                    min-height: 2.75rem;
                 }
                 .ci .pin {
                     opacity: 0.5;
@@ -2204,7 +2204,7 @@
 
                 /* Thinking indicator */
                 #thinking {
-                    padding: 0 16px 14px;
+                    padding: 0 var(--sp-7) 0.875rem;
                     font-size: var(--text-lg);
                 }
 
@@ -2215,7 +2215,7 @@
                 }
                 .followup-chip {
                     font-size: var(--text-md);
-                    padding: 10px 14px;
+                    padding: var(--sp-5) 0.875rem;
                     border-radius: var(--r-lg);
                 }
 
@@ -2223,28 +2223,28 @@
                 .sg input,
                 .sg textarea,
                 .sg select {
-                    padding: 10px 12px;
+                    padding: var(--sp-5) var(--sp-6);
                     font-size: var(--text-md);
                 }
                 .mem-del {
                     opacity: 0.4;
-                    padding: 8px;
+                    padding: var(--sp-4);
                 }
 
                 /* Context gauge */
                 #ctx-gauge {
-                    height: 4px;
+                    height: var(--sp-2);
                 }
 
                 /* Scroll-to-bottom button */
                 #scroll-bottom {
-                    width: 40px;
-                    height: 40px;
+                    width: var(--sp-10);
+                    height: var(--sp-10);
                     border-radius: var(--r-full);
                 }
                 #scroll-bottom svg {
-                    width: 18px;
-                    height: 18px;
+                    width: 1.125rem;
+                    height: 1.125rem;
                 }
 
                 /* Animations — subtle bounce on mobile interactions */
@@ -2303,13 +2303,13 @@
             #ctx-label {
                 display: none;
                 position: absolute;
-                top: 6px;
-                right: 8px;
+                top: var(--sp-3);
+                right: var(--sp-4);
                 background: var(--sidebar);
                 border: 1px solid var(--border);
                 color: var(--dim);
                 font-size: var(--text-sm);
-                padding: 3px 8px;
+                padding: 0.1875rem var(--sp-4);
                 border-radius: 6px;
                 white-space: nowrap;
                 z-index: 10;
@@ -2329,13 +2329,13 @@
                 cursor: pointer;
                 opacity: 0;
                 transition: opacity 0.15s;
-                padding: 4px;
+                padding: var(--sp-2);
             }
             .fork-btn:hover {
                 color: var(--text);
             }
             .m-user .fork-btn {
-                left: -56px;
+                left: -3.5rem;
                 top: 50%;
                 transform: translateY(-50%);
             }
@@ -2344,8 +2344,8 @@
             }
             .m-asst .fork-btn {
                 position: absolute;
-                right: -28px;
-                top: 4px;
+                right: -1.75rem;
+                top: var(--sp-2);
                 opacity: 0;
             }
             .m-asst {
@@ -2365,7 +2365,7 @@
                 color: var(--accent);
                 font-size: var(--text-xs);
                 font-weight: 600;
-                padding: 4px 10px;
+                padding: var(--sp-2) var(--sp-5);
                 border-radius: var(--r-md);
                 pointer-events: none;
                 font-family: inherit;
@@ -2378,11 +2378,11 @@
             }
             /* Sub-chat breakout room — full-width warm-tinted container */
             .subchat-frame {
-                margin: 8px 0 16px;
+                margin: var(--sp-4) 0 var(--sp-7);
                 background: rgba(196, 134, 60, 0.04);
                 border-top: 1px solid rgba(196, 134, 60, 0.15);
                 border-bottom: 1px solid rgba(196, 134, 60, 0.15);
-                padding: 12px 0 4px;
+                padding: var(--sp-6) 0 var(--sp-2);
                 position: relative;
             }
             .subchat-frame::before {
@@ -2396,9 +2396,9 @@
                 opacity: 0.5;
             }
             .subchat-label {
-                max-width: 900px;
-                margin: 0 auto 10px;
-                padding: 0 28px;
+                max-width: 56.25rem;
+                margin: 0 auto var(--sp-5);
+                padding: 0 var(--sp-9);
                 font-size: var(--text-xs);
                 color: var(--accent);
                 text-transform: uppercase;
@@ -2422,11 +2422,11 @@
             .subchat-frame .m-tool,
             .subchat-frame .m-think,
             .subchat-frame .m-err {
-                max-width: 900px;
+                max-width: 56.25rem;
                 margin-left: auto;
                 margin-right: auto;
-                padding-left: 28px;
-                padding-right: 28px;
+                padding-left: var(--sp-9);
+                padding-right: var(--sp-9);
             }
             .subchat-frame .m-user .bub {
                 background: rgba(196, 134, 60, 0.1);
@@ -2452,13 +2452,13 @@
                 border: 1px solid var(--border);
                 color: var(--dim);
                 font-size: var(--text-sm);
-                padding: 4px 10px;
+                padding: var(--sp-2) var(--sp-5);
                 border-radius: var(--r-md);
                 cursor: pointer;
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
-                max-width: 180px;
+                max-width: 11.25rem;
                 flex-shrink: 0;
                 line-height: 1.4;
                 position: relative;
@@ -2479,14 +2479,14 @@
                 position: absolute;
                 bottom: 100%;
                 left: 0;
-                margin-bottom: 8px;
+                margin-bottom: var(--sp-4);
                 background: var(--surface-raised);
                 border: 1px solid var(--border);
                 border-radius: var(--r-lg);
-                padding: 6px;
+                padding: var(--sp-3);
                 z-index: 50;
-                min-width: 280px;
-                max-height: 320px;
+                min-width: 17.5rem;
+                max-height: 20rem;
                 overflow-y: auto;
                 box-shadow:
                     0 -12px 40px rgba(0, 0, 0, 0.35),
@@ -2516,8 +2516,8 @@
             #auth-screen::before {
                 content: "";
                 position: absolute;
-                width: 400px;
-                height: 400px;
+                width: 25rem;
+                height: 25rem;
                 border-radius: var(--r-full);
                 background: radial-gradient(
                     circle,
@@ -2534,15 +2534,15 @@
                 display: flex;
                 flex-direction: column;
                 align-items: center;
-                margin-bottom: 32px;
+                margin-bottom: 2rem;
                 animation: authFadeIn 0.5s ease-out;
                 position: relative;
                 z-index: 1;
             }
             .auth-brand img {
-                width: 52px;
-                height: 52px;
-                margin-bottom: 14px;
+                width: 3.25rem;
+                height: 3.25rem;
+                margin-bottom: 0.875rem;
                 filter: drop-shadow(0 0 20px rgba(196, 134, 60, 0.2));
             }
             .auth-brand h1 {
@@ -2550,7 +2550,7 @@
                 font-weight: 700;
                 color: var(--text);
                 letter-spacing: -0.5px;
-                margin-bottom: 6px;
+                margin-bottom: var(--sp-3);
             }
             .auth-brand p {
                 font-size: var(--text-base);
@@ -2561,9 +2561,9 @@
                 background: var(--surface);
                 border: 1px solid var(--border);
                 border-radius: var(--r-xl);
-                padding: 32px;
-                width: min(380px, 90vw);
-                max-width: 380px;
+                padding: 2rem;
+                width: min(23.75rem, 90vw);
+                max-width: 23.75rem;
                 box-shadow:
                     0 8px 40px rgba(0, 0, 0, 0.3),
                     0 0 0 1px rgba(255, 255, 255, 0.03) inset;
@@ -2573,22 +2573,22 @@
             }
             .auth-card h2 {
                 font-size: var(--text-xl);
-                margin-bottom: 6px;
+                margin-bottom: var(--sp-3);
                 font-weight: 600;
             }
             .auth-card .auth-sub {
                 font-size: var(--text-base);
                 color: var(--dim);
-                margin-bottom: 22px;
+                margin-bottom: 1.375rem;
             }
             .auth-card .sg {
-                margin-bottom: 16px;
+                margin-bottom: var(--sp-7);
             }
             .auth-card .sg label {
                 display: block;
                 font-size: var(--text-sm);
                 color: var(--dim);
-                margin-bottom: 5px;
+                margin-bottom: 0.3125rem;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
                 font-weight: 500;
@@ -2599,7 +2599,7 @@
                 color: var(--text);
                 border: 1px solid var(--border);
                 border-radius: 10px;
-                padding: 12px 14px;
+                padding: var(--sp-6) 0.875rem;
                 font-size: var(--text-md);
                 font-family: inherit;
                 outline: none;
@@ -2616,15 +2616,15 @@
                 background: var(--err-bg);
                 border: 1px solid var(--err-border);
                 color: var(--err-text);
-                padding: 10px 14px;
+                padding: var(--sp-5) 0.875rem;
                 border-radius: 10px;
                 font-size: var(--text-base);
-                margin-bottom: 16px;
+                margin-bottom: var(--sp-7);
                 animation: authShake 0.3s ease-out;
             }
             #auth-btn {
                 width: 100%;
-                padding: 12px;
+                padding: var(--sp-6);
                 background: var(--accent);
                 color: #000;
                 border: none;
@@ -2653,7 +2653,7 @@
                 box-shadow: none;
             }
             .auth-footer {
-                margin-top: 20px;
+                margin-top: var(--sp-8);
                 font-size: var(--text-sm);
                 color: var(--faint);
                 text-align: center;
@@ -2694,8 +2694,8 @@
 
             /* User menu */
             #user-avatar {
-                width: 34px;
-                height: 34px;
+                width: 2.125rem;
+                height: 2.125rem;
                 border-radius: var(--r-full);
                 background: var(--accent);
                 color: #000;
@@ -2718,13 +2718,13 @@
                 position: absolute;
                 right: 0;
                 top: 100%;
-                margin-top: 6px;
+                margin-top: var(--sp-3);
                 background: var(--surface-raised);
                 border: 1px solid var(--border);
                 border-radius: 10px;
-                padding: 4px;
+                padding: var(--sp-2);
                 z-index: 120;
-                min-width: 180px;
+                min-width: 11.25rem;
                 box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
             }
             #user-dd.open {
@@ -2732,11 +2732,11 @@
                 animation: ddIn 150ms var(--ease);
             }
             .user-dd-name {
-                padding: 8px 12px;
+                padding: var(--sp-4) var(--sp-6);
                 font-size: var(--text-base);
                 color: var(--dim);
                 border-bottom: 1px solid var(--border);
-                margin-bottom: 2px;
+                margin-bottom: var(--sp-1);
             }
             #user-dd button {
                 display: block;
@@ -2745,7 +2745,7 @@
                 background: none;
                 border: none;
                 color: var(--text);
-                padding: 8px 12px;
+                padding: var(--sp-4) var(--sp-6);
                 font-size: var(--text-base);
                 cursor: pointer;
                 border-radius: 6px;
@@ -2760,15 +2760,15 @@
                 display: none;
                 flex: 1;
                 overflow-y: auto;
-                padding: 28px 24px;
+                padding: var(--sp-9) 1.5rem;
                 scrollbar-gutter: stable;
             }
             #sys-settings.open {
                 display: block;
             }
             .sys-header {
-                max-width: 560px;
-                margin: 0 auto 16px;
+                max-width: 35rem;
+                margin: 0 auto var(--sp-7);
                 display: flex;
                 align-items: center;
                 gap: var(--sp-4);
@@ -2784,7 +2784,7 @@
                 color: var(--dim);
                 font-size: var(--text-lg);
                 cursor: pointer;
-                padding: 4px 8px;
+                padding: var(--sp-2) var(--sp-4);
                 border-radius: var(--r-md);
                 transition:
                     background 0.15s,
@@ -2795,8 +2795,8 @@
                 color: var(--text);
             }
             .sys-tabs {
-                max-width: 560px;
-                margin: 0 auto 20px;
+                max-width: 35rem;
+                margin: 0 auto var(--sp-8);
                 display: flex;
                 gap: 0;
                 border-bottom: 1px solid var(--border);
@@ -2807,7 +2807,7 @@
                 border: none;
                 color: var(--dim);
                 font-size: var(--text-sm);
-                padding: 8px 14px;
+                padding: var(--sp-4) 0.875rem;
                 cursor: pointer;
                 border-bottom: 2px solid transparent;
                 margin-bottom: -1px;
@@ -2822,26 +2822,26 @@
                 border-bottom-color: var(--accent);
             }
             .sys-content {
-                max-width: 560px;
+                max-width: 35rem;
                 margin: 0 auto;
             }
             .sys-section {
-                margin-bottom: 20px;
+                margin-bottom: var(--sp-8);
             }
             .sys-section h3 {
                 font-size: var(--text-lg);
                 font-weight: 600;
-                margin-bottom: 14px;
+                margin-bottom: 0.875rem;
                 color: var(--text);
             }
             .sys-field {
-                margin-bottom: 16px;
+                margin-bottom: var(--sp-7);
             }
             .sys-field label {
                 display: block;
                 font-size: var(--text-xs);
                 color: var(--dim);
-                margin-bottom: 5px;
+                margin-bottom: 0.3125rem;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
             }
@@ -2851,7 +2851,7 @@
                 color: var(--text);
                 border: 1px solid var(--border);
                 border-radius: var(--r-md);
-                padding: 8px 10px;
+                padding: var(--sp-4) var(--sp-5);
                 font-size: var(--text-md);
                 font-family: inherit;
                 outline: none;
@@ -2866,7 +2866,7 @@
                 cursor: default;
             }
             .sys-btn {
-                padding: 8px 16px;
+                padding: var(--sp-4) var(--sp-7);
                 background: var(--accent);
                 color: #000;
                 border: none;
@@ -2901,8 +2901,8 @@
             }
             .sys-msg {
                 font-size: var(--text-base);
-                margin-top: 8px;
-                padding: 8px 12px;
+                margin-top: var(--sp-4);
+                padding: var(--sp-4) var(--sp-6);
                 border-radius: var(--r-md);
             }
             .sys-msg.ok {
@@ -2915,14 +2915,14 @@
             }
             .totp-qr {
                 text-align: center;
-                padding: 20px;
+                padding: var(--sp-8);
                 background: var(--surface);
                 border-radius: var(--r-lg);
-                margin: 16px 0;
+                margin: var(--sp-7) 0;
             }
             .totp-qr svg {
-                max-width: 200px;
-                margin: 0 auto 12px;
+                max-width: 12.5rem;
+                margin: 0 auto var(--sp-6);
                 display: block;
             }
             .totp-secret {
@@ -2931,7 +2931,7 @@
                 letter-spacing: 2px;
                 color: var(--accent);
                 word-break: break-all;
-                padding: 8px 12px;
+                padding: var(--sp-4) var(--sp-6);
                 background: var(--bg);
                 border-radius: 6px;
                 text-align: center;
@@ -2939,7 +2939,7 @@
                 user-select: all;
             }
             .totp-verify-input {
-                width: 160px;
+                width: 10rem;
                 text-align: center;
                 font-size: var(--text-xl);
                 letter-spacing: 8px;
@@ -2949,7 +2949,7 @@
                 display: flex;
                 align-items: center;
                 gap: var(--sp-4);
-                padding: 12px 0;
+                padding: var(--sp-6) 0;
                 border-bottom: 1px solid var(--border);
                 font-size: var(--text-md);
             }
@@ -2973,7 +2973,7 @@
                 letter-spacing: 0.5px;
                 color: var(--accent);
                 background: var(--accent-glow);
-                padding: 2px 8px;
+                padding: var(--sp-1) var(--sp-4);
                 border-radius: var(--r-sm);
             }
             #memory-badge {
@@ -2981,7 +2981,7 @@
                 color: var(--accent);
                 font-size: var(--text-xs);
                 font-weight: 600;
-                padding: 4px 10px;
+                padding: var(--sp-2) var(--sp-5);
                 border-radius: var(--r-lg);
                 cursor: pointer;
                 opacity: 0;
@@ -3157,8 +3157,8 @@
                     src="/lm-chat-logo.svg"
                     alt="LM Chat"
                     style="
-                        width: 24px;
-                        height: 24px;
+                        width:1.5rem;
+                        height:1.5rem;
                         flex-shrink: 0;
                         display: block;
                     "
@@ -3615,7 +3615,7 @@
                         style="
                             font-size: 0.625rem;
                             color: var(--faint);
-                            margin-top: 2px;
+                            margin-top:var(--sp-1);
                         "
                     >
                         -1 = unlimited
@@ -3654,7 +3654,7 @@
                             "
                             style="
                                 width: auto;
-                                padding: 4px 8px;
+                                padding:var(--sp-2) var(--sp-4);
                                 background: var(--surface);
                                 color: var(--text);
                                 border: 1px solid var(--border);
@@ -3690,7 +3690,7 @@
                         style="
                             font-size: 0.625rem;
                             color: var(--faint);
-                            margin-top: 3px;
+                            margin-top:0.1875rem;
                         "
                     >
                         Show follow-up questions after responses
@@ -3706,7 +3706,7 @@
             </div>
             <div id="memory-settings-content">
                 <div class="sg">
-                    <div class="toggle-row" style="margin-bottom: 12px">
+                    <div class="toggle-row" style="margin-bottom:var(--sp-6)">
                         <span style="font-size: var(--text-sm); font-weight: 600"
                             >Memory</span
                         >
@@ -3724,7 +3724,7 @@
                         style="
                             font-size: 0.625rem;
                             color: var(--faint);
-                            margin-bottom: 10px;
+                            margin-bottom:var(--sp-5);
                         "
                     >
                         LM Chat remembers facts about you across chats. Injected
@@ -3732,9 +3732,9 @@
                     </div>
                     <div
                         id="memory-list"
-                        style="max-height: 400px; overflow-y: auto"
+                        style="max-height:25rem; overflow-y: auto"
                     ></div>
-                    <div style="display: flex; gap: 6px; margin-top: 8px">
+                    <div style="display: flex; gap:var(--sp-3); margin-top:var(--sp-4)">
                         <button class="btn-sm" onclick="addInsightPrompt()">
                             + Add
                         </button>
@@ -3761,14 +3761,14 @@
                         style="
                             font-size: 0.625rem;
                             color: var(--faint);
-                            margin-bottom: 8px;
+                            margin-bottom:var(--sp-4);
                         "
                     >
                         Shown on the welcome screen. Click to populate chat
                         input.
                     </div>
-                    <div id="starters-list" style="margin: 6px 0"></div>
-                    <div style="display: flex; gap: 4px">
+                    <div id="starters-list" style="margin:var(--sp-3) 0"></div>
+                    <div style="display: flex; gap:var(--sp-2)">
                         <button class="btn-sm" onclick="addStarter()">
                             + Add
                         </button>
@@ -4138,7 +4138,7 @@
                 else if (settingsTab === "users") content += renderUsersTab();
 
                 content += "</div>";
-                content += `<div style="text-align:center;padding:16px 0 8px;font-size:0.6875rem;color:var(--faint)">LM Chat v${appVersion || "…"}</div>`;
+                content += `<div style="text-align:center;padding:var(--sp-7) 0 var(--sp-4);font-size:0.6875rem;color:var(--faint)">LM Chat v${appVersion || "…"}</div>`;
                 el.innerHTML = header + tabs + content;
 
                 // Move live DOM nodes into their slots
@@ -4255,7 +4255,7 @@
                     return `
       <div class="sys-section">
         <h3>Two-Factor Authentication</h3>
-        <p style="color:var(--green);margin-bottom:16px">&#10003; 2FA is enabled</p>
+        <p style="color:var(--green);margin-bottom:var(--sp-7)">&#10003; 2FA is enabled</p>
         <div class="sys-field"><label>Enter current 2FA code to disable</label><input type="text" id="st-code" class="totp-verify-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="000000"></div>
         <button class="sys-btn danger" onclick="disableTotp()">Disable 2FA</button>
         <div id="st-msg"></div>
@@ -4264,7 +4264,7 @@
                 return `
     <div class="sys-section">
       <h3>Two-Factor Authentication</h3>
-      <p style="color:var(--dim);margin-bottom:16px">Add an extra layer of security to your account</p>
+      <p style="color:var(--dim);margin-bottom:var(--sp-7)">Add an extra layer of security to your account</p>
       <div id="totp-setup-area">
         <button class="sys-btn" onclick="startTotpSetup()">Enable 2FA</button>
       </div>
@@ -4288,16 +4288,16 @@
                 area.innerHTML = `
     <div class="totp-qr">
       ${sanitizeSvg(d.qr_svg)}
-      <div style="margin-top:12px;font-size:var(--text-xs);color:var(--dim)">Scan with your authenticator app</div>
+      <div style="margin-top:var(--sp-6);font-size:var(--text-xs);color:var(--dim)">Scan with your authenticator app</div>
     </div>
-    <div style="margin:16px 0">
-      <div style="font-size:var(--text-xs);color:var(--dim);margin-bottom:6px">Or enter this secret manually:</div>
+    <div style="margin:var(--sp-7) 0">
+      <div style="font-size:var(--text-xs);color:var(--dim);margin-bottom:var(--sp-3)">Or enter this secret manually:</div>
       <div class="totp-secret" data-secret="${esc(d.secret)}" onclick="navigator.clipboard.writeText(this.dataset.secret);this.style.opacity='.6';setTimeout(()=>this.style.opacity='1',300)" title="Click to copy">${esc(d.secret)}</div>
     </div>
-    <div style="margin-top:20px">
-      <div style="font-size:var(--text-xs);color:var(--dim);margin-bottom:6px">Enter the 6-digit code from your app to verify:</div>
-      <div style="display:flex;gap:10px;align-items:center">
-        <input type="text" id="st-verify-code" class="totp-verify-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" style="width:160px">
+    <div style="margin-top:var(--sp-8)">
+      <div style="font-size:var(--text-xs);color:var(--dim);margin-bottom:var(--sp-3)">Enter the 6-digit code from your app to verify:</div>
+      <div style="display:flex;gap:var(--sp-5);align-items:center">
+        <input type="text" id="st-verify-code" class="totp-verify-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" style="width:10rem">
         <button class="sys-btn" onclick="verifyTotpSetup()">Verify</button>
       </div>
     </div>`;
@@ -4410,7 +4410,7 @@
                     if (u.id !== AUTH_STATE.user.id) {
                         const btn = document.createElement("button");
                         btn.className = "sys-btn danger";
-                        btn.style.cssText = "padding:5px 12px;font-size:var(--text-xs)";
+                        btn.style.cssText = "padding:0.3125rem var(--sp-6);font-size:var(--text-xs)";
                         btn.textContent = "Delete";
                         btn.addEventListener("click", () =>
                             settingsDeleteUser(u.id, u.username),
@@ -4681,14 +4681,14 @@
     <div class="sys-section">
       <h3>LM Studio Connection</h3>
       <div class="sys-field"><label>Server URL</label><input type="text" id="ss-url" value="${esc(urlVal)}" placeholder="http://localhost:1234"></div>
-      <div class="sys-field"><label>API Key</label><div style="display:flex;gap:8px"><input type="password" id="ss-apikey" placeholder="${serverSettings.hasApiKey ? "••••••••  (saved)" : "Enter API key"}" autocomplete="off" style="flex:1">${serverSettings.hasApiKey ? '<button class="sys-btn" onclick="clearApiKey()" style="white-space:nowrap;background:var(--err-bg);color:var(--err-text)">Clear</button>' : ""}<button class="sys-btn" onclick="saveServerSettings()" style="white-space:nowrap">${serverSettings.hasApiKey ? "Update" : "Save"}</button></div></div>
-      <div id="ss-status" style="font-size:var(--text-xs);color:${statusColor};margin-top:8px">${statusText}</div>
-      <div id="ss-conn" style="margin-top:12px"></div>
+      <div class="sys-field"><label>API Key</label><div style="display:flex;gap:var(--sp-4)"><input type="password" id="ss-apikey" placeholder="${serverSettings.hasApiKey ? "••••••••  (saved)" : "Enter API key"}" autocomplete="off" style="flex:1">${serverSettings.hasApiKey ? '<button class="sys-btn" onclick="clearApiKey()" style="white-space:nowrap;background:var(--err-bg);color:var(--err-text)">Clear</button>' : ""}<button class="sys-btn" onclick="saveServerSettings()" style="white-space:nowrap">${serverSettings.hasApiKey ? "Update" : "Save"}</button></div></div>
+      <div id="ss-status" style="font-size:var(--text-xs);color:${statusColor};margin-top:var(--sp-4)">${statusText}</div>
+      <div id="ss-conn" style="margin-top:var(--sp-6)"></div>
     </div>
     <div class="sys-section">
       <h3>Loaded Models</h3>
       <div id="model-list"></div>
-      <div style="font-size:var(--text-xs);color:var(--faint);margin-top:8px">Load and unload models in LM Studio</div>
+      <div style="font-size:var(--text-xs);color:var(--faint);margin-top:var(--sp-4)">Load and unload models in LM Studio</div>
     </div>
     <div class="sys-section">
       <h3>MCP Tools</h3>
@@ -4697,17 +4697,17 @@
     <div class="sys-section">
       <h3>Remote MCP Servers</h3>
       <div id="remote-mcp-list"></div>
-      <button onclick="addRemoteMcp()" style="background:none;border:1px dashed var(--border);color:var(--dim);width:100%;padding:8px;border-radius:8px;cursor:pointer;font-size:var(--text-sm);margin-top:8px">+ Add Remote Server</button>
-      <div style="font-size:var(--text-xs);color:var(--faint);margin-top:8px">Requires "Allow per-request MCPs" in LM Studio Developer Settings</div>
+      <button onclick="addRemoteMcp()" style="background:none;border:1px dashed var(--border);color:var(--dim);width:100%;padding:var(--sp-4);border-radius:8px;cursor:pointer;font-size:var(--text-sm);margin-top:var(--sp-4)">+ Add Remote Server</button>
+      <div style="font-size:var(--text-xs);color:var(--faint);margin-top:var(--sp-4)">Requires "Allow per-request MCPs" in LM Studio Developer Settings</div>
     </div>
     <div class="sys-section">
       <h3>Debug Logging</h3>
-      <div style="display:flex;align-items:center;gap:12px">
+      <div style="display:flex;align-items:center;gap:var(--sp-6)">
         <label class="sw"><input type="checkbox" id="ss-debug" onchange="toggleDebugMode(this.checked)"><span class="slider"></span></label>
         <span style="font-size:var(--text-base)">Verbose debug mode</span>
       </div>
-      <div id="ss-debug-info" style="font-size:var(--text-xs);color:var(--faint);margin-top:8px">Logs requests, SSE events, memory operations, and tool calls to <code style="font-size:0.6875rem">logs/</code></div>
-      <div id="ss-log-files" style="margin-top:8px"></div>
+      <div id="ss-debug-info" style="font-size:var(--text-xs);color:var(--faint);margin-top:var(--sp-4)">Logs requests, SSE events, memory operations, and tool calls to <code style="font-size:0.6875rem">logs/</code></div>
+      <div id="ss-log-files" style="margin-top:var(--sp-4)"></div>
     </div>`;
             }
 
@@ -4770,7 +4770,7 @@
                         el.innerHTML = d.log_files
                             .map(
                                 (f) =>
-                                    `<div style="font-size:0.6875rem;color:var(--dim);padding:2px 0"><code>${esc(f.name)}</code> — ${(f.size / 1024).toFixed(1)} KB</div>`,
+                                    `<div style="font-size:0.6875rem;color:var(--dim);padding:var(--sp-1) 0"><code>${esc(f.name)}</code> — ${(f.size / 1024).toFixed(1)} KB</div>`,
                             )
                             .join("");
                     }
@@ -5275,9 +5275,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     d.className = "mcp-i";
                     const authBadge =
                         s.has_auth ?
-                            '<span style="color:var(--accent);font-size:0.625rem;margin-left:6px" title="Auth token configured">&#128274;</span>'
+                            '<span style="color:var(--accent);font-size:0.625rem;margin-left:var(--sp-3)" title="Auth token configured">&#128274;</span>'
                         :   "";
-                    d.innerHTML = `<input type=checkbox ${s.on ? "checked" : ""}><span>${esc(s.label)}</span>${authBadge}<span style="color:var(--faint);font-size:0.6875rem;margin-left:auto">${esc(s.url)}</span><button onclick="setMcpAuth(${i})" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-xs);padding:0 4px" title="Set auth token">&#128273;</button><button onclick="removeRemoteMcp(${i})" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-lg);padding:0 4px" title="Remove">&times;</button>`;
+                    d.innerHTML = `<input type=checkbox ${s.on ? "checked" : ""}><span>${esc(s.label)}</span>${authBadge}<span style="color:var(--faint);font-size:0.6875rem;margin-left:auto">${esc(s.url)}</span><button onclick="setMcpAuth(${i})" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-xs);padding:0 var(--sp-2)" title="Set auth token">&#128273;</button><button onclick="removeRemoteMcp(${i})" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-lg);padding:0 var(--sp-2)" title="Remove">&times;</button>`;
                     d.querySelector("input").onchange = (e) => {
                         remoteMcps[i].on = e.target.checked;
                         saveRemoteMcps();
@@ -5521,7 +5521,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     console.error("loadChatList:", e);
                     const el = $("chat-list");
                     el.innerHTML =
-                        '<div style="padding:16px;color:var(--err-text);font-size:var(--text-sm)">Failed to load chats. <button class="retry-btn" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline">Retry</button></div>';
+                        '<div style="padding:var(--sp-7);color:var(--err-text);font-size:var(--text-sm)">Failed to load chats. <button class="retry-btn" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline">Retry</button></div>';
                     el.querySelector(".retry-btn")?.addEventListener(
                         "click",
                         () => loadChatList(),
@@ -5622,7 +5622,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 if (!chats.length) {
                     const empty = document.createElement("div");
                     empty.style.cssText =
-                        "padding:24px 12px;text-align:center;font-size:var(--text-sm);color:var(--faint)";
+                        "padding:1.5rem var(--sp-6);text-align:center;font-size:var(--text-sm);color:var(--faint)";
                     empty.textContent = "No conversations yet";
                     list.appendChild(empty);
                 }
@@ -5715,7 +5715,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     const insights = await resp.json();
                     if (!insights.length) {
                         list.innerHTML =
-                            '<div style="padding:12px;color:var(--faint);font-size:var(--text-xs);text-align:center">No memories yet. Chat a bit and switch chats to start building memory.</div>';
+                            '<div style="padding:var(--sp-6);color:var(--faint);font-size:var(--text-xs);text-align:center">No memories yet. Chat a bit and switch chats to start building memory.</div>';
                         return;
                     }
                     list.innerHTML = "";
@@ -5746,7 +5746,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     if (faded.length) {
                         const hdr = document.createElement("div");
                         hdr.style.cssText =
-                            "font-size:0.625rem;color:var(--faint);padding:8px 10px 4px;text-transform:uppercase;letter-spacing:.5px";
+                            "font-size:0.625rem;color:var(--faint);padding:var(--sp-4) var(--sp-5) var(--sp-2);text-transform:uppercase;letter-spacing:.5px";
                         hdr.textContent = `Faded (${faded.length})`;
                         list.appendChild(hdr);
                         faded.forEach((i) => renderInsight(i, list, true));
@@ -5999,7 +5999,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 } catch (e) {
                     console.error("loadChat:", e);
                     msgs.innerHTML =
-                        '<div style="padding:40px 24px;text-align:center;color:var(--err-text);font-size:var(--text-base)">Failed to load chat. <button class="retry-btn" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline;font-size:var(--text-base)">Retry</button></div>';
+                        '<div style="padding:var(--sp-10) 1.5rem;text-align:center;color:var(--err-text);font-size:var(--text-base)">Failed to load chat. <button class="retry-btn" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline;font-size:var(--text-base)">Retry</button></div>';
                     msgs.querySelector(".retry-btn")?.addEventListener(
                         "click",
                         () => loadChat(id),
@@ -6072,7 +6072,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             // --- Render ---
             function renderWelcome() {
                 msgs.innerHTML =
-                    '<div class="welcome"><img src="/lm-chat-logo.svg" alt="" style="width:48px;height:48px;opacity:.45;margin-bottom:16px"><h2>LM Chat</h2><p>Local AI, deeply integrated with LM Studio.<br>MCP tools, context management, and more.</p><div class="w-hint"><span>Type a message or use <kbd>/</kbd> for commands</span><span><kbd>Cmd+N</kbd> new chat &nbsp; <kbd>Cmd+,</kbd> settings</span></div></div>';
+                    '<div class="welcome"><img src="/lm-chat-logo.svg" alt="" style="width:3rem;height:3rem;opacity:.45;margin-bottom:var(--sp-7)"><h2>LM Chat</h2><p>Local AI, deeply integrated with LM Studio.<br>MCP tools, context management, and more.</p><div class="w-hint"><span>Type a message or use <kbd>/</kbd> for commands</span><span><kbd>Cmd+N</kbd> new chat &nbsp; <kbd>Cmd+,</kbd> settings</span></div></div>';
                 renderStarters();
             }
 
@@ -6108,7 +6108,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 el.innerHTML = list
                     .map(
                         (s, i) =>
-                            `<div style="display:flex;gap:6px;margin-bottom:4px;align-items:center"><input value="${esc(s.icon || "💬")}" style="width:32px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px;font-size:var(--text-base)" onchange="updateStarter(${i},'icon',this.value)"><input value="${esc(s.title)}" placeholder="Title" style="width:70px;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:var(--text-xs);color:var(--text)" onchange="updateStarter(${i},'title',this.value)"><input value="${esc(s.prompt)}" placeholder="Prompt text..." style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:var(--text-xs);color:var(--text)" onchange="updateStarter(${i},'prompt',this.value)"><button onclick="removeStarter(${i})" style="background:none;border:none;color:var(--faint);cursor:pointer;font-size:var(--text-base)">&times;</button></div>`,
+                            `<div style="display:flex;gap:var(--sp-3);margin-bottom:var(--sp-2);align-items:center"><input value="${esc(s.icon || "💬")}" style="width:2rem;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:0.1875rem;font-size:var(--text-base)" onchange="updateStarter(${i},'icon',this.value)"><input value="${esc(s.title)}" placeholder="Title" style="width:4.375rem;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:0.1875rem var(--sp-3);font-size:var(--text-xs);color:var(--text)" onchange="updateStarter(${i},'title',this.value)"><input value="${esc(s.prompt)}" placeholder="Prompt text..." style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:0.1875rem var(--sp-3);font-size:var(--text-xs);color:var(--text)" onchange="updateStarter(${i},'prompt',this.value)"><button onclick="removeStarter(${i})" style="background:none;border:none;color:var(--faint);cursor:pointer;font-size:var(--text-base)">&times;</button></div>`,
                     )
                     .join("");
             }
@@ -6207,7 +6207,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     const bub = d.querySelector(".bub");
                     const imgBox = document.createElement("div");
                     imgBox.style.cssText =
-                        "display:flex;gap:6px;margin-top:8px;flex-wrap:wrap";
+                        "display:flex;gap:var(--sp-3);margin-top:var(--sp-4);flex-wrap:wrap";
                     attachments
                         .filter((a) => a.type === "image")
                         .forEach((a) => {
@@ -6215,7 +6215,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             img.src = a.data_url;
                             img.alt = a.name || "image";
                             img.style.cssText =
-                                "max-height:120px;border-radius:6px;cursor:pointer";
+                                "max-height:7.5rem;border-radius:6px;cursor:pointer";
                             img.onclick = () =>
                                 window.open(a.data_url, "_blank");
                             imgBox.appendChild(img);
@@ -6225,7 +6225,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         .forEach((a) => {
                             const tag = document.createElement("span");
                             tag.style.cssText =
-                                "display:inline-flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:var(--text-xs);color:var(--dim)";
+                                "display:inline-flex;align-items:center;gap:var(--sp-2);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:var(--sp-2) var(--sp-4);font-size:var(--text-xs);color:var(--dim)";
                             tag.textContent = a.name;
                             imgBox.appendChild(tag);
                         });
@@ -6318,7 +6318,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             function addErrRetry(t) {
                 const d = document.createElement("div");
                 d.className = "m-err";
-                d.innerHTML = `<div class="bub">${esc(t)} <button onclick="retryLast()" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline;font-size:inherit;margin-left:6px">Retry</button></div>`;
+                d.innerHTML = `<div class="bub">${esc(t)} <button onclick="retryLast()" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline;font-size:inherit;margin-left:var(--sp-3)">Retry</button></div>`;
                 getMsgTarget().appendChild(d);
             }
             function retryLast() {
@@ -7510,18 +7510,18 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     const fields = (opts.fields || [])
                         .map(
                             (f, i) =>
-                                `<div style="margin-top:10px"><label style="font-size:var(--text-sm);color:var(--dim);display:block;margin-bottom:4px">${esc(f.label)}</label><input id="dlg-f-${i}" type="${f.type || "text"}" placeholder="${esc(f.placeholder || "")}" value="${esc(f.value || "")}" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px;font-size:var(--text-base);color:var(--text);font-family:inherit;outline:none;box-sizing:border-box" ${f.required ? "required" : ""}></div>`,
+                                `<div style="margin-top:var(--sp-5)"><label style="font-size:var(--text-sm);color:var(--dim);display:block;margin-bottom:var(--sp-2)">${esc(f.label)}</label><input id="dlg-f-${i}" type="${f.type || "text"}" placeholder="${esc(f.placeholder || "")}" value="${esc(f.value || "")}" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-4) var(--sp-5);font-size:var(--text-base);color:var(--text);font-family:inherit;outline:none;box-sizing:border-box" ${f.required ? "required" : ""}></div>`,
                         )
                         .join("");
                     const singleInput =
                         opts.input ?
-                            `<div style="margin-top:10px"><input id="dlg-input" type="text" placeholder="${esc(opts.placeholder || "")}" value="${esc(opts.inputValue || "")}" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px;font-size:var(--text-base);color:var(--text);font-family:inherit;outline:none;box-sizing:border-box"></div>`
+                            `<div style="margin-top:var(--sp-5)"><input id="dlg-input" type="text" placeholder="${esc(opts.placeholder || "")}" value="${esc(opts.inputValue || "")}" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-4) var(--sp-5);font-size:var(--text-base);color:var(--text);font-family:inherit;outline:none;box-sizing:border-box"></div>`
                         :   "";
                     const dangerStyle =
                         opts.danger ?
                             "background:var(--err-bg,rgba(220,38,38,.15));color:var(--err-text);border:1px solid var(--err-border)"
                         :   "";
-                    el.innerHTML = `<div class="share-content" style="animation:ddIn 150ms var(--ease)"><h3 style="margin:0 0 6px">${esc(opts.title)}</h3>${opts.message ? `<p style="color:var(--dim);font-size:var(--text-base);margin:4px 0 0">${esc(opts.message)}</p>` : ""}${singleInput}${fields}<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end"><button id="dlg-cancel" class="sys-btn" style="background:var(--surface);border:1px solid var(--border);color:var(--dim)">${esc(opts.cancelText || "Cancel")}</button><button id="dlg-ok" class="sys-btn" style="${dangerStyle}">${esc(opts.confirmText || "OK")}</button></div></div>`;
+                    el.innerHTML = `<div class="share-content" style="animation:ddIn 150ms var(--ease)"><h3 style="margin:0 0 var(--sp-3)">${esc(opts.title)}</h3>${opts.message ? `<p style="color:var(--dim);font-size:var(--text-base);margin:var(--sp-2) 0 0">${esc(opts.message)}</p>` : ""}${singleInput}${fields}<div style="display:flex;gap:var(--sp-4);margin-top:var(--sp-7);justify-content:flex-end"><button id="dlg-cancel" class="sys-btn" style="background:var(--surface);border:1px solid var(--border);color:var(--dim)">${esc(opts.cancelText || "Cancel")}</button><button id="dlg-ok" class="sys-btn" style="${dangerStyle}">${esc(opts.confirmText || "OK")}</button></div></div>`;
                     document.body.appendChild(el);
                     const close = (val) => {
                         el.remove();
@@ -8082,11 +8082,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const dialog = document.createElement("div");
                 dialog.className = "share-dialog";
                 dialog.innerHTML =
-                    '<div class="share-content"><h3>Share Conversation</h3><p style="color:var(--dim);font-size:var(--text-sm);margin:8px 0">Anyone with this link can view a read-only snapshot of this conversation.</p><div style="display:flex;gap:6px"><input id="share-url" value="' +
+                    '<div class="share-content"><h3>Share Conversation</h3><p style="color:var(--dim);font-size:var(--text-sm);margin:var(--sp-4) 0">Anyone with this link can view a read-only snapshot of this conversation.</p><div style="display:flex;gap:var(--sp-3)"><input id="share-url" value="' +
                     esc(url) +
-                    '" readonly style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:var(--text-sm);color:var(--text);font-family:inherit"><button onclick="navigator.clipboard.writeText(document.getElementById(\'share-url\').value);this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy\',1500)" class="sys-btn" style="white-space:nowrap">Copy</button></div><div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button onclick="unshareChat(\'' +
+                    '" readonly style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:var(--sp-3) var(--sp-5);font-size:var(--text-sm);color:var(--text);font-family:inherit"><button onclick="navigator.clipboard.writeText(document.getElementById(\'share-url\').value);this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy\',1500)" class="sys-btn" style="white-space:nowrap">Copy</button></div><div style="display:flex;gap:var(--sp-4);margin-top:var(--sp-6);justify-content:flex-end"><button onclick="unshareChat(\'' +
                     activeId +
-                    '\',this.closest(\'.share-dialog\'))" style="background:none;border:1px solid var(--err-border);color:var(--err-text);padding:4px 12px;border-radius:6px;font-size:var(--text-xs);cursor:pointer;font-family:inherit">Delete Link</button><button onclick="this.closest(\'.share-dialog\').remove()" class="sys-btn">Done</button></div></div>';
+                    '\',this.closest(\'.share-dialog\'))" style="background:none;border:1px solid var(--err-border);color:var(--err-text);padding:var(--sp-2) var(--sp-6);border-radius:6px;font-size:var(--text-xs);cursor:pointer;font-family:inherit">Delete Link</button><button onclick="this.closest(\'.share-dialog\').remove()" class="sys-btn">Done</button></div></div>';
                 document.body.appendChild(dialog);
                 // Close on backdrop click
                 dialog.addEventListener("click", (e) => {
