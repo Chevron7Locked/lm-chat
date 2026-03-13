@@ -88,15 +88,15 @@
                 --sp-8: 20px;
                 --sp-9: 28px;
                 --sp-10: 40px;
-                /* Type — 1.2 minor third from 15px base */
-                --text-xs: 12px;
-                --text-sm: 13px;
-                --text-base: 14px;
-                --text-md: 15px;
-                --text-lg: 16px;
-                --text-xl: 20px;
-                --text-2xl: 24px;
-                --text-3xl: 28px;
+                /* Type — rem scale, respects browser font-size preferences */
+                --text-xs: 0.75rem;
+                --text-sm: 0.8125rem;
+                --text-base: 0.875rem;
+                --text-md: 0.9375rem;
+                --text-lg: 1rem;
+                --text-xl: 1.25rem;
+                --text-2xl: 1.5rem;
+                --text-3xl: 1.75rem;
                 /* Radius — rounded, GPT-like */
                 --r-sm: 6px;
                 --r-md: 10px;
@@ -225,7 +225,7 @@
                 background: none;
                 border: none;
                 color: var(--faint);
-                font-size: 16px;
+                font-size: var(--text-lg);
                 cursor: pointer;
                 display: none;
                 padding: 0 4px;
@@ -236,7 +236,7 @@
             #chat-no-match {
                 display: none;
                 padding: 8px 12px;
-                font-size: 12px;
+                font-size: var(--text-xs);
                 color: var(--faint);
             }
             #chat-list {
@@ -246,7 +246,7 @@
                 padding: 4px 8px 0;
             }
             #search-mode {
-                font-size: 11px;
+                font-size: 0.6875rem;
                 color: var(--faint);
                 padding: 4px 0 8px 14px;
                 cursor: pointer;
@@ -258,7 +258,7 @@
                 padding: 6px 10px;
                 border-radius: var(--r-md);
                 cursor: pointer;
-                font-size: 12px;
+                font-size: var(--text-xs);
                 margin-bottom: 1px;
                 overflow: hidden;
             }
@@ -321,7 +321,7 @@
                 background: none;
                 border: none;
                 color: var(--faint);
-                font-size: 12px;
+                font-size: var(--text-xs);
                 cursor: pointer;
                 padding: 0 2px;
                 flex-shrink: 0;
@@ -343,7 +343,7 @@
                 background: none;
                 border: none;
                 color: var(--faint);
-                font-size: 16px;
+                font-size: var(--text-lg);
                 cursor: pointer;
                 padding: 0 2px;
                 flex-shrink: 0;
@@ -352,7 +352,7 @@
                 display: block;
             }
             .sidebar-section {
-                font-size: 11px;
+                font-size: 0.6875rem;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
                 color: var(--faint);
@@ -377,7 +377,7 @@
             }
             .folder-arrow {
                 flex-shrink: 0;
-                font-size: 10px;
+                font-size: 0.625rem;
                 opacity: 0.6;
             }
             .sb-foot {
@@ -543,7 +543,7 @@
                 flex-shrink: 0;
             }
             .mdd-status {
-                font-size: 10px;
+                font-size: 0.625rem;
                 padding: 1px 6px;
                 border-radius: var(--r-sm);
                 font-weight: 600;
@@ -728,7 +728,7 @@
                 background: var(--surface-raised);
             }
             .starter-icon {
-                font-size: 16px;
+                font-size: var(--text-lg);
                 display: flex;
                 align-items: center;
             }
@@ -880,7 +880,7 @@
                 font-size: var(--text-xl);
             }
             .m-asst .bub h2 {
-                font-size: 16px;
+                font-size: var(--text-lg);
             }
             .m-asst .bub h3 {
                 font-size: var(--text-lg);
@@ -928,7 +928,7 @@
                 border-radius: 0 8px 8px 0;
             }
             .think-toggle {
-                font-size: 12px;
+                font-size: var(--text-xs);
                 color: var(--faint);
                 cursor: pointer;
                 margin-bottom: 4px;
@@ -946,7 +946,7 @@
                 transition:
                     max-height 0.3s ease,
                     opacity 0.3s ease;
-                font-size: 12px;
+                font-size: var(--text-xs);
                 line-height: 1.5;
                 color: var(--dim);
                 -webkit-mask-image: linear-gradient(
@@ -969,7 +969,7 @@
                 animation: ddIn var(--dur) var(--ease);
             }
             .m-tool .t-toggle {
-                font-size: 12px;
+                font-size: var(--text-xs);
                 color: var(--faint);
                 cursor: pointer;
                 user-select: none;
@@ -1024,7 +1024,7 @@
                 border-left: 2px solid var(--border);
                 padding: 6px 12px;
                 margin-top: 4px;
-                font-size: 12px;
+                font-size: var(--text-xs);
                 color: var(--faint);
                 max-height: 60vh;
                 overflow-y: auto;
@@ -1118,7 +1118,7 @@
                 background: none;
                 border: 1px solid var(--border);
                 color: var(--dim);
-                font-size: 12px;
+                font-size: var(--text-xs);
                 padding: 5px 14px;
                 border-radius: var(--r-lg);
                 cursor: pointer;
@@ -1141,7 +1141,7 @@
                 display: flex;
                 align-items: center;
                 gap: 5px;
-                font-size: 12px;
+                font-size: var(--text-xs);
                 color: var(--faint);
                 cursor: default;
                 padding: 2px 6px;
@@ -1332,7 +1332,7 @@
             }
             .att .att-file {
                 padding: 8px 12px;
-                font-size: 12px;
+                font-size: var(--text-xs);
                 color: var(--dim);
                 display: flex;
                 align-items: center;
@@ -1354,7 +1354,7 @@
                 background: rgba(0, 0, 0, 0.7);
                 color: #fff;
                 border: none;
-                font-size: 12px;
+                font-size: var(--text-xs);
                 cursor: pointer;
                 display: flex;
                 align-items: center;
@@ -1434,7 +1434,7 @@
             }
             #slash-menu .sc-desc {
                 color: var(--dim);
-                font-size: 12px;
+                font-size: var(--text-xs);
             }
             #input-box {
                 display: flex;
@@ -1536,7 +1536,7 @@
                 border: 1px solid var(--border);
                 border-radius: 6px;
                 padding: 6px 8px;
-                font-size: 12px;
+                font-size: var(--text-xs);
                 font-family: inherit;
                 outline: none;
             }
@@ -1592,7 +1592,7 @@
                 background: var(--surface);
                 padding: 1px 4px;
                 border-radius: 3px;
-                font-size: 9px;
+                font-size: 0.5625rem;
                 color: var(--dim);
             }
             .mcp-i {
@@ -1615,7 +1615,7 @@
                 padding: 4px 0;
             }
             .toggle-row span {
-                font-size: 12px;
+                font-size: var(--text-xs);
             }
             .sw {
                 position: relative;
@@ -1680,7 +1680,7 @@
                 background: var(--hover);
             }
             .mem-cat {
-                font-size: 9px;
+                font-size: 0.5625rem;
                 padding: 2px 6px;
                 border-radius: var(--r-sm);
                 font-weight: 700;
@@ -1868,7 +1868,7 @@
                 max-width: 480px;
             }
             .share-content h3 {
-                font-size: 16px;
+                font-size: var(--text-lg);
                 font-weight: 600;
             }
 
@@ -1915,7 +1915,7 @@
                 flex-shrink: 0;
             }
             .model-empty {
-                font-size: 12px;
+                font-size: var(--text-xs);
                 color: var(--faint);
                 padding: 4px 0;
             }
@@ -2083,7 +2083,7 @@
                     align-items: center;
                 }
                 #input {
-                    font-size: 16px;
+                    font-size: 1rem;
                     min-height: 28px;
                     padding: 4px 4px;
                 }
@@ -2124,7 +2124,7 @@
                     margin-bottom: 6px !important;
                 }
                 .welcome h2 {
-                    font-size: 24px;
+                    font-size: var(--text-2xl);
                     letter-spacing: -0.5px;
                 }
                 .welcome p {
@@ -2363,7 +2363,7 @@
                 background: rgba(196, 134, 60, 0.12);
                 border: 1px solid rgba(196, 134, 60, 0.25);
                 color: var(--accent);
-                font-size: 12px;
+                font-size: var(--text-xs);
                 font-weight: 600;
                 padding: 4px 10px;
                 border-radius: var(--r-md);
@@ -2546,7 +2546,7 @@
                 filter: drop-shadow(0 0 20px rgba(196, 134, 60, 0.2));
             }
             .auth-brand h1 {
-                font-size: 24px;
+                font-size: var(--text-2xl);
                 font-weight: 700;
                 color: var(--text);
                 letter-spacing: -0.5px;
@@ -2839,7 +2839,7 @@
             }
             .sys-field label {
                 display: block;
-                font-size: 12px;
+                font-size: var(--text-xs);
                 color: var(--dim);
                 margin-bottom: 5px;
                 text-transform: uppercase;
@@ -2941,7 +2941,7 @@
             .totp-verify-input {
                 width: 160px;
                 text-align: center;
-                font-size: 20px;
+                font-size: var(--text-xl);
                 letter-spacing: 8px;
                 font-family: "SF Mono", Menlo, monospace;
             }
@@ -2965,7 +2965,7 @@
             }
             .user-row .ur-name small {
                 color: var(--dim);
-                font-size: 12px;
+                font-size: var(--text-xs);
             }
             .user-row .ur-badge {
                 font-size: var(--text-xs);
@@ -3058,7 +3058,7 @@
                         placeholder="000000"
                         style="
                             text-align: center;
-                            font-size: 18px;
+                            font-size: 1.125rem;
                             letter-spacing: 4px;
                         "
                     />
@@ -3613,7 +3613,7 @@
                     />
                     <div
                         style="
-                            font-size: 10px;
+                            font-size: 0.625rem;
                             color: var(--faint);
                             margin-top: 2px;
                         "
@@ -3637,10 +3637,10 @@
                         "
                     >
                         <div>
-                            <span style="font-size: 13px; font-weight: 500"
+                            <span style="font-size: var(--text-sm); font-weight: 500"
                                 >Reasoning</span
                             ><br />
-                            <span style="font-size: 11px; color: var(--dim)"
+                            <span style="font-size: 0.6875rem; color: var(--dim)"
                                 >Thinking depth for supported models</span
                             >
                         </div>
@@ -3659,7 +3659,7 @@
                                 color: var(--text);
                                 border: 1px solid var(--border);
                                 border-radius: 6px;
-                                font-size: 12px;
+                                font-size: var(--text-xs);
                                 font-family: inherit;
                             "
                         >
@@ -3688,7 +3688,7 @@
                     </div>
                     <div
                         style="
-                            font-size: 10px;
+                            font-size: 0.625rem;
                             color: var(--faint);
                             margin-top: 3px;
                         "
@@ -3707,7 +3707,7 @@
             <div id="memory-settings-content">
                 <div class="sg">
                     <div class="toggle-row" style="margin-bottom: 12px">
-                        <span style="font-size: 13px; font-weight: 600"
+                        <span style="font-size: var(--text-sm); font-weight: 600"
                             >Memory</span
                         >
                         <label class="sw"
@@ -3722,7 +3722,7 @@
                     </div>
                     <div
                         style="
-                            font-size: 10px;
+                            font-size: 0.625rem;
                             color: var(--faint);
                             margin-bottom: 10px;
                         "
@@ -3759,7 +3759,7 @@
                     <label>Prompt Starters</label>
                     <div
                         style="
-                            font-size: 10px;
+                            font-size: 0.625rem;
                             color: var(--faint);
                             margin-bottom: 8px;
                         "
@@ -4138,7 +4138,7 @@
                 else if (settingsTab === "users") content += renderUsersTab();
 
                 content += "</div>";
-                content += `<div style="text-align:center;padding:16px 0 8px;font-size:11px;color:var(--faint)">LM Chat v${appVersion || "…"}</div>`;
+                content += `<div style="text-align:center;padding:16px 0 8px;font-size:0.6875rem;color:var(--faint)">LM Chat v${appVersion || "…"}</div>`;
                 el.innerHTML = header + tabs + content;
 
                 // Move live DOM nodes into their slots
@@ -4288,14 +4288,14 @@
                 area.innerHTML = `
     <div class="totp-qr">
       ${sanitizeSvg(d.qr_svg)}
-      <div style="margin-top:12px;font-size:12px;color:var(--dim)">Scan with your authenticator app</div>
+      <div style="margin-top:12px;font-size:var(--text-xs);color:var(--dim)">Scan with your authenticator app</div>
     </div>
     <div style="margin:16px 0">
-      <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Or enter this secret manually:</div>
+      <div style="font-size:var(--text-xs);color:var(--dim);margin-bottom:6px">Or enter this secret manually:</div>
       <div class="totp-secret" data-secret="${esc(d.secret)}" onclick="navigator.clipboard.writeText(this.dataset.secret);this.style.opacity='.6';setTimeout(()=>this.style.opacity='1',300)" title="Click to copy">${esc(d.secret)}</div>
     </div>
     <div style="margin-top:20px">
-      <div style="font-size:12px;color:var(--dim);margin-bottom:6px">Enter the 6-digit code from your app to verify:</div>
+      <div style="font-size:var(--text-xs);color:var(--dim);margin-bottom:6px">Enter the 6-digit code from your app to verify:</div>
       <div style="display:flex;gap:10px;align-items:center">
         <input type="text" id="st-verify-code" class="totp-verify-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" style="width:160px">
         <button class="sys-btn" onclick="verifyTotpSetup()">Verify</button>
@@ -4410,7 +4410,7 @@
                     if (u.id !== AUTH_STATE.user.id) {
                         const btn = document.createElement("button");
                         btn.className = "sys-btn danger";
-                        btn.style.cssText = "padding:5px 12px;font-size:12px";
+                        btn.style.cssText = "padding:5px 12px;font-size:var(--text-xs)";
                         btn.textContent = "Delete";
                         btn.addEventListener("click", () =>
                             settingsDeleteUser(u.id, u.username),
@@ -4682,13 +4682,13 @@
       <h3>LM Studio Connection</h3>
       <div class="sys-field"><label>Server URL</label><input type="text" id="ss-url" value="${esc(urlVal)}" placeholder="http://localhost:1234"></div>
       <div class="sys-field"><label>API Key</label><div style="display:flex;gap:8px"><input type="password" id="ss-apikey" placeholder="${serverSettings.hasApiKey ? "••••••••  (saved)" : "Enter API key"}" autocomplete="off" style="flex:1">${serverSettings.hasApiKey ? '<button class="sys-btn" onclick="clearApiKey()" style="white-space:nowrap;background:var(--err-bg);color:var(--err-text)">Clear</button>' : ""}<button class="sys-btn" onclick="saveServerSettings()" style="white-space:nowrap">${serverSettings.hasApiKey ? "Update" : "Save"}</button></div></div>
-      <div id="ss-status" style="font-size:12px;color:${statusColor};margin-top:8px">${statusText}</div>
+      <div id="ss-status" style="font-size:var(--text-xs);color:${statusColor};margin-top:8px">${statusText}</div>
       <div id="ss-conn" style="margin-top:12px"></div>
     </div>
     <div class="sys-section">
       <h3>Loaded Models</h3>
       <div id="model-list"></div>
-      <div style="font-size:12px;color:var(--faint);margin-top:8px">Load and unload models in LM Studio</div>
+      <div style="font-size:var(--text-xs);color:var(--faint);margin-top:8px">Load and unload models in LM Studio</div>
     </div>
     <div class="sys-section">
       <h3>MCP Tools</h3>
@@ -4697,16 +4697,16 @@
     <div class="sys-section">
       <h3>Remote MCP Servers</h3>
       <div id="remote-mcp-list"></div>
-      <button onclick="addRemoteMcp()" style="background:none;border:1px dashed var(--border);color:var(--dim);width:100%;padding:8px;border-radius:8px;cursor:pointer;font-size:13px;margin-top:8px">+ Add Remote Server</button>
-      <div style="font-size:12px;color:var(--faint);margin-top:8px">Requires "Allow per-request MCPs" in LM Studio Developer Settings</div>
+      <button onclick="addRemoteMcp()" style="background:none;border:1px dashed var(--border);color:var(--dim);width:100%;padding:8px;border-radius:8px;cursor:pointer;font-size:var(--text-sm);margin-top:8px">+ Add Remote Server</button>
+      <div style="font-size:var(--text-xs);color:var(--faint);margin-top:8px">Requires "Allow per-request MCPs" in LM Studio Developer Settings</div>
     </div>
     <div class="sys-section">
       <h3>Debug Logging</h3>
       <div style="display:flex;align-items:center;gap:12px">
         <label class="sw"><input type="checkbox" id="ss-debug" onchange="toggleDebugMode(this.checked)"><span class="slider"></span></label>
-        <span style="font-size:14px">Verbose debug mode</span>
+        <span style="font-size:var(--text-base)">Verbose debug mode</span>
       </div>
-      <div id="ss-debug-info" style="font-size:12px;color:var(--faint);margin-top:8px">Logs requests, SSE events, memory operations, and tool calls to <code style="font-size:11px">logs/</code></div>
+      <div id="ss-debug-info" style="font-size:var(--text-xs);color:var(--faint);margin-top:8px">Logs requests, SSE events, memory operations, and tool calls to <code style="font-size:0.6875rem">logs/</code></div>
       <div id="ss-log-files" style="margin-top:8px"></div>
     </div>`;
             }
@@ -4770,7 +4770,7 @@
                         el.innerHTML = d.log_files
                             .map(
                                 (f) =>
-                                    `<div style="font-size:11px;color:var(--dim);padding:2px 0"><code>${esc(f.name)}</code> — ${(f.size / 1024).toFixed(1)} KB</div>`,
+                                    `<div style="font-size:0.6875rem;color:var(--dim);padding:2px 0"><code>${esc(f.name)}</code> — ${(f.size / 1024).toFixed(1)} KB</div>`,
                             )
                             .join("");
                     }
@@ -5275,9 +5275,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     d.className = "mcp-i";
                     const authBadge =
                         s.has_auth ?
-                            '<span style="color:var(--accent);font-size:10px;margin-left:6px" title="Auth token configured">&#128274;</span>'
+                            '<span style="color:var(--accent);font-size:0.625rem;margin-left:6px" title="Auth token configured">&#128274;</span>'
                         :   "";
-                    d.innerHTML = `<input type=checkbox ${s.on ? "checked" : ""}><span>${esc(s.label)}</span>${authBadge}<span style="color:var(--faint);font-size:11px;margin-left:auto">${esc(s.url)}</span><button onclick="setMcpAuth(${i})" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:12px;padding:0 4px" title="Set auth token">&#128273;</button><button onclick="removeRemoteMcp(${i})" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:16px;padding:0 4px" title="Remove">&times;</button>`;
+                    d.innerHTML = `<input type=checkbox ${s.on ? "checked" : ""}><span>${esc(s.label)}</span>${authBadge}<span style="color:var(--faint);font-size:0.6875rem;margin-left:auto">${esc(s.url)}</span><button onclick="setMcpAuth(${i})" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-xs);padding:0 4px" title="Set auth token">&#128273;</button><button onclick="removeRemoteMcp(${i})" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-lg);padding:0 4px" title="Remove">&times;</button>`;
                     d.querySelector("input").onchange = (e) => {
                         remoteMcps[i].on = e.target.checked;
                         saveRemoteMcps();
@@ -5521,7 +5521,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     console.error("loadChatList:", e);
                     const el = $("chat-list");
                     el.innerHTML =
-                        '<div style="padding:16px;color:var(--err-text);font-size:13px">Failed to load chats. <button class="retry-btn" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline">Retry</button></div>';
+                        '<div style="padding:16px;color:var(--err-text);font-size:var(--text-sm)">Failed to load chats. <button class="retry-btn" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline">Retry</button></div>';
                     el.querySelector(".retry-btn")?.addEventListener(
                         "click",
                         () => loadChatList(),
@@ -5715,7 +5715,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     const insights = await resp.json();
                     if (!insights.length) {
                         list.innerHTML =
-                            '<div style="padding:12px;color:var(--faint);font-size:12px;text-align:center">No memories yet. Chat a bit and switch chats to start building memory.</div>';
+                            '<div style="padding:12px;color:var(--faint);font-size:var(--text-xs);text-align:center">No memories yet. Chat a bit and switch chats to start building memory.</div>';
                         return;
                     }
                     list.innerHTML = "";
@@ -5746,14 +5746,14 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     if (faded.length) {
                         const hdr = document.createElement("div");
                         hdr.style.cssText =
-                            "font-size:10px;color:var(--faint);padding:8px 10px 4px;text-transform:uppercase;letter-spacing:.5px";
+                            "font-size:0.625rem;color:var(--faint);padding:8px 10px 4px;text-transform:uppercase;letter-spacing:.5px";
                         hdr.textContent = `Faded (${faded.length})`;
                         list.appendChild(hdr);
                         faded.forEach((i) => renderInsight(i, list, true));
                     }
                 } catch (e) {
                     list.innerHTML =
-                        '<div style="color:var(--err-text);font-size:12px">Failed to load</div>';
+                        '<div style="color:var(--err-text);font-size:var(--text-xs)">Failed to load</div>';
                 }
             }
 
@@ -5999,7 +5999,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 } catch (e) {
                     console.error("loadChat:", e);
                     msgs.innerHTML =
-                        '<div style="padding:40px 24px;text-align:center;color:var(--err-text);font-size:14px">Failed to load chat. <button class="retry-btn" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline;font-size:14px">Retry</button></div>';
+                        '<div style="padding:40px 24px;text-align:center;color:var(--err-text);font-size:var(--text-base)">Failed to load chat. <button class="retry-btn" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline;font-size:var(--text-base)">Retry</button></div>';
                     msgs.querySelector(".retry-btn")?.addEventListener(
                         "click",
                         () => loadChat(id),
@@ -6108,7 +6108,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 el.innerHTML = list
                     .map(
                         (s, i) =>
-                            `<div style="display:flex;gap:6px;margin-bottom:4px;align-items:center"><input value="${esc(s.icon || "💬")}" style="width:32px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px;font-size:14px" onchange="updateStarter(${i},'icon',this.value)"><input value="${esc(s.title)}" placeholder="Title" style="width:70px;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px;color:var(--text)" onchange="updateStarter(${i},'title',this.value)"><input value="${esc(s.prompt)}" placeholder="Prompt text..." style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:12px;color:var(--text)" onchange="updateStarter(${i},'prompt',this.value)"><button onclick="removeStarter(${i})" style="background:none;border:none;color:var(--faint);cursor:pointer;font-size:14px">&times;</button></div>`,
+                            `<div style="display:flex;gap:6px;margin-bottom:4px;align-items:center"><input value="${esc(s.icon || "💬")}" style="width:32px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px;font-size:var(--text-base)" onchange="updateStarter(${i},'icon',this.value)"><input value="${esc(s.title)}" placeholder="Title" style="width:70px;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:var(--text-xs);color:var(--text)" onchange="updateStarter(${i},'title',this.value)"><input value="${esc(s.prompt)}" placeholder="Prompt text..." style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:var(--text-xs);color:var(--text)" onchange="updateStarter(${i},'prompt',this.value)"><button onclick="removeStarter(${i})" style="background:none;border:none;color:var(--faint);cursor:pointer;font-size:var(--text-base)">&times;</button></div>`,
                     )
                     .join("");
             }
@@ -6225,7 +6225,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         .forEach((a) => {
                             const tag = document.createElement("span");
                             tag.style.cssText =
-                                "display:inline-flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px;color:var(--dim)";
+                                "display:inline-flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:var(--text-xs);color:var(--dim)";
                             tag.textContent = a.name;
                             imgBox.appendChild(tag);
                         });
@@ -8082,11 +8082,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const dialog = document.createElement("div");
                 dialog.className = "share-dialog";
                 dialog.innerHTML =
-                    '<div class="share-content"><h3>Share Conversation</h3><p style="color:var(--dim);font-size:13px;margin:8px 0">Anyone with this link can view a read-only snapshot of this conversation.</p><div style="display:flex;gap:6px"><input id="share-url" value="' +
+                    '<div class="share-content"><h3>Share Conversation</h3><p style="color:var(--dim);font-size:var(--text-sm);margin:8px 0">Anyone with this link can view a read-only snapshot of this conversation.</p><div style="display:flex;gap:6px"><input id="share-url" value="' +
                     esc(url) +
-                    '" readonly style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px;color:var(--text);font-family:inherit"><button onclick="navigator.clipboard.writeText(document.getElementById(\'share-url\').value);this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy\',1500)" class="sys-btn" style="white-space:nowrap">Copy</button></div><div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button onclick="unshareChat(\'' +
+                    '" readonly style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:var(--text-sm);color:var(--text);font-family:inherit"><button onclick="navigator.clipboard.writeText(document.getElementById(\'share-url\').value);this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy\',1500)" class="sys-btn" style="white-space:nowrap">Copy</button></div><div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button onclick="unshareChat(\'' +
                     activeId +
-                    '\',this.closest(\'.share-dialog\'))" style="background:none;border:1px solid var(--err-border);color:var(--err-text);padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit">Delete Link</button><button onclick="this.closest(\'.share-dialog\').remove()" class="sys-btn">Done</button></div></div>';
+                    '\',this.closest(\'.share-dialog\'))" style="background:none;border:1px solid var(--err-border);color:var(--err-text);padding:4px 12px;border-radius:6px;font-size:var(--text-xs);cursor:pointer;font-family:inherit">Delete Link</button><button onclick="this.closest(\'.share-dialog\').remove()" class="sys-btn">Done</button></div></div>';
                 document.body.appendChild(dialog);
                 // Close on backdrop click
                 dialog.addEventListener("click", (e) => {
