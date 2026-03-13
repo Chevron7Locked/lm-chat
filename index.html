@@ -5943,6 +5943,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
 
             async function loadChat(id) {
+                const prevId = activeId;
+                const wasStreaming = sending;
                 if (sending) stopStream();
                 // Close settings if open
                 if (settingsOpen) closeSettings();
@@ -6004,6 +6006,23 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     );
                 }
                 if (window.innerWidth <= 768) closeSB();
+                // If we aborted a stream, the previous chat's response_id may have been
+                // persisted server-side but never reached the client via chat.end.
+                // Refresh after a short delay to give the server time to persist.
+                if (wasStreaming && prevId && prevId !== id && chatMeta[prevId]) {
+                    setTimeout(async () => {
+                        try {
+                            const listResp = await apiFetch("/api/chats");
+                            if (listResp.ok) {
+                                const chats = await listResp.json();
+                                const prev = chats.find(c => c.id === prevId);
+                                if (prev && chatMeta[prevId]) {
+                                    chatMeta[prevId].response_id = prev.response_id;
+                                }
+                            }
+                        } catch {}
+                    }, 1000);
+                }
                 updateExportBtn();
             }
 
