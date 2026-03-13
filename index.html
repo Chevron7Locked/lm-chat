@@ -4583,6 +4583,13 @@
                 chatMeta = {},
                 incognitoMode = false;
 
+            // Incognito session history — ephemeral, never persisted.
+            // Holds {role, content} pairs so the model has context
+            // without server-side response_id chaining.
+            const INCOGNITO_HISTORY_MAX = 100; // max turns
+            const INCOGNITO_HISTORY_MAX_CHARS = 50000; // max chars in context prefix
+            let incognitoHistory = [];
+
             // --- Session stats (persisted in localStorage) ---
             // GPT-5.2 pricing: $1.75/1M input, $14/1M output (as of March 2026)
             const GPT5_INPUT_PER_TOKEN = 1.75 / 1e6,
@@ -4862,7 +4869,7 @@
                 const family = detectModelFamily(m.id);
                 if (
                     ["qwen", "deepseek"].includes(family) &&
-                    /r1|qwq|qwen3/i.test(m.id)
+                    /\br1\b|\bqwq\b/i.test(m.id)
                 ) {
                     const el = $("s-reasoning");
                     if (el && el.value === "off") el.value = "medium";
@@ -5856,6 +5863,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     if (activeId && !activeId.startsWith("incog_"))
                         distillChat(activeId);
                     incognitoMode = true;
+                    incognitoHistory = [];
                     document.body.classList.add("incognito");
                     $("incognito-btn").classList.add("active");
                     activeId = "incog_" + Date.now().toString(36);
@@ -5886,6 +5894,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             function exitIncognito() {
                 const oldId = activeId;
                 incognitoMode = false;
+                incognitoHistory = [];
                 document.body.classList.remove("incognito");
                 $("incognito-btn").classList.remove("active");
                 if (oldId && chatMeta[oldId] && chatMeta[oldId]._incognito)
@@ -6559,6 +6568,28 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         });
                     inputVal = inputArr;
                 }
+                // In incognito mode, prepend conversation history so the
+                // model has context without any server-side state.
+                // History is plain text only, held in JS memory, never persisted.
+                if (incognitoMode && incognitoHistory.length > 1) {
+                    // Build context from all turns except the last (which is
+                    // the current user message already in inputVal).
+                    // Trim oldest turns to stay within char budget.
+                    const prior = incognitoHistory.slice(0, -1);
+                    let ctx = "";
+                    for (let i = prior.length - 1; i >= 0; i--) {
+                        const line = (prior[i].role === "user" ? "User" : "Assistant") + ": " + prior[i].content;
+                        if (ctx.length + line.length + 2 > INCOGNITO_HISTORY_MAX_CHARS) break;
+                        ctx = line + (ctx ? "\n\n" + ctx : "");
+                    }
+                    const prefix = "[Conversation history]\n" + ctx + "\n\n[Current message]\n";
+                    if (typeof inputVal === "string") {
+                        inputVal = prefix + inputVal;
+                    } else if (Array.isArray(inputVal)) {
+                        // Multimodal input array — prepend history as a text part
+                        inputVal.unshift({ type: "text", text: prefix });
+                    }
+                }
                 const body = { model, input: inputVal, integrations };
                 if (incognitoMode) {
                     body.incognito = true;
@@ -6770,6 +6801,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 scroll.scrollTop = scroll.scrollHeight;
                 $("thinking").classList.add("on");
 
+                // Track user message for incognito context
+                if (incognitoMode) {
+                    incognitoHistory.push({ role: "user", content: actualText });
+                    if (incognitoHistory.length > INCOGNITO_HISTORY_MAX)
+                        incognitoHistory.splice(0, incognitoHistory.length - INCOGNITO_HISTORY_MAX);
+                }
+
                 const sys =
                     presetKey && PRESETS[presetKey] ?
                         expandVars(PRESETS[presetKey])
@@ -6854,6 +6892,18 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 }
                 setSendMode(false);
                 $("thinking").classList.remove("on");
+                // Track assistant response for incognito context.
+                // If stream produced no content (error/abort), pop the
+                // orphaned user turn so it doesn't confuse future context.
+                if (incognitoMode) {
+                    if (streamContent) {
+                        incognitoHistory.push({ role: "assistant", content: streamContent });
+                        if (incognitoHistory.length > INCOGNITO_HISTORY_MAX)
+                            incognitoHistory.splice(0, incognitoHistory.length - INCOGNITO_HISTORY_MAX);
+                    } else if (incognitoHistory.length && incognitoHistory[incognitoHistory.length - 1].role === "user") {
+                        incognitoHistory.pop();
+                    }
+                }
                 // Final markdown render
                 const asstWrap =
                     streamBub ? streamBub.closest(".m-asst") : null;

@@ -8,7 +8,7 @@ import http.cookies
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 LMSTUDIO = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_TOKEN = os.environ.get("LMSTUDIO_TOKEN", "")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -1612,7 +1612,8 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(result)
 
             chat_id = body.get("chat_id")
-            if chat_id:
+            is_incognito = body.get("incognito", False)
+            if chat_id and not is_incognito:
                 db = get_db()
                 if not self._verify_chat_owner(db, chat_id, user["id"]):
                     return
