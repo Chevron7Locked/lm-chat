@@ -8,7 +8,7 @@ import http.cookies
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 LMSTUDIO = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_TOKEN = os.environ.get("LMSTUDIO_TOKEN", "")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -2261,8 +2261,8 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_share_404(self):
         html = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Not Found — LM Chat</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,system-ui,sans-serif;background:#0B1018;color:#E8EDF2;display:flex;align-items:center;justify-content:center;min-height:100vh}
-.c{text-align:center}h1{font-size:48px;font-weight:700;color:#566A7C;margin-bottom:8px}p{color:#94A3B8;font-size:15px}a{color:#C4863C}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,system-ui,sans-serif;background:#261545;color:#E8E0F0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.c{text-align:center}h1{font-size:48px;font-weight:700;color:#8070A0;margin-bottom:8px}p{color:#9B8AB8;font-size:15px}a{color:#D4944E;text-decoration:none}a:hover{text-decoration:underline}</style>
 </head><body><div class="c"><h1>404</h1><p>This shared conversation doesn't exist or has been deleted.</p><p style="margin-top:12px"><a href="/">Go to LM Chat</a></p></div></body></html>"""
         data = html.encode("utf-8")
         self.send_response(404)
@@ -2277,12 +2277,25 @@ class Handler(BaseHTTPRequestHandler):
         # HTML-escape the title
         safe_title = html_mod.escape(title)
         msg_html = []
+        def _md(text):
+            """Minimal markdown: bold, italic, inline code, code blocks."""
+            import re
+            s = html_mod.escape(text)
+            # Fenced code blocks: ```...```
+            s = re.sub(r'```(\w*)\n(.*?)```', lambda m: f'<pre><code>{m.group(2)}</code></pre>', s, flags=re.DOTALL)
+            # Inline code: `...`
+            s = re.sub(r'`([^`]+)`', r'<code>\1</code>', s)
+            # Bold: **...**
+            s = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', s)
+            # Italic: *...*
+            s = re.sub(r'\*(.+?)\*', r'<em>\1</em>', s)
+            # Paragraphs and line breaks
+            s = s.replace("\n\n", "</p><p>").replace("\n", "<br>")
+            return s
         for m in messages:
             role = m.get("role", "")
             content = m.get("content", "") or ""
-            # HTML escape content
-            safe = html_mod.escape(content)
-            safe = safe.replace("\n\n", "</p><p>").replace("\n", "<br>")
+            safe = _md(content)
             if role == "user":
                 msg_html.append(f'<div class="msg user"><div class="role">You</div><div class="content"><p>{safe}</p></div></div>')
             elif role == "assistant":
@@ -2290,9 +2303,8 @@ class Handler(BaseHTTPRequestHandler):
             elif role == "tool":
                 name = html_mod.escape(m.get("name") or "tool")
                 output = m.get("output", "") or ""
-                safe_output = html_mod.escape(output)
+                safe_output = _md(output)
                 if safe_output:
-                    safe_output = safe_output.replace("\n\n", "</p><p>").replace("\n", "<br>")
                     msg_html.append(f'<div class="msg tool"><div class="role">Tool: {name}</div><div class="content tool-out"><p>{safe_output}</p></div></div>')
                 else:
                     msg_html.append(f'<div class="msg tool"><div class="role">Tool: {name}</div></div>')
@@ -2303,22 +2315,22 @@ class Handler(BaseHTTPRequestHandler):
 <title>{safe_title} — LM Chat</title>
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:-apple-system,system-ui,sans-serif;background:#0B1018;color:#E8EDF2;line-height:1.6;padding:20px}}
+body{{font-family:-apple-system,system-ui,'Segoe UI',sans-serif;background:#261545;color:#E8E0F0;line-height:1.65;padding:2rem 1rem}}
 .container{{max-width:720px;margin:0 auto}}
-h1{{font-size:22px;font-weight:600;margin-bottom:4px}}
-.meta{{font-size:13px;color:#94A3B8;margin-bottom:24px}}
-.msg{{margin-bottom:16px;padding:12px 16px;border-radius:10px}}
-.msg.user{{background:#131B23}}
-.msg.asst{{background:#1A2430}}
-.msg.tool{{background:#0A0F14;font-size:12px;color:#566A7C}}
-.role{{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#566A7C;margin-bottom:4px;font-weight:600}}
-.content p{{margin-bottom:8px}}
+h1{{font-size:1.5rem;font-weight:600;margin-bottom:4px;color:#F0EAF6}}
+.meta{{font-size:0.8rem;color:#9B8AB8;margin-bottom:1.75rem}}
+.msg{{margin-bottom:1rem;padding:0.875rem 1.125rem;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.18),0 0 0 1px rgba(255,255,255,.04)}}
+.msg.user{{background:#2E1B52}}
+.msg.asst{{background:#35205E}}
+.msg.tool{{background:#1E1038;font-size:0.75rem;color:#8070A0}}
+.role{{font-size:0.6875rem;text-transform:uppercase;letter-spacing:.6px;color:#9B8AB8;margin-bottom:5px;font-weight:600}}
+.content p{{margin-bottom:0.5rem}}
 .content p:last-child{{margin-bottom:0}}
-.tool-out{{font-size:12px;color:#94A3B8;margin-top:4px}}
-pre{{background:#0A0F14;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;margin:8px 0}}
-code{{font-family:'SF Mono',Menlo,monospace}}
-.footer{{margin-top:32px;padding-top:16px;border-top:1px solid rgba(255,255,255,.06);font-size:12px;color:#566A7C;text-align:center}}
-a{{color:#C4863C}}
+.tool-out{{font-size:0.75rem;color:#9B8AB8;margin-top:4px}}
+pre{{background:#1E1038;padding:0.75rem;border-radius:8px;overflow-x:auto;font-size:0.8rem;margin:0.5rem 0;border:1px solid rgba(255,255,255,.06)}}
+code{{font-family:'SF Mono',Menlo,Consolas,monospace}}
+.footer{{margin-top:2rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,.07);font-size:0.75rem;color:#8070A0;text-align:center}}
+a{{color:#D4944E;text-decoration:none}}a:hover{{text-decoration:underline}}
 </style>
 </head><body>
 <div class="container">

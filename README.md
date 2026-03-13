@@ -290,7 +290,7 @@ browser  ──HTTP──>  server.py  ──HTTP──>  LM Studio
 ```
 
 - **`server.py`** — stdlib Python. Proxies native API, persists chats, manages auth, indexes embeddings, handles memory distillation, structured logging. ~3.1k lines.
-- **`index.html`** — single-file SPA. All CSS, JS, and HTML inline. Zero build step. ~3.5k lines.
+- **`index.html`** — single-file SPA. All CSS, JS, and HTML inline. Zero build step. ~8.9k lines.
 - **`manifest.json` + `sw.js`** — PWA support.
 - **`logs/`** — rotating debug logs (auto-created, gitignored).
 

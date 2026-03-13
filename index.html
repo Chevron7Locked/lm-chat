@@ -6044,7 +6044,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 } else {
                     exitIncognito();
                     activeId = null;
-                    msgs.innerHTML = "";
+                    renderWelcome();
                     renderList();
                     updateExportBtn();
                     input.focus();
@@ -7208,7 +7208,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                                 "th" + Math.random().toString(36).slice(2, 8);
                             const d = document.createElement("div");
                             d.className = "m-think";
-                            d.innerHTML = `<div class="think-toggle" role="button" tabindex="0" onclick="const b=document.getElementById('${uid}');b.classList.toggle('open');this.textContent=b.classList.contains('open')?'Hide reasoning':'Show reasoning'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">Reasoning...</div><div class="bub"><div id="${uid}" class="think-body open" style="display:block"></div></div>`;
+                            d.innerHTML = `<div class="think-toggle" role="button" tabindex="0" onclick="const b=document.getElementById('${uid}');b.classList.toggle('open');this.textContent=b.classList.contains('open')?'Hide thinking':'Show thinking'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">Thinking...</div><div class="bub"><div id="${uid}" class="think-body open" style="display:block"></div></div>`;
                             streamGroup.appendChild(d);
                             thinkBody = d.querySelector(".think-body");
                             thinkBuf = "";
@@ -7226,7 +7226,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             if (thinkBody) {
                                 thinkBody.classList.remove("open");
                                 thinkBody.parentElement.previousElementSibling.textContent =
-                                    "Show reasoning";
+                                    "Show thinking";
                             }
                         }
                         break;
@@ -7248,7 +7248,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             if (thinkBody) {
                                 thinkBody.classList.remove("open");
                                 thinkBody.parentElement.previousElementSibling.textContent =
-                                    "Show reasoning";
+                                    "Show thinking";
                             }
                         }
 
@@ -8011,9 +8011,12 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 );
             }
 
+            function modelDisplayName(m) {
+                return m.identifier || m.id;
+            }
             function modelLabelHtml(m) {
                 const caps = m.capabilities || {};
-                let h = esc(m.id);
+                let h = esc(modelDisplayName(m));
                 if (caps.vision) h += capIcon(ICON_VISION_PATH, "var(--accent)");
                 if (caps.trained_for_tool_use)
                     h += capIcon(ICON_TOOLS_PATH, "var(--green)");
@@ -8021,7 +8024,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
             function modelLabel(m) {
                 const caps = m.capabilities || {};
-                let label = m.id;
+                let label = modelDisplayName(m);
                 if (caps.vision) label += " ◉";
                 if (caps.trained_for_tool_use) label += " ⚒";
                 return label;
@@ -8043,10 +8046,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         const instCfg = inst?.config || {};
                         const instCtx = instCfg.context_length || 0;
                         const maxCtx = m.max_context_length || 0;
+                        // User-set identifier from loaded instance, or LM Studio display name
+                        const identifier = inst?.id || m.display_name || "";
                         // Use instance context if reasonable (>=1024), otherwise fall back to model max
                         cachedModels.push({
                             ...m,
                             id,
+                            identifier,
                             context_length: instCtx >= 1024 ? instCtx : maxCtx,
                             max_context_length: maxCtx,
                             instance_config: instCfg,
@@ -8705,6 +8711,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             // --- Quick Model Pill ---
             function getModelShortName(id) {
                 if (!id) return "?";
+                const m = cachedModels.find((x) => x.id === id);
+                if (m?.identifier) return m.identifier;
                 const parts = id.split("/");
                 return parts[parts.length - 1];
             }
@@ -8770,7 +8778,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         meta += '<span class="mdd-status loaded">Loaded</span>';
                     item.innerHTML =
                         '<span class="mdd-name">' +
-                        esc(m.id) +
+                        esc(modelDisplayName(m)) +
                         "</span>" +
                         (meta ?
                             '<div class="mdd-meta">' + meta + "</div>"
