@@ -23,8 +23,6 @@ ENV PORT=3001 \
     LM_CHAT_LOGS=/app/data/logs \
     PYTHONUNBUFFERED=1
 
-VOLUME /app/data
-
 USER lmchat
 
 EXPOSE 3001

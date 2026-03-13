@@ -7,7 +7,7 @@ services:
     ports:
       - "3002:3001"
     volumes:
-      - lm-chat-dev-data:/app/data
+      - ./data-dev:/app/data
     environment:
       - LMSTUDIO_URL=http://host.docker.internal:1234
       - LM_CHAT_AUTH=true
@@ -19,6 +19,3 @@ services:
     cap_drop:
       - ALL
     restart: "no"
-
-volumes:
-  lm-chat-dev-data:

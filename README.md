@@ -27,7 +27,7 @@ Two files. No `pip install`, no `npm`, no build step. Just run it.
 ### Docker (recommended)
 
 ```bash
-docker run -d -p 3001:3001 -v lm-chat-data:/app/data \
+docker run -d -p 3001:3001 -v ./lm-chat-data:/app/data \
   -e LMSTUDIO_URL=http://host.docker.internal:1234 \
   ghcr.io/chevron7locked/lm-chat:nightly
 ```
@@ -70,7 +70,7 @@ LM_CHAT_ADMIN_USER=myname LM_CHAT_ADMIN_PASS=mypassword python3 server.py
 Or with Docker:
 
 ```bash
-docker run -d -p 3001:3001 -v lm-chat-data:/app/data \
+docker run -d -p 3001:3001 -v ./lm-chat-data:/app/data \
   -e LMSTUDIO_URL=http://host.docker.internal:1234 \
   -e LM_CHAT_ADMIN_USER=myname \
   -e LM_CHAT_ADMIN_PASS=mypassword \
@@ -318,7 +318,7 @@ No frameworks. No transpilation. No node_modules. Two files do all the work — 
 
 ```bash
 # Quick start
-docker run -d -p 3001:3001 -v lm-chat-data:/app/data ghcr.io/chevron7locked/lm-chat:nightly
+docker run -d -p 3001:3001 -v ./lm-chat-data:/app/data ghcr.io/chevron7locked/lm-chat:nightly
 
 # With Docker Compose
 curl -O https://raw.githubusercontent.com/Chevron7Locked/lm-chat/main/docker-compose.yml
@@ -330,7 +330,7 @@ docker pull ghcr.io/chevron7locked/lm-chat:nightly
 
 **Platforms:** `linux/amd64`, `linux/arm64` (Apple Silicon, Raspberry Pi, AWS Graviton)
 
-**Data persistence:** Mount a volume at `/app/data` — stores the SQLite database, logs, and signing key. Without a volume, data is lost on container restart.
+**Data persistence:** Mount a directory to `/app/data` — stores the SQLite database, logs, and signing key. Without a mount, data is lost on container restart. The default `docker-compose.yml` uses a `./data` bind mount so your database lives alongside the compose file.
 
 **Security hardening:** The default `docker-compose.yml` runs with `read_only: true`, `no-new-privileges`, and all capabilities dropped. Only `/tmp` and `/app/data` are writable.
 

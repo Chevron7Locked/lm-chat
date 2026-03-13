@@ -1,4 +1,6 @@
 # Runtime data
+data/
+data-dev/
 *.db
 *.db-shm
 *.db-wal
