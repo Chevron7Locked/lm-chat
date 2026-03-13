@@ -4724,16 +4724,6 @@
                     prompt: "Draft a professional email about: ",
                     icon: "email",
                 },
-                {
-                    title: "Pros & cons",
-                    prompt: "List the pros and cons of: ",
-                    icon: "proscons",
-                },
-                {
-                    title: "Debug this",
-                    prompt: "Help me debug this code:\n\n```\n",
-                    icon: "debug",
-                },
             ];
             function getStarters() {
                 const c = localStorage.getItem("lsc-starters");
@@ -7525,7 +7515,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 d.dataset.toolName = name || "";
                 d.innerHTML = `<span class="t-name" style="display:none">${esc(name || "tool")}</span><div class="t-toggle" role="button" tabindex="0"><span class="t-arrow">&#9656;</span> ${esc(label)}<span class="t-preview"></span><span class="t-dots"><i></i><i></i><i></i></span></div><div class="t-body" id="${uid}"><div class="t-args"></div></div>`;
                 // Insert tool calls before the response bubble so they appear above the text
-                const target = getMsgTarget();
+                const target = streamGroup || getMsgTarget();
                 const streamEl = streamBub && streamBub.closest(".m-asst");
                 if (streamEl && streamEl.parentElement === target)
                     target.insertBefore(d, streamEl);
