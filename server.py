@@ -867,6 +867,9 @@ class PooledHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     def process_request(self, request, client_address):
         self._pool.submit(self.process_request_thread, request, client_address)
+    def server_close(self):
+        self._pool.shutdown(wait=True)
+        super().server_close()
 
 class Handler(BaseHTTPRequestHandler):
     timeout = 30  # seconds — prevents slow-loris and thread leaks
@@ -1602,7 +1605,6 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             data = self._lmstudio_chat(payload, user["id"], timeout=300)
-            result = json.dumps(data).encode()
 
             chat_id = body.get("chat_id")
             is_incognito = body.get("incognito", False)
@@ -1621,7 +1623,7 @@ class Handler(BaseHTTPRequestHandler):
                     db, chat_id, body.get("input", ""), content, tool_calls,
                     data.get("response_id"), data.get("usage") or {},
                 )
-            self._json_response(200, result)
+            self._json_response(200, data)
         except urllib.error.HTTPError as e:
             self._json_response(e.code, e.read())
         except Exception as e:
@@ -2969,7 +2971,7 @@ Curated list:"""
         self.end_headers()
         self.wfile.write(data)
 
-    _file_cache = {}  # {filename: (raw_bytes, gzipped_bytes, mtime)}
+    _file_cache = {}  # {filename: (raw_bytes, gzipped_bytes, mtime, etag)}
 
     def _serve_file(self, filename, content_type):
         path = os.path.join(os.path.dirname(__file__), filename)
