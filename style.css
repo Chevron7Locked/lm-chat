@@ -816,6 +816,8 @@
       margin-bottom: var(--sp-8);
       position: relative;
       animation: msgSlideIn 0.3s var(--ease);
+      content-visibility: auto;
+      contain-intrinsic-size: auto 80px;
       & .bub {
           background: var(--surface);
           padding: var(--sp-5) 0.875rem;
@@ -902,6 +904,8 @@
       margin-bottom: var(--sp-8);
       animation: asstFadeIn 0.35s var(--ease);
       position: relative;
+      content-visibility: auto;
+      contain-intrinsic-size: auto 120px;
       & .bub {
           font-size: var(--text-md);
           line-height: 1.6;
@@ -1150,6 +1154,8 @@
   .m-tool {
       margin-bottom: var(--sp-6);
       animation: ddIn var(--dur) var(--ease);
+      content-visibility: auto;
+      contain-intrinsic-size: auto 40px;
       & .t-toggle {
           font-size: var(--text-xs);
           color: var(--faint);
