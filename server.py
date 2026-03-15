@@ -103,6 +103,10 @@ def init_db():
     """Run once at startup: create tables and run migrations."""
     db = sqlite3.connect(DB_PATH)
     db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA synchronous=NORMAL")
+    db.execute("PRAGMA cache_size=-64000")
+    db.execute("PRAGMA temp_store=MEMORY")
+    db.execute("PRAGMA journal_size_limit=67108864")
     db.execute("""CREATE TABLE IF NOT EXISTS chats (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL DEFAULT 'New chat',
@@ -197,7 +201,6 @@ def init_db():
         messages TEXT NOT NULL,
         created_at REAL NOT NULL
     )""")
-    db.execute("PRAGMA foreign_keys=ON")
     # Ensure "default" user exists for auth-disabled mode (FK constraints require it)
     db.execute(
         """INSERT OR IGNORE INTO users (id, username, password_hash, salt, display_name, is_admin, created_at)
@@ -228,6 +231,9 @@ def get_db():
                 pass
     db = sqlite3.connect(DB_PATH)
     db.execute("PRAGMA busy_timeout=5000")
+    db.execute("PRAGMA synchronous=NORMAL")
+    db.execute("PRAGMA cache_size=-64000")
+    db.execute("PRAGMA temp_store=MEMORY")
     db.execute("PRAGMA foreign_keys=ON")
     db.create_function("ln", 1, math.log)
     _thread_local.db = db
