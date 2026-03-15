@@ -239,8 +239,15 @@ def get_db():
         try:
             db.execute("SELECT 1")
             return db
-        except sqlite3.ProgrammingError:
-            pass
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            try:
+                db.close()
+            except Exception:
+                pass
     db = sqlite3.connect(DB_PATH)
     db.execute("PRAGMA busy_timeout=5000")
     db.execute("PRAGMA foreign_keys=ON")
@@ -862,8 +869,8 @@ def get_embedding(text, token=None):
             headers=headers,
             method="POST",
         )
-        resp = urllib.request.urlopen(req, timeout=10)
-        data = json.loads(resp.read())
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
         return data["data"][0]["embedding"]
     except Exception:
         return None
@@ -987,8 +994,8 @@ class Handler(BaseHTTPRequestHandler):
                 db = get_db()
                 db.execute("SELECT 1")
                 status["db"] = True
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning(f"Health check DB failed: {e}")
             try:
                 req = urllib.request.Request(f"{LMSTUDIO}/api/v1/models", method="GET")
                 # Try env var token first, then any stored user key
@@ -999,12 +1006,12 @@ class Handler(BaseHTTPRequestHandler):
                         row = db2.execute("SELECT value FROM user_settings WHERE key='lm_apikey' AND value != '' LIMIT 1").fetchone()
                         if row:
                             token = row[0]
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.warning(f"Health check: cannot read API key from DB: {e}")
                 if token:
                     req.add_header("Authorization", f"Bearer {token}")
-                resp = urllib.request.urlopen(req, timeout=3)
-                resp.read()
+                with urllib.request.urlopen(req, timeout=3) as resp:
+                    resp.read()
                 status["lmstudio"] = True
             except Exception:
                 pass
@@ -1607,8 +1614,8 @@ class Handler(BaseHTTPRequestHandler):
         )
 
         try:
-            resp = urllib.request.urlopen(req, timeout=300)
-            result = resp.read()
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                result = resp.read()
             data = json.loads(result)
 
             chat_id = body.get("chat_id")
@@ -1812,6 +1819,8 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             # Client disconnected — don't persist partial responses
             log.debug("Stream aborted by client")
+        finally:
+            resp.close()
 
         # Only persist complete responses (skip if client disconnected mid-stream)
         chat_id = body.get("chat_id")
@@ -2078,8 +2087,8 @@ class Handler(BaseHTTPRequestHandler):
                 headers=headers_sum,
                 method="POST",
             )
-            sum_resp = urllib.request.urlopen(sum_req, timeout=60)
-            sum_data = json.loads(sum_resp.read())
+            with urllib.request.urlopen(sum_req, timeout=60) as sum_resp:
+                sum_data = json.loads(sum_resp.read())
             summary = self._extract_content(sum_data)
             if not summary:
                 self._error(500, "Failed to generate summary.")
@@ -2134,8 +2143,8 @@ class Handler(BaseHTTPRequestHandler):
                     headers=distill_headers,
                     method="POST",
                 )
-                distill_resp = urllib.request.urlopen(distill_req, timeout=30)
-                distill_data = json.loads(distill_resp.read())
+                with urllib.request.urlopen(distill_req, timeout=30) as distill_resp:
+                    distill_data = json.loads(distill_resp.read())
                 raw = self._extract_content(distill_data) or ""
                 new = self._parse_and_store_insights(db, user["id"], raw, chat_id)
                 if new:
@@ -2261,8 +2270,8 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_share_404(self):
         html = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Not Found — LM Chat</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,system-ui,sans-serif;background:#261545;color:#E8E0F0;display:flex;align-items:center;justify-content:center;min-height:100vh}
-.c{text-align:center}h1{font-size:48px;font-weight:700;color:#8070A0;margin-bottom:8px}p{color:#9B8AB8;font-size:15px}a{color:#D4944E;text-decoration:none}a:hover{text-decoration:underline}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,system-ui,sans-serif;background:#0B1117;color:#E2E8F0;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.c{text-align:center}h1{font-size:48px;font-weight:700;color:#4A5568;margin-bottom:8px}p{color:#8494A7;font-size:15px}a{color:#C084FC;text-decoration:none}a:hover{text-decoration:underline}</style>
 </head><body><div class="c"><h1>404</h1><p>This shared conversation doesn't exist or has been deleted.</p><p style="margin-top:12px"><a href="/">Go to LM Chat</a></p></div></body></html>"""
         data = html.encode("utf-8")
         self.send_response(404)
@@ -2315,22 +2324,22 @@ class Handler(BaseHTTPRequestHandler):
 <title>{safe_title} — LM Chat</title>
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:-apple-system,system-ui,'Segoe UI',sans-serif;background:#261545;color:#E8E0F0;line-height:1.65;padding:2rem 1rem}}
+body{{font-family:-apple-system,system-ui,'Segoe UI',sans-serif;background:#0B1117;color:#E2E8F0;line-height:1.65;padding:2rem 1rem}}
 .container{{max-width:720px;margin:0 auto}}
-h1{{font-size:1.5rem;font-weight:600;margin-bottom:4px;color:#F0EAF6}}
-.meta{{font-size:0.8rem;color:#9B8AB8;margin-bottom:1.75rem}}
-.msg{{margin-bottom:1rem;padding:0.875rem 1.125rem;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.18),0 0 0 1px rgba(255,255,255,.04)}}
-.msg.user{{background:#2E1B52}}
-.msg.asst{{background:#35205E}}
-.msg.tool{{background:#1E1038;font-size:0.75rem;color:#8070A0}}
-.role{{font-size:0.6875rem;text-transform:uppercase;letter-spacing:.6px;color:#9B8AB8;margin-bottom:5px;font-weight:600}}
+h1{{font-size:1.5rem;font-weight:600;margin-bottom:4px;color:#E2E8F0}}
+.meta{{font-size:0.8rem;color:#8494A7;margin-bottom:1.75rem}}
+.msg{{margin-bottom:1rem;padding:0.875rem 1.125rem;border-radius:10px;border:1px solid rgba(255,255,255,.06)}}
+.msg.user{{background:#131B24}}
+.msg.asst{{background:#1B2530}}
+.msg.tool{{background:#0D1319;font-size:0.75rem;color:#8494A7}}
+.role{{font-size:0.6875rem;text-transform:uppercase;letter-spacing:.6px;color:#8494A7;margin-bottom:5px;font-weight:600}}
 .content p{{margin-bottom:0.5rem}}
 .content p:last-child{{margin-bottom:0}}
-.tool-out{{font-size:0.75rem;color:#9B8AB8;margin-top:4px}}
-pre{{background:#1E1038;padding:0.75rem;border-radius:8px;overflow-x:auto;font-size:0.8rem;margin:0.5rem 0;border:1px solid rgba(255,255,255,.06)}}
+.tool-out{{font-size:0.75rem;color:#8494A7;margin-top:4px}}
+pre{{background:#0D1319;padding:0.75rem;border-radius:8px;overflow-x:auto;font-size:0.8rem;margin:0.5rem 0;border:1px solid rgba(255,255,255,.06)}}
 code{{font-family:'SF Mono',Menlo,Consolas,monospace}}
-.footer{{margin-top:2rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,.07);font-size:0.75rem;color:#8070A0;text-align:center}}
-a{{color:#D4944E;text-decoration:none}}a:hover{{text-decoration:underline}}
+.footer{{margin-top:2rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,.06);font-size:0.75rem;color:#4A5568;text-align:center}}
+a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
 </style>
 </head><body>
 <div class="container">
@@ -2672,8 +2681,8 @@ Distill insights (or respond "none" if nothing new):"""
                 headers=headers,
                 method="POST",
             )
-            resp = urllib.request.urlopen(req, timeout=60)
-            data = json.loads(resp.read())
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read())
             raw_text = self._extract_content(data) or ""
         except Exception as e:
             log.error(f"LLM distillation failed: {e}")
@@ -2886,8 +2895,8 @@ Curated list:"""
                 headers=headers,
                 method="POST",
             )
-            resp = urllib.request.urlopen(req, timeout=60)
-            data = json.loads(resp.read())
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read())
             raw_text = self._extract_content(data) or ""
         except Exception as e:
             return self._error(502, f"LLM refinement failed: {e}")
@@ -3039,8 +3048,8 @@ Curated list:"""
             headers["Authorization"] = f"Bearer {token}"
         req = urllib.request.Request(f"{LMSTUDIO}{path}", headers=headers)
         try:
-            resp = urllib.request.urlopen(req, timeout=10)
-            self._json_response(200, resp.read())
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                self._json_response(200, resp.read())
         except Exception as e:
             log.error(f"proxy GET: {e}")
             self._error(502, "upstream service unavailable")
