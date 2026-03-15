@@ -3023,12 +3023,18 @@ Curated list:"""
             return
         cached = self._file_cache.get(filename)
         if cached and cached[2] == st.st_mtime:
-            raw, gz = cached[0], cached[1]
+            raw, gz, etag = cached[0], cached[1], cached[3]
         else:
             with open(path, "rb") as f:
                 raw = f.read()
             gz = gzip.compress(raw, compresslevel=6)
-            self._file_cache[filename] = (raw, gz, st.st_mtime)
+            etag = hashlib.md5(raw).hexdigest()
+            self._file_cache[filename] = (raw, gz, st.st_mtime, etag)
+        # ETag: return 304 if client has current version
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.end_headers()
+            return
         accept_enc = self.headers.get("Accept-Encoding", "")
         use_gz = "gzip" in accept_enc and len(gz) < len(raw)
         data = gz if use_gz else raw
@@ -3036,6 +3042,7 @@ Curated list:"""
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache")
+        self.send_header("ETag", etag)
         if use_gz:
             self.send_header("Content-Encoding", "gzip")
         self._send_security_headers()
