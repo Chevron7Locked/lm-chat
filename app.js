@@ -2186,15 +2186,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                                         m.output
                                     :   "");
                                 if (text) {
-                                    const words = text.split(/\s+/).length;
-                                    const special = (
-                                        text.match(
-                                            /[{}\[\]()<>=/\\|@#$%^&*;:,.]/g,
-                                        ) || []
-                                    ).length;
-                                    totalTokens += Math.round(
-                                        words * 1.3 + special * 0.5,
-                                    );
+                                    totalTokens += estimateTokens(text);
                                 }
                             }
                         }
@@ -2373,7 +2365,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                                 "th" + Math.random().toString(36).slice(2, 8);
                             const td = document.createElement("div");
                             td.className = "m-think";
-                            td.innerHTML = `<div class="think-toggle" role="button" tabindex="0" onclick="const b=document.getElementById('${uid}');b.classList.toggle('open');this.textContent=b.classList.contains('open')?'Hide thinking':'Show thinking'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">Show thinking</div><div class="bub"><div id="${uid}" class="think-body">${esc(tm[1].trim())}</div></div>`;
+                            td.innerHTML = thinkHtml(uid, "Show thinking", esc(tm[1].trim()), false);
                             grp.appendChild(td);
                             // Add response inside group
                             if (c) {
@@ -2516,7 +2508,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const uid = "th" + Math.random().toString(36).slice(2, 8);
                 const d = document.createElement("div");
                 d.className = "m-think";
-                d.innerHTML = `<div class="think-toggle" role="button" tabindex="0" onclick="const b=document.getElementById('${uid}');b.classList.toggle('open');this.textContent=b.classList.contains('open')?'Hide thinking':'Show thinking'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">Show thinking</div><div class="bub"><div id="${uid}" class="think-body">${esc(t)}</div></div>`;
+                d.innerHTML = thinkHtml(uid, "Show thinking", esc(t), false);
                 getMsgTarget().appendChild(d);
             }
             function addErr(t) {
@@ -2914,43 +2906,25 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 // Handle slash commands
                 const slashCmd = parseSlashCmd(text);
                 if (slashCmd && slashCmd.type === "help") {
-                    sending = false;
-                    setSendMode(false);
-                    if (sentAttachments) {
-                        pendingAttachments = sentAttachments;
-                        renderAttachments();
-                    }
-                    input.value = "";
-                    input.style.height = "auto";
+                    cancelSend(sentAttachments);
                     if (!activeId) await newChat();
                     showSlashHelp();
                     return;
                 }
                 if (slashCmd && slashCmd.type === "compact") {
-                    sending = false;
-                    setSendMode(false);
-                    if (sentAttachments) {
-                        pendingAttachments = sentAttachments;
-                        renderAttachments();
-                    }
-                    input.value = "";
-                    input.style.height = "auto";
+                    cancelSend(sentAttachments);
                     triggerCompact();
                     return;
                 }
 
                 const actualText = slashCmd ? slashCmd.rest : text;
                 if (slashCmd && !actualText) {
-                    sending = false;
-                    setSendMode(false);
-                    input.value = "";
-                    input.style.height = "auto";
+                    cancelSend();
                     addErr("Please provide a query after the command.");
                     return;
                 }
                 if (!actualText && !sentAttachments) {
-                    sending = false;
-                    setSendMode(false);
+                    cancelSend();
                     return;
                 }
 
@@ -2971,8 +2945,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         try {
                             await newChat();
                         } catch (e) {
-                            sending = false;
-                            setSendMode(false);
+                            cancelSend();
                             addErr("Failed to create chat: " + e.message);
                             return;
                         }
@@ -3263,7 +3236,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                                 "th" + Math.random().toString(36).slice(2, 8);
                             const d = document.createElement("div");
                             d.className = "m-think";
-                            d.innerHTML = `<div class="think-toggle" role="button" tabindex="0" onclick="const b=document.getElementById('${uid}');b.classList.toggle('open');this.textContent=b.classList.contains('open')?'Hide thinking':'Show thinking'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">Thinking...</div><div class="bub"><div id="${uid}" class="think-body open" style="display:block"></div></div>`;
+                            d.innerHTML = thinkHtml(uid, "Thinking...", "", true);
                             streamGroup.appendChild(d);
                             thinkBody = d.querySelector(".think-body");
                             thinkBuf = "";
@@ -3345,7 +3318,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                                     Math.random().toString(36).slice(2, 8);
                                 const d = document.createElement("div");
                                 d.className = "m-think";
-                                d.innerHTML = `<div class="think-toggle" role="button" tabindex="0" onclick="const b=document.getElementById('${uid}');b.classList.toggle('open');this.textContent=b.classList.contains('open')?'Hide thinking':'Show thinking'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">Thinking...</div><div class="bub"><div id="${uid}" class="think-body open" style="display:block"></div></div>`;
+                                d.innerHTML = thinkHtml(uid, "Thinking...", "", true);
                                 getMsgTarget().appendChild(d);
                                 thinkBody = d.querySelector(".think-body");
                                 thinkBody.textContent = thinkBuf;
@@ -3713,6 +3686,28 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
 
             // --- Utils ---
+            function thinkHtml(uid, label, content, startOpen) {
+                const openClass = startOpen ? " open" : "";
+                const style = startOpen ? ' style="display:block"' : "";
+                return `<div class="think-toggle" role="button" tabindex="0" onclick="const b=document.getElementById('${uid}');b.classList.toggle('open');this.textContent=b.classList.contains('open')?'Hide thinking':'Show thinking'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">${label}</div><div class="bub"><div id="${uid}" class="think-body${openClass}"${style}>${content}</div></div>`;
+            }
+            function cancelSend(restoreAttachments) {
+                sending = false;
+                setSendMode(false);
+                if (restoreAttachments) {
+                    pendingAttachments = restoreAttachments;
+                    renderAttachments();
+                }
+                input.value = "";
+                input.style.height = "auto";
+            }
+            function estimateTokens(text) {
+                const words = text.split(/\s+/).length;
+                const special = (
+                    text.match(/[{}\[\]()<>=/\\|@#$%^&*;:,.]/g) || []
+                ).length;
+                return Math.round(words * 1.3 + special * 0.5);
+            }
             function esc(s) {
                 return String(s)
                     .replace(/&/g, "&amp;")
