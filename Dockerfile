@@ -11,7 +11,7 @@ RUN groupadd -r lmchat && useradd -r -g lmchat -d /app -s /sbin/nologin lmchat
 WORKDIR /app
 
 # Copy only what's needed — no build step, no pip install
-COPY server.py index.html manifest.json sw.js lm-chat-logo.svg ./
+COPY server.py index.html style.css app.js manifest.json sw.js lm-chat-logo.svg ./
 
 # Persistent data: DB, logs, signing key (mount a volume at /app/data)
 RUN mkdir -p /app/data /app/data/logs && chown -R lmchat:lmchat /app
