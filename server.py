@@ -135,45 +135,23 @@ def init_db():
         created_at REAL NOT NULL,
         expires_at REAL NOT NULL
     )""")
-    # Add user_id column to chats if missing
-    try:
-        db.execute("ALTER TABLE chats ADD COLUMN user_id TEXT")
-    except sqlite3.OperationalError:
-        pass  # column already exists
-    # Add summary columns to chats for context management
-    try:
-        db.execute("ALTER TABLE chats ADD COLUMN summary TEXT")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        db.execute("ALTER TABLE chats ADD COLUMN summary_up_to INTEGER")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        db.execute("ALTER TABLE users ADD COLUMN totp_secret TEXT")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        db.execute("ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        db.execute("ALTER TABLE users ADD COLUMN last_totp_counter INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-    # Add token_count column to messages for real token counts from LM Studio
-    try:
-        db.execute("ALTER TABLE messages ADD COLUMN token_count INTEGER")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        db.execute("ALTER TABLE chats ADD COLUMN pinned INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        db.execute("ALTER TABLE chats ADD COLUMN folder TEXT DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass
+    # Schema migrations — add columns that may not exist yet
+    _MIGRATIONS = [
+        ("chats", "user_id", "TEXT"),
+        ("chats", "summary", "TEXT"),
+        ("chats", "summary_up_to", "INTEGER"),
+        ("users", "totp_secret", "TEXT"),
+        ("users", "totp_enabled", "INTEGER DEFAULT 0"),
+        ("users", "last_totp_counter", "INTEGER DEFAULT 0"),
+        ("messages", "token_count", "INTEGER"),
+        ("chats", "pinned", "INTEGER DEFAULT 0"),
+        ("chats", "folder", "TEXT DEFAULT ''"),
+    ]
+    for table, col, typedef in _MIGRATIONS:
+        try:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typedef}")
+        except sqlite3.OperationalError:
+            pass
     db.execute("""CREATE TABLE IF NOT EXISTS embeddings (
         message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
         vector BLOB NOT NULL
