@@ -3095,7 +3095,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 sending = false;
                 abortCtrl = null;
                 if (streamMdTimer) {
-                    clearInterval(streamMdTimer);
+                    cancelAnimationFrame(streamMdTimer);
                     streamMdTimer = null;
                 }
                 setSendMode(false);
@@ -3485,14 +3485,20 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 (streamGroup || getMsgTarget()).appendChild(d);
                 streamBub = d.querySelector(".bub");
                 // Clear any orphaned timer before creating a new one
-                if (streamMdTimer) clearInterval(streamMdTimer);
-                // Throttled markdown rendering during stream
-                streamMdTimer = setInterval(() => {
-                    if (streamBub && streamContent) {
+                if (streamMdTimer) cancelAnimationFrame(streamMdTimer);
+                // Throttled markdown rendering during stream (~10fps)
+                let lastRenderTime = 0;
+                function streamRender() {
+                    if (!streamBub || !streamContent) return;
+                    const now = performance.now();
+                    if (now - lastRenderTime > 100) {
                         streamBub.innerHTML = md(streamContent);
                         autoScroll();
+                        lastRenderTime = now;
                     }
-                }, 150);
+                    if (sending) streamMdTimer = requestAnimationFrame(streamRender);
+                }
+                streamMdTimer = requestAnimationFrame(streamRender);
             }
 
             let userScrolledUp = false,
