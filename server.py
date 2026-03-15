@@ -940,17 +940,17 @@ class Handler(BaseHTTPRequestHandler):
     def _set_session_cookie(self, token):
         secure = self._secure_flag()
         if secure:
-            cookie = f"__Host-lm_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_EXPIRY}; Secure"
+            cookie = f"__Host-lm_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_EXPIRY}; Secure"
         else:
-            cookie = f"lm_session={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_EXPIRY}"
+            cookie = f"lm_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_EXPIRY}"
         self.send_header("Set-Cookie", cookie)
 
     def _clear_session_cookie(self):
         secure = self._secure_flag()
         if secure:
-            self.send_header("Set-Cookie", "__Host-lm_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0; Secure")
+            self.send_header("Set-Cookie", "__Host-lm_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0; Secure")
         else:
-            self.send_header("Set-Cookie", "lm_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0")
+            self.send_header("Set-Cookie", "lm_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
 
     def _send_security_headers(self, csp=None, referrer="strict-origin-when-cross-origin"):
         self.send_header("X-Frame-Options", "DENY")
