@@ -1600,22 +1600,9 @@ class Handler(BaseHTTPRequestHandler):
 
         payload = self._build_lmstudio_payload(body)
 
-        headers = {"Content-Type": "application/json"}
-        token = self._get_lmstudio_token(user["id"])
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-
-        req = urllib.request.Request(
-            f"{LMSTUDIO}/api/v1/chat",
-            data=json.dumps(payload).encode(),
-            headers=headers,
-            method="POST",
-        )
-
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
-                result = resp.read()
-            data = json.loads(result)
+            data = self._lmstudio_chat(payload, user["id"], timeout=300)
+            result = json.dumps(data).encode()
 
             chat_id = body.get("chat_id")
             is_incognito = body.get("incognito", False)
@@ -2075,19 +2062,8 @@ class Handler(BaseHTTPRequestHandler):
             "stream": False,
             "store": False,
         }
-        headers_sum = {"Content-Type": "application/json"}
-        lms_token = self._get_lmstudio_token(user["id"])
-        if lms_token:
-            headers_sum["Authorization"] = f"Bearer {lms_token}"
         try:
-            sum_req = urllib.request.Request(
-                f"{LMSTUDIO}/api/v1/chat",
-                data=json.dumps(summary_payload).encode(),
-                headers=headers_sum,
-                method="POST",
-            )
-            with urllib.request.urlopen(sum_req, timeout=60) as sum_resp:
-                sum_data = json.loads(sum_resp.read())
+            sum_data = self._lmstudio_chat(summary_payload, user["id"], timeout=60)
             summary = self._extract_content(sum_data)
             if not summary:
                 self._error(500, "Failed to generate summary.")
@@ -2133,17 +2109,7 @@ class Handler(BaseHTTPRequestHandler):
                     "stream": False, "store": False,
                     "temperature": 0.3,
                 }
-                distill_headers = {"Content-Type": "application/json"}
-                if lms_token:
-                    distill_headers["Authorization"] = f"Bearer {lms_token}"
-                distill_req = urllib.request.Request(
-                    f"{LMSTUDIO}/api/v1/chat",
-                    data=json.dumps(distill_payload).encode(),
-                    headers=distill_headers,
-                    method="POST",
-                )
-                with urllib.request.urlopen(distill_req, timeout=30) as distill_resp:
-                    distill_data = json.loads(distill_resp.read())
+                distill_data = self._lmstudio_chat(distill_payload, user["id"], timeout=30)
                 raw = self._extract_content(distill_data) or ""
                 new = self._parse_and_store_insights(db, user["id"], raw, chat_id)
                 if new:
@@ -2426,6 +2392,21 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
 
     # --- Helpers ---
 
+    def _lmstudio_chat(self, payload, user_id, timeout=60):
+        """Send a chat completion request to LM Studio. Returns parsed JSON."""
+        headers = {"Content-Type": "application/json"}
+        token = self._get_lmstudio_token(user_id)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(
+            f"{LMSTUDIO}/api/v1/chat",
+            data=json.dumps(payload).encode(),
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+
     def _get_lmstudio_token(self, user_id=None):
         """Get LM Studio auth token from server-side user settings, fall back to env var.
         No longer reads from client Authorization header (H4 security fix)."""
@@ -2668,20 +2649,8 @@ Distill insights (or respond "none" if nothing new):"""
             "store": False,
             "temperature": 0.3,
         }
-        headers = {"Content-Type": "application/json"}
-        token = self._get_lmstudio_token(user["id"])
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-
         try:
-            req = urllib.request.Request(
-                f"{LMSTUDIO}/api/v1/chat",
-                data=json.dumps(payload).encode(),
-                headers=headers,
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read())
+            data = self._lmstudio_chat(payload, user["id"], timeout=60)
             raw_text = self._extract_content(data) or ""
         except Exception as e:
             log.error(f"LLM distillation failed: {e}")
@@ -2882,20 +2851,8 @@ Curated list:"""
             "store": False,
             "temperature": 0.2,
         }
-        headers = {"Content-Type": "application/json"}
-        token = self._get_lmstudio_token(user["id"])
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-
         try:
-            req = urllib.request.Request(
-                f"{LMSTUDIO}/api/v1/chat",
-                data=json.dumps(payload).encode(),
-                headers=headers,
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read())
+            data = self._lmstudio_chat(payload, user["id"], timeout=60)
             raw_text = self._extract_content(data) or ""
         except Exception as e:
             return self._error(502, f"LLM refinement failed: {e}")
