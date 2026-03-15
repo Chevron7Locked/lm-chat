@@ -964,7 +964,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _json_response_with_cookie(self, code, data, cookie_token=None, clear_cookie=False):
         """Like _json_response but can set/clear cookie before end_headers."""
-        if isinstance(data, str):
+        if isinstance(data, (dict, list)):
+            data = json.dumps(data).encode()
+        elif isinstance(data, str):
             data = data.encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
@@ -1021,7 +1023,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             status["ok"] = status["db"] and status["lmstudio"]
             code = 200 if status["ok"] else 503
-            self._json_response(code, json.dumps(status).encode())
+            self._json_response(code, status)
         elif self.path.startswith("/share/"):
             share_id = self.path.split("/")[2] if len(self.path.split("/")) > 2 else ""
             self._serve_shared(share_id)
@@ -1042,13 +1044,13 @@ class Handler(BaseHTTPRequestHandler):
                     fp = os.path.join(LOG_DIR, f)
                     if os.path.isfile(fp):
                         log_files.append({"name": f, "size": os.path.getsize(fp)})
-            self._json_response(200, json.dumps({
+            self._json_response(200, {
                 "enabled": console_level == "DEBUG",
                 "log_dir": LOG_DIR,
                 "log_files": log_files,
                 "max_bytes": LOG_MAX_BYTES,
                 "backup_count": LOG_BACKUP_COUNT,
-            }).encode())
+            })
         elif self.path == "/api/auth/me":
             self._auth_me()
         elif self.path == "/api/auth/users":
@@ -1117,7 +1119,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(403, "admin only")
             enabled = body.get("enabled", True)
             set_debug_mode(enabled)
-            self._json_response(200, json.dumps({"enabled": enabled}).encode())
+            self._json_response(200, {"enabled": enabled})
         elif self.path == "/api/chat":
             self._handle_chat(body)
         elif self.path == "/api/chat/stream":
@@ -1188,17 +1190,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _auth_me(self):
         if not AUTH_ENABLED:
-            return self._json_response(200, json.dumps({"auth_enabled": False}).encode())
+            return self._json_response(200, {"auth_enabled": False})
         db = get_db()
         user_count = db.execute("SELECT COUNT(*) FROM users WHERE username != 'default'").fetchone()[0]
         user = self._get_user()
         if not user:
-            return self._json_response(200, json.dumps({
+            return self._json_response(200, {
                 "auth_enabled": True, "user": None, "needs_setup": user_count == 0
-            }).encode())
-        return self._json_response(200, json.dumps({
+            })
+        return self._json_response(200, {
             "auth_enabled": True, "user": user, "needs_setup": False
-        }).encode())
+        })
 
     def _auth_setup(self, body):
         if not self._check_csrf():
@@ -1232,7 +1234,7 @@ class Handler(BaseHTTPRequestHandler):
             db.rollback()
             return self._error(500, "setup failed")
         user = {"id": user_id, "username": username, "display_name": display_name, "is_admin": 1}
-        self._json_response_with_cookie(200, json.dumps({"user": user}).encode(), cookie_token=token)
+        self._json_response_with_cookie(200, {"user": user}, cookie_token=token)
 
     def _auth_login(self, body):
         if not self._check_csrf():
@@ -1257,12 +1259,12 @@ class Handler(BaseHTTPRequestHandler):
         totp_row = db.execute("SELECT totp_enabled FROM users WHERE id=?", (row[0],)).fetchone()
         if totp_row and totp_row[0]:
             partial = sign_partial_token(row[0])
-            return self._json_response(200, json.dumps({"needs_totp": True, "partial_token": partial}).encode())
+            return self._json_response(200, {"needs_totp": True, "partial_token": partial})
         # Only clear rate limit after FULL authentication (no 2FA pending)
         clear_rate_limit(ip)
         token = create_session(db, row[0])
         user = {"id": row[0], "username": row[1], "display_name": row[4], "is_admin": row[5]}
-        self._json_response_with_cookie(200, json.dumps({"user": user}).encode(), cookie_token=token)
+        self._json_response_with_cookie(200, {"user": user}, cookie_token=token)
 
     def _auth_logout(self):
         if not self._check_csrf():
@@ -1272,7 +1274,7 @@ class Handler(BaseHTTPRequestHandler):
             db = get_db()
             db.execute("DELETE FROM sessions WHERE token=?", (_hash_token(token),))
             db.commit()
-        self._json_response_with_cookie(200, json.dumps({"ok": True}).encode(), clear_cookie=True)
+        self._json_response_with_cookie(200, {"ok": True}, clear_cookie=True)
 
     def _auth_invite(self, body):
         user = self._require_auth()
@@ -1299,7 +1301,7 @@ class Handler(BaseHTTPRequestHandler):
         except sqlite3.IntegrityError:
             return self._error(409, "username already taken")
         new_user = {"id": user_id, "username": username, "display_name": display_name, "is_admin": 0}
-        self._json_response(200, json.dumps({"user": new_user}).encode())
+        self._json_response(200, {"user": new_user})
 
     def _auth_delete_user(self, target_id):
         user = self._require_auth()
@@ -1331,7 +1333,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             return self._error(500, "failed to delete user")
-        self._json_response(200, json.dumps({"ok": True}).encode())
+        self._json_response(200, {"ok": True})
     def _auth_change_password(self, body):
         user = self._require_auth()
         if not user:
@@ -1350,7 +1352,7 @@ class Handler(BaseHTTPRequestHandler):
         db.execute("DELETE FROM sessions WHERE user_id=?", (user["id"],))
         # Create fresh session
         token = create_session(db, user["id"])
-        self._json_response_with_cookie(200, json.dumps({"ok": True}).encode(), cookie_token=token)
+        self._json_response_with_cookie(200, {"ok": True}, cookie_token=token)
 
     def _auth_update_profile(self, body):
         user = self._require_auth()
@@ -1364,7 +1366,7 @@ class Handler(BaseHTTPRequestHandler):
         db = get_db()
         db.execute("UPDATE users SET display_name=? WHERE id=?", (display_name, user["id"]))
         db.commit()
-        self._json_response(200, json.dumps({"ok": True}).encode())
+        self._json_response(200, {"ok": True})
 
     def _auth_list_users(self):
         user = self._require_auth()
@@ -1375,7 +1377,7 @@ class Handler(BaseHTTPRequestHandler):
         db = get_db()
         rows = db.execute("SELECT id,username,display_name,is_admin,created_at FROM users ORDER BY created_at").fetchall()
         users = [{"id": r[0], "username": r[1], "display_name": r[2], "is_admin": r[3], "created_at": r[4]} for r in rows]
-        self._json_response(200, json.dumps(users).encode())
+        self._json_response(200, users)
 
     # --- TOTP 2FA ---
 
@@ -1393,7 +1395,7 @@ class Handler(BaseHTTPRequestHandler):
         qr_svg = generate_qr_svg(uri) or ""
         # Store secret server-side; client gets opaque token (secret never in transport token)
         setup_token = store_totp_setup(user["id"], secret)
-        self._json_response(200, json.dumps({"secret": secret, "qr_svg": qr_svg, "setup_token": setup_token}).encode())
+        self._json_response(200, {"secret": secret, "qr_svg": qr_svg, "setup_token": setup_token})
 
     def _totp_verify(self, body):
         """Verify TOTP code and enable 2FA."""
@@ -1417,7 +1419,7 @@ class Handler(BaseHTTPRequestHandler):
         db = get_db()
         db.execute("UPDATE users SET totp_secret=?, totp_enabled=1, last_totp_counter=? WHERE id=?", (tok_secret, counter, user["id"]))
         db.commit()
-        self._json_response(200, json.dumps({"ok": True}).encode())
+        self._json_response(200, {"ok": True})
 
     def _totp_disable(self, body):
         """Disable 2FA after verifying current TOTP code."""
@@ -1434,7 +1436,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "invalid code")
         db.execute("UPDATE users SET totp_enabled=0, totp_secret=NULL WHERE id=?", (user["id"],))
         db.commit()
-        self._json_response(200, json.dumps({"ok": True}).encode())
+        self._json_response(200, {"ok": True})
 
     def _totp_login(self, body):
         """Complete 2FA login with partial token + TOTP code."""
@@ -1464,7 +1466,7 @@ class Handler(BaseHTTPRequestHandler):
         token = create_session(db, user_id)
         clear_rate_limit(ip)  # Clear rate limit after full 2FA success
         user = {"id": user_id, "username": row[1], "display_name": row[2], "is_admin": row[3]}
-        self._json_response_with_cookie(200, json.dumps({"user": user}).encode(), cookie_token=token)
+        self._json_response_with_cookie(200, {"user": user}, cookie_token=token)
 
     # --- User Settings API (H4: server-side secrets) ---
 
@@ -1490,7 +1492,7 @@ class Handler(BaseHTTPRequestHandler):
                     result[key] = []
             else:
                 result[key] = value
-        self._json_response(200, json.dumps(result).encode())
+        self._json_response(200, result)
 
     def _save_settings(self, body):
         user = self._require_auth()
@@ -1546,7 +1548,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 saved[key] = str_val
         db.commit()
-        self._json_response(200, json.dumps(saved).encode())
+        self._json_response(200, saved)
     def _get_user_lm_apikey(self, user_id):
         """Get stored LM Studio API key for a user."""
         db = get_db()
@@ -1877,7 +1879,7 @@ class Handler(BaseHTTPRequestHandler):
             (chat_id, title, model, now, user["id"]),
         )
         db.commit()
-        self._json_response(200, json.dumps({"id": chat_id, "title": title}).encode())
+        self._json_response(200, {"id": chat_id, "title": title})
 
     def _list_chats(self):
         user = self._require_auth()
@@ -1894,7 +1896,7 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT id,title,model,response_id,updated_at,pinned,folder FROM chats ORDER BY pinned DESC, updated_at DESC"
             ).fetchall()
         chats = [{"id": r[0], "title": r[1], "model": r[2], "response_id": r[3], "updated_at": r[4], "pinned": r[5] or 0, "folder": r[6] or ""} for r in rows]
-        self._json_response(200, json.dumps(chats).encode())
+        self._json_response(200, chats)
 
     def _toggle_pin(self, chat_id):
         user = self._require_auth()
@@ -1909,7 +1911,7 @@ class Handler(BaseHTTPRequestHandler):
         new_val = 0 if row[0] else 1
         db.execute("UPDATE chats SET pinned=? WHERE id=?", (new_val, chat_id))
         db.commit()
-        self._json_response(200, json.dumps({"pinned": new_val}).encode())
+        self._json_response(200, {"pinned": new_val})
 
     def _set_folder(self, chat_id, body):
         user = self._require_auth()
@@ -1921,7 +1923,7 @@ class Handler(BaseHTTPRequestHandler):
         folder = str(body.get("folder", "")).strip()[:50]
         db.execute("UPDATE chats SET folder=? WHERE id=?", (folder, chat_id))
         db.commit()
-        self._json_response(200, json.dumps({"folder": folder}).encode())
+        self._json_response(200, {"folder": folder})
 
     def _get_messages(self, chat_id):
         user = self._require_auth()
@@ -1947,7 +1949,7 @@ class Handler(BaseHTTPRequestHandler):
                 except (json.JSONDecodeError, ValueError, TypeError): m["output"] = r[5]
             if r[6]: m["token_count"] = r[6]
             msgs.append(m)
-        self._json_response(200, json.dumps(msgs).encode())
+        self._json_response(200, msgs)
 
     def _delete_last_response(self, chat_id):
         """Delete last assistant message + preceding tool calls, return last user content + previous response_id."""
@@ -1986,7 +1988,7 @@ class Handler(BaseHTTPRequestHandler):
         if to_delete:
             db.execute("UPDATE chats SET response_id=NULL, updated_at=? WHERE id=?", (time.time(), chat_id))
         db.commit()
-        self._json_response(200, json.dumps({"user_content": user_content}).encode())
+        self._json_response(200, {"user_content": user_content})
 
     def _truncate_messages(self, chat_id, body):
         """Delete all messages with id >= from_message_id."""
@@ -2003,7 +2005,7 @@ class Handler(BaseHTTPRequestHandler):
         db.execute("DELETE FROM messages WHERE chat_id=? AND id>=?", (chat_id, from_id))
         db.execute("UPDATE chats SET response_id=NULL, updated_at=? WHERE id=?", (time.time(), chat_id))
         db.commit()
-        self._json_response(200, json.dumps({"ok": True}).encode())
+        self._json_response(200, {"ok": True})
 
     def _fork_chat(self, source_id, body):
         user = self._require_auth()
@@ -2040,7 +2042,7 @@ class Handler(BaseHTTPRequestHandler):
                 (new_id, r[0], r[1], r[2], r[3], r[4], r[5]),
             )
         db.commit()
-        self._json_response(200, json.dumps({"id": new_id, "title": new_title}).encode())
+        self._json_response(200, {"id": new_id, "title": new_title})
     def _compact_chat(self, chat_id, body):
         user = self._require_auth()
         if not user:
@@ -2156,11 +2158,11 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 log.warning(f"memory: compaction distillation failed (non-fatal): {e}")
 
-            self._json_response(200, json.dumps({
+            self._json_response(200, {
                 "summary": summary,
                 "messages_summarized": len(db_messages),
                 "messages_deleted": half,
-            }).encode())
+            })
         except Exception as e:
             log.error(f"Compact failed: {e}")
             self._error(500, "compact failed")
@@ -2176,7 +2178,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         db.execute("UPDATE chats SET title=? WHERE id=?", (title, chat_id))
         db.commit()
-        self._json_response(200, json.dumps({"ok": True}).encode())
+        self._json_response(200, {"ok": True})
 
     def _delete_chat(self, chat_id):
         user = self._require_auth()
@@ -2189,7 +2191,7 @@ class Handler(BaseHTTPRequestHandler):
         db.execute("DELETE FROM messages WHERE chat_id=?", (chat_id,))
         db.execute("DELETE FROM chats WHERE id=?", (chat_id,))
         db.commit()
-        self._json_response(200, json.dumps({"ok": True}).encode())
+        self._json_response(200, {"ok": True})
 
     # --- Share endpoints ---
 
@@ -2204,7 +2206,7 @@ class Handler(BaseHTTPRequestHandler):
         existing = db.execute("SELECT share_id FROM shared_chats WHERE chat_id=? AND user_id=?",
                               (chat_id, user["id"])).fetchone()
         if existing:
-            return self._json_response(200, json.dumps({"share_id": existing[0], "url": f"/share/{existing[0]}"}).encode())
+            return self._json_response(200, {"share_id": existing[0], "url": f"/share/{existing[0]}"})
         # Build message snapshot (text only — no system prompts, no base64 images, max 500 messages)
         rows = db.execute(
             "SELECT role, content, name, args, output FROM messages WHERE chat_id=? ORDER BY id LIMIT 500",
@@ -2238,7 +2240,7 @@ class Handler(BaseHTTPRequestHandler):
             (share_id, chat_id, user["id"], title, json.dumps(snapshot), now)
         )
         db.commit()
-        self._json_response(200, json.dumps({"share_id": share_id, "url": f"/share/{share_id}"}).encode())
+        self._json_response(200, {"share_id": share_id, "url": f"/share/{share_id}"})
 
     def _unshare_chat(self, chat_id):
         user = self._require_auth()
@@ -2249,7 +2251,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         db.execute("DELETE FROM shared_chats WHERE chat_id=? AND user_id=?", (chat_id, user["id"]))
         db.commit()
-        self._json_response(200, json.dumps({"ok": True}).encode())
+        self._json_response(200, {"ok": True})
 
     def _serve_shared(self, share_id):
         """Serve a read-only shared conversation page. NO auth required."""
@@ -2398,7 +2400,7 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             results.append({"message_id": mid, "score": round(sim, 4), "content": (content or "")[:200], "role": role, "chat_id": chat_id, "chat_title": title})
 
         results.sort(key=lambda x: x["score"], reverse=True)
-        self._json_response(200, json.dumps({"results": results[:20], "mode": "semantic"}).encode())
+        self._json_response(200, {"results": results[:20], "mode": "semantic"})
 
     def _search_messages_like(self, user, query):
         """Fallback text search using SQL LIKE when embedding model is unavailable."""
@@ -2427,7 +2429,7 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         results = []
         for mid, content, role, chat_id, title in rows:
             results.append({"message_id": mid, "score": 1.0, "content": (content or "")[:200], "role": role, "chat_id": chat_id, "chat_title": title})
-        self._json_response(200, json.dumps({"results": results, "mode": "text"}).encode())
+        self._json_response(200, {"results": results, "mode": "text"})
 
     # --- Helpers ---
 
@@ -2453,7 +2455,7 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
 
     def _error(self, code, msg):
         """Send a JSON error response."""
-        self._json_response(code, json.dumps({"error": msg}).encode())
+        self._json_response(code, {"error": msg})
 
     def _build_lmstudio_payload(self, body, system_prompt=None, stream=False):
         """Build the common LM Studio API payload."""
@@ -2642,7 +2644,7 @@ Distill insights (or respond "none" if nothing new):"""
             (chat_id,),
         ).fetchall()
         if not msg_rows:
-            return self._json_response(200, json.dumps({"insights": [], "message": "empty chat"}).encode())
+            return self._json_response(200, {"insights": [], "message": "empty chat"})
 
         convo_lines = []
         for r in msg_rows:
@@ -2698,7 +2700,7 @@ Distill insights (or respond "none" if nothing new):"""
             log.error(f"Failed to store insights: {e}")
             return self._error(500, "failed to store insights")
         log.debug(f"memory: distilled {len(new_insights)} insights from chat {chat_id}")
-        self._json_response(200, json.dumps({"insights": new_insights}).encode())
+        self._json_response(200, {"insights": new_insights})
 
     # --- Memory: CRUD endpoints ---
 
@@ -2721,7 +2723,7 @@ Distill insights (or respond "none" if nothing new):"""
              "use_count": r[7], "state": r[8]}
             for r in rows
         ]
-        self._json_response(200, json.dumps(insights).encode())
+        self._json_response(200, insights)
 
     def _add_insight(self, body):
         """POST /api/insights — manually add an insight."""
@@ -2743,7 +2745,7 @@ Distill insights (or respond "none" if nothing new):"""
             (insight_id, user["id"], content, category, now, now),
         )
         db.commit()
-        self._json_response(201, json.dumps({"id": insight_id, "content": content, "category": category}).encode())
+        self._json_response(201, {"id": insight_id, "content": content, "category": category})
 
     def _edit_insight(self, insight_id, body):
         """POST /api/insights/:id/edit — edit an insight."""
@@ -2770,7 +2772,7 @@ Distill insights (or respond "none" if nothing new):"""
         params.append(insight_id)
         db.execute(f"UPDATE user_insights SET {','.join(updates)} WHERE id=?", params)
         db.commit()
-        self._json_response(200, json.dumps({"ok": True}).encode())
+        self._json_response(200, {"ok": True})
 
     def _delete_insight(self, insight_id):
         """DELETE /api/insights/:id — hard delete an insight."""
@@ -2785,7 +2787,7 @@ Distill insights (or respond "none" if nothing new):"""
             return self._error(404, "insight not found")
         db.execute("DELETE FROM user_insights WHERE id=?", (insight_id,))
         db.commit()
-        self._json_response(200, json.dumps({"ok": True}).encode())
+        self._json_response(200, {"ok": True})
 
     def _clear_insights(self):
         """DELETE /api/insights — clear all insights for current user."""
@@ -2795,7 +2797,7 @@ Distill insights (or respond "none" if nothing new):"""
         db = get_db()
         db.execute("DELETE FROM user_insights WHERE user_id=?", (user["id"],))
         db.commit()
-        self._json_response(200, json.dumps({"ok": True}).encode())
+        self._json_response(200, {"ok": True})
 
     def _get_insight_settings(self):
         """GET /api/insights/settings — get memory preferences."""
@@ -2810,7 +2812,7 @@ Distill insights (or respond "none" if nothing new):"""
         settings = {r[0]: r[1] for r in rows}
         settings.setdefault("memory_enabled", "true")
         settings.setdefault("memory_max_inject", "30")
-        self._json_response(200, json.dumps(settings).encode())
+        self._json_response(200, settings)
 
     def _save_insight_settings(self, body):
         """POST /api/insights/settings — update memory preferences."""
@@ -2838,7 +2840,7 @@ Distill insights (or respond "none" if nothing new):"""
                 (user["id"], key, val),
             )
         db.commit()
-        self._json_response(200, json.dumps({"ok": True}).encode())
+        self._json_response(200, {"ok": True})
 
     REFINE_PROMPT = """You are a personal context curator. Review these user insights and:
 
@@ -2871,7 +2873,7 @@ Curated list:"""
         ).fetchall()
 
         if len(rows) < 3:
-            return self._json_response(200, json.dumps({"message": "too few insights to refine", "count": len(rows)}).encode())
+            return self._json_response(200, {"message": "too few insights to refine", "count": len(rows)})
 
         insight_lines = []
         for r in rows:
@@ -2965,7 +2967,7 @@ Curated list:"""
             return self._error(500, "refinement failed")
         result = {"dropped": dropped, "merged": merged, "kept": kept, "total": len(new_insights)}
         log.debug(f"memory: refined: {result}")
-        self._json_response(200, json.dumps(result).encode())
+        self._json_response(200, result)
 
     def _persist_chat_messages(self, db, chat_id, user_input, content, tool_calls, response_id, usage, now=None):
         """Persist user message, tool calls, and assistant response."""
@@ -3007,7 +3009,9 @@ Curated list:"""
         db.commit()
 
     def _json_response(self, code, data):
-        if isinstance(data, str): data = data.encode()
+        if isinstance(data, (dict, list)):
+            data = json.dumps(data).encode()
+        elif isinstance(data, str): data = data.encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
