@@ -5,6 +5,7 @@ Serves a PWA-ready single-page app, proxies to LM Studio, persists chats in SQLi
 
 import base64, gzip, hashlib, hmac, html as html_mod, json, logging, math, os, re, secrets, signal, sqlite3, struct, sys, threading, time, uuid, urllib.request, urllib.error
 import http.cookies
+from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 
@@ -860,7 +861,15 @@ def get_embedding(text, token=None):
         return None
 
 
+class PooledHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer with a bounded thread pool instead of unbounded threads."""
+    _pool = ThreadPoolExecutor(max_workers=64)
+    daemon_threads = True
+    def process_request(self, request, client_address):
+        self._pool.submit(self.process_request_thread, request, client_address)
+
 class Handler(BaseHTTPRequestHandler):
+    timeout = 30  # seconds — prevents slow-loris and thread leaks
 
     # --- Auth middleware ---
 
@@ -3117,7 +3126,7 @@ def _remove_pid():
 if __name__ == "__main__":
     init_db()
     _kill_stale_server()
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    server = PooledHTTPServer(("0.0.0.0", PORT), Handler)
     _write_pid()
     log.info(f"lm-chat running on http://localhost:{PORT}")
     log.info(f"Proxying to LM Studio at {LMSTUDIO}")
