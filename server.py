@@ -15,7 +15,7 @@ PORT = int(os.environ.get("PORT", "3001"))
 DB_PATH = os.environ.get("LM_CHAT_DB", os.path.join(os.path.dirname(__file__), "chats.db"))
 os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
 AUTH_ENABLED = os.environ.get("LM_CHAT_AUTH", "true").lower() not in ("0", "false", "no")
-CSP = "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
+CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
 def _get_or_create_signing_key():
     """Get signing key from env, or persist a generated one to .lm_chat_secret."""
     env_key = os.environ.get("LM_CHAT_SECRET")
@@ -990,6 +990,8 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_file("lm-chat-logo.svg", "image/svg+xml")
         elif self.path == "/style.css":
             self._serve_file("style.css", "text/css")
+        elif self.path == "/app.js":
+            self._serve_file("app.js", "application/javascript")
         elif self.path == "/api/health":
             status = {"ok": True, "version": VERSION, "db": False, "lmstudio": False}
             try:
