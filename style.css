@@ -817,7 +817,7 @@
       position: relative;
       animation: msgSlideIn 0.3s var(--ease);
       content-visibility: auto;
-      contain-intrinsic-size: auto 80px;
+      contain-intrinsic-size: auto 200px;
       & .bub {
           background: var(--surface);
           padding: var(--sp-5) 0.875rem;

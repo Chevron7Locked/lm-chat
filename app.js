@@ -502,7 +502,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     area.innerHTML = `<p style="color:var(--err-text)">${esc(d.error || "Failed")}</p>`;
                     return;
                 }
-                window._totpSetupToken = d.setup_token;
+                _totpSetupToken = d.setup_token;
                 area.innerHTML = `
     <div class="totp-qr">
       ${sanitizeSvg(d.qr_svg)}
@@ -540,7 +540,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         code,
-                        setup_token: window._totpSetupToken,
+                        setup_token: _totpSetupToken,
                     }),
                 });
                 const d = await r.json();
@@ -789,7 +789,8 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
             let activeId = null,
                 sending = false,
                 chatMeta = {},
-                incognitoMode = false;
+                incognitoMode = false,
+                _totpSetupToken = null;
 
             // Incognito session history — ephemeral, never persisted.
             // Holds {role, content} pairs so the model has context
@@ -4935,5 +4936,5 @@ Object.assign(window, {
     doLogout, startTotpSetup, verifyTotpSetup, disableTotp,
     toggleModelDD, toggleTopModelDD, toggleUserDD, startEdit,
     saveEdit, cancelEdit, forkFromMsg, retryLast, regenerate,
-    triggerCompact, handleFiles, saveStarters, removeAttachment, unshareChat,
+    triggerCompact, handleFiles, removeAttachment, unshareChat,
 });
