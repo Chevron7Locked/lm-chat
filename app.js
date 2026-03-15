@@ -4934,5 +4934,5 @@ Object.assign(window, {
     doLogout, startTotpSetup, verifyTotpSetup, disableTotp,
     toggleModelDD, toggleTopModelDD, toggleUserDD, startEdit,
     saveEdit, cancelEdit, forkFromMsg, retryLast, regenerate,
-    triggerCompact,
+    triggerCompact, handleFiles, saveStarters, removeAttachment, unshareChat,
 });
