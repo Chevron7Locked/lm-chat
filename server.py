@@ -988,6 +988,8 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_file("sw.js", "application/javascript")
         elif self.path == "/lm-chat-logo.svg":
             self._serve_file("lm-chat-logo.svg", "image/svg+xml")
+        elif self.path == "/style.css":
+            self._serve_file("style.css", "text/css")
         elif self.path == "/api/health":
             status = {"ok": True, "version": VERSION, "db": False, "lmstudio": False}
             try:
