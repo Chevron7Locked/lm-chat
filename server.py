@@ -1521,15 +1521,11 @@ class Handler(BaseHTTPRequestHandler):
         if not user:
             return
         db = get_db()
-        if AUTH_ENABLED:
-            rows = db.execute(
-                "SELECT id,title,model,response_id,updated_at,pinned,folder FROM chats WHERE user_id=? ORDER BY pinned DESC, updated_at DESC",
-                (user["id"],),
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT id,title,model,response_id,updated_at,pinned,folder FROM chats ORDER BY pinned DESC, updated_at DESC"
-            ).fetchall()
+        where, params = self._user_filter(user)
+        rows = db.execute(
+            f"SELECT id,title,model,response_id,updated_at,pinned,folder FROM chats {where} ORDER BY pinned DESC, updated_at DESC",
+            params,
+        ).fetchall()
         chats = [{"id": r[0], "title": r[1], "model": r[2], "response_id": r[3], "updated_at": r[4], "pinned": r[5] or 0, "folder": r[6] or ""} for r in rows]
         self._json_response(200, chats)
 
@@ -1908,7 +1904,6 @@ class Handler(BaseHTTPRequestHandler):
         msg_html = []
         def _md(text):
             """Minimal markdown: bold, italic, inline code, code blocks."""
-            import re
             s = html_mod.escape(text)
             # Fenced code blocks: ```...```
             s = re.sub(r'```(\w*)\n(.*?)```', lambda m: f'<pre><code>{m.group(2)}</code></pre>', s, flags=re.DOTALL)
@@ -1985,25 +1980,16 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             return self._search_messages_like(user, query)
 
         db = get_db()
-        if AUTH_ENABLED:
-            rows = db.execute("""
-                SELECT e.message_id, e.vector, m.content, m.role, m.chat_id, c.title
-                FROM embeddings e
-                JOIN messages m ON e.message_id = m.id
-                JOIN chats c ON m.chat_id = c.id
-                WHERE c.user_id = ?
-                ORDER BY m.created_at DESC
-                LIMIT ?
-            """, (user["id"], SEARCH_MAX_RESULTS)).fetchall()
-        else:
-            rows = db.execute("""
-                SELECT e.message_id, e.vector, m.content, m.role, m.chat_id, c.title
-                FROM embeddings e
-                JOIN messages m ON e.message_id = m.id
-                JOIN chats c ON m.chat_id = c.id
-                ORDER BY m.created_at DESC
-                LIMIT ?
-            """, (SEARCH_MAX_RESULTS,)).fetchall()
+        where, params = self._user_filter(user)
+        rows = db.execute(f"""
+            SELECT e.message_id, e.vector, m.content, m.role, m.chat_id, chats.title
+            FROM embeddings e
+            JOIN messages m ON e.message_id = m.id
+            JOIN chats ON m.chat_id = chats.id
+            {where}
+            ORDER BY m.created_at DESC
+            LIMIT ?
+        """, (*params, SEARCH_MAX_RESULTS)).fetchall()
         results = []
         q_norm = math.sqrt(sum(x*x for x in query_vec))
         for mid, blob, content, role, chat_id, title in rows:
@@ -2022,28 +2008,27 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         # Escape LIKE wildcards in user input
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         like_pattern = f"%{escaped}%"
-        if AUTH_ENABLED:
-            rows = db.execute("""
-                SELECT m.id, m.content, m.role, m.chat_id, c.title
-                FROM messages m
-                JOIN chats c ON m.chat_id = c.id
-                WHERE c.user_id = ? AND m.content LIKE ? ESCAPE '\\' AND m.role IN ('user', 'assistant')
-                ORDER BY m.created_at DESC
-                LIMIT 20
-            """, (user["id"], like_pattern)).fetchall()
-        else:
-            rows = db.execute("""
-                SELECT m.id, m.content, m.role, m.chat_id, c.title
-                FROM messages m
-                JOIN chats c ON m.chat_id = c.id
-                WHERE m.content LIKE ? ESCAPE '\\' AND m.role IN ('user', 'assistant')
-                ORDER BY m.created_at DESC
-                LIMIT 20
-            """, (like_pattern,)).fetchall()
+        where, params = self._user_filter(user)
+        content_filter = "AND" if where else "WHERE"
+        rows = db.execute(f"""
+            SELECT m.id, m.content, m.role, m.chat_id, chats.title
+            FROM messages m
+            JOIN chats ON m.chat_id = chats.id
+            {where}
+            {content_filter} m.content LIKE ? ESCAPE '\\' AND m.role IN ('user', 'assistant')
+            ORDER BY m.created_at DESC
+            LIMIT 20
+        """, (*params, like_pattern)).fetchall()
         results = []
         for mid, content, role, chat_id, title in rows:
             results.append({"message_id": mid, "score": 1.0, "content": (content or "")[:200], "role": role, "chat_id": chat_id, "chat_title": title})
         self._json_response(200, {"results": results, "mode": "text"})
+
+    def _user_filter(self, user, table="chats"):
+        """Return (where_clause, params) for user-scoped queries."""
+        if AUTH_ENABLED:
+            return f"WHERE {table}.user_id = ?", (user["id"],)
+        return "", ()
 
     # --- Helpers ---
 
@@ -2202,24 +2187,30 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
 
     VALID_INSIGHT_CATEGORIES = {"identity", "preference", "skill", "project", "opinion", "context"}
 
+    def _parse_insight_line(self, line):
+        """Parse a single insight line. Returns (content, category) or (None, None)."""
+        line = line.lstrip("•-* ").strip()
+        if not line:
+            return None, None
+        category = "context"
+        for cat in self.VALID_INSIGHT_CATEGORIES:
+            if f"[{cat}]" in line.lower():
+                category = cat
+                line = re.sub(r'\[' + cat + r'\]', '', line, flags=re.IGNORECASE).strip()
+                break
+        return line, category
+
     def _parse_and_store_insights(self, db, user_id, raw_text, chat_id=None):
         """Parse LLM distillation output and store insights. Returns list of new insights."""
         if not raw_text or raw_text.strip().lower() == "none":
             return []
         new_insights = []
         now = time.time()
-        for line in raw_text.strip().split("\n"):
-            line = line.strip().lstrip("- \u2022")
-            if not line or len(line) < 5:
-                continue
-            if line.lower().startswith("[correction]"):
-                line = line[len("[correction]"):].strip()
-            category = "context"
-            for cat in self.VALID_INSIGHT_CATEGORIES:
-                if f"[{cat}]" in line.lower():
-                    category = cat
-                    line = re.sub(r'\[' + cat + r'\]', '', line, flags=re.IGNORECASE).strip()
-                    break
+        for raw_line in raw_text.strip().split("\n"):
+            raw_line = raw_line.strip()
+            if raw_line.lower().lstrip("- \u2022").startswith("[correction]"):
+                raw_line = raw_line.lstrip("- \u2022")[len("[correction]"):].strip()
+            line, category = self._parse_insight_line(raw_line)
             if not line or len(line) < 5:
                 continue
             insight_id = uuid.uuid4().hex[:12]
@@ -2514,36 +2505,30 @@ Curated list:"""
 
         dropped, merged, kept = 0, 0, 0
         now = time.time()
-        valid_categories = self.VALID_INSIGHT_CATEGORIES
 
         old_ids = [r[0] for r in rows]
 
         new_insights = []
-        for line in raw_text.strip().split("\n"):
-            line = line.strip().lstrip("- •")
-            if not line or len(line) < 5:
+        for raw_line in raw_text.strip().split("\n"):
+            raw_line = raw_line.strip()
+            if not raw_line or len(raw_line.lstrip("- •")) < 5:
                 continue
 
-            if line.lower().startswith("[drop]"):
+            if raw_line.lstrip("- •").lower().startswith("[drop]"):
                 dropped += 1
                 continue
 
-            is_merged = line.lower().startswith("[merged]")
+            is_merged = raw_line.lstrip("- •").lower().startswith("[merged]")
             if is_merged:
-                line = line[len("[merged]"):].strip()
+                raw_line = raw_line.lstrip("- •")[len("[merged]"):].strip()
                 merged += 1
             else:
                 kept += 1
 
-            category = "context"
-            for cat in valid_categories:
-                if f"[{cat}]" in line.lower():
-                    category = cat
-                    line = re.sub(r'\[' + cat + r'\]', '', line, flags=re.IGNORECASE).strip()
-                    break
+            line, category = self._parse_insight_line(raw_line)
 
             # Strip date annotations the LLM might echo back
-            line = re.sub(r'\(added \d{4}-\d{2}-\d{2}\)', '', line).strip()
+            line = re.sub(r'\(added \d{4}-\d{2}-\d{2}\)', '', line).strip() if line else ""
 
             if line and len(line) >= 5:
                 new_insights.append({"content": line, "category": category})
