@@ -2362,19 +2362,26 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                                 const { text: cleanC } = extractFollowups(c);
                                 const ad = document.createElement("div");
                                 ad.className = "m-asst";
-                                ad.innerHTML = `<button class="fork-btn" onclick="forkFromMsg(this)" title="Fork from here">&#9095;</button><div class="bub">${md(cleanC)}</div>`;
                                 if (m.id) ad.dataset.msgId = m.id;
+                                const bub = document.createElement("div");
+                                bub.className = "bub";
+                                bub.innerHTML = md(cleanC);
+                                ad.appendChild(bub);
+                                ad.appendChild(buildMsgRow({
+                                    role: "assistant",
+                                    msgId: m.id,
+                                    feedback: m.feedback ?? null,
+                                    isPinned: false,
+                                }));
                                 grp.appendChild(ad);
                             }
                         } else if (c) {
                             const { text: cleanC } = extractFollowups(c);
-                            addAsst(cleanC);
-                            if (m.id) {
-                                const asstEls =
-                                    msgs.querySelectorAll(".m-asst");
-                                asstEls[asstEls.length - 1].dataset.msgId =
-                                    m.id;
-                            }
+                            addAsst(cleanC, {
+                                msgId: m.id,
+                                feedback: m.feedback ?? null,
+                                isPinned: false,
+                            });
                         }
                     } else if (m.role === "tool")
                         addTool(m.name, m.args, m.output);
@@ -2394,9 +2401,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 d.className = "m-user";
                 if (msgId) d.dataset.msgId = msgId;
                 d.dataset.text = t;
-                d.innerHTML = `<button class="fork-btn" onclick="forkFromMsg(this)" title="Fork from here">&#9095;</button><button class="edit-btn" onclick="startEdit(this.parentElement)" title="Edit">&#9998;</button><div class="bub">${esc(t)}</div>`;
+                const bub = document.createElement("div");
+                bub.className = "bub";
+                bub.innerHTML = esc(t);
+                d.appendChild(bub);
                 if (attachments && attachments.length) {
-                    const bub = d.querySelector(".bub");
                     const imgBox = document.createElement("div");
                     imgBox.style.cssText =
                         "display:flex;gap:var(--sp-3);margin-top:var(--sp-4);flex-wrap:wrap";
@@ -2423,13 +2432,26 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         });
                     if (imgBox.children.length) bub.appendChild(imgBox);
                 }
+                d.appendChild(buildMsgRow({ role: "user", msgId }));
                 getMsgTarget().appendChild(d);
             }
-            function addAsst(t) {
+            function addAsst(t, opts = {}) {
+                // opts: { msgId, feedback, isPinned }
                 const d = document.createElement("div");
                 d.className = "m-asst";
-                d.innerHTML = `<button class="fork-btn" onclick="forkFromMsg(this)" title="Fork from here">&#9095;</button><div class="bub">${md(t)}</div>`;
+                if (opts.msgId) d.dataset.msgId = opts.msgId;
+                const bub = document.createElement("div");
+                bub.className = "bub";
+                bub.innerHTML = md(t);
+                d.appendChild(bub);
+                d.appendChild(buildMsgRow({
+                    role: "assistant",
+                    msgId: opts.msgId,
+                    feedback: opts.feedback,
+                    isPinned: opts.isPinned
+                }));
                 getMsgTarget().appendChild(d);
+                return d;
             }
             function toolLabel(raw) {
                 if (!raw) return "Used a tool";
@@ -3130,6 +3152,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     if (followups.length)
                         renderFollowups(followups, streamGroup || asstWrap);
                 }
+                // Append bottom row to just-completed response.
+                // asstWrap was captured before streamBub was nullified — safe to use here.
+                if (asstWrap && !asstWrap.querySelector(".msg-row")) {
+                    asstWrap.appendChild(buildMsgRow({ role: "assistant" }));
+                }
                 // Add token stats after the assistant message
                 if (streamDeltaCount > 0) addMsgStats(streamGroup || asstWrap);
                 addCopyButtons();
@@ -3438,47 +3465,34 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
 
             function addMsgStats(container) {
-                // Remove live stats element
                 if (liveStatsEl) {
                     liveStatsEl.remove();
                     liveStatsEl = null;
                 }
-                // Build stats from chat.end data or our own measurements
                 const parts = [];
                 const s = streamEndStats || {};
                 const stats = s.stats || {};
                 const usage = s.usage || {};
-                // Tokens per second: prefer server stats, fall back to our measurement
-                const tps =
-                    stats.tokens_per_second ||
+                const tps = stats.tokens_per_second ||
                     (streamDeltaCount > 2 && streamFirstTokenTime ?
-                        streamDeltaCount /
-                        ((performance.now() - streamFirstTokenTime) / 1000)
-                    :   0);
+                        streamDeltaCount / ((performance.now() - streamFirstTokenTime) / 1000) : 0);
                 if (tps > 0) parts.push(tps.toFixed(1) + " tok/s");
-                // TTFT: prefer server, fall back to ours
-                const ttft =
-                    stats.time_to_first_token_seconds ||
+                const ttft = stats.time_to_first_token_seconds ||
                     (streamFirstTokenTime && streamStartTime ?
-                        (streamFirstTokenTime - streamStartTime) / 1000
-                    :   0);
+                        (streamFirstTokenTime - streamStartTime) / 1000 : 0);
                 if (ttft > 0) parts.push("TTFT: " + ttft.toFixed(2) + "s");
-                // Token counts
                 const inp = usage.input_tokens || usage.prompt_tokens || 0;
-                const out =
-                    usage.output_tokens ||
-                    usage.completion_tokens ||
-                    streamDeltaCount;
-                if (inp || out)
-                    parts.push((inp || "?") + "\u2192" + out + " tokens");
+                const out = usage.output_tokens || usage.completion_tokens || streamDeltaCount;
+                if (inp || out) parts.push((inp || "?") + "\u2192" + out + " tokens");
                 recordTokens(inp, out, tps);
                 if (!parts.length) return;
-                const el = document.createElement("div");
-                el.className = "msg-stats";
-                el.textContent = parts.join(" \u00b7 ");
-                // Insert after the last assistant bubble
-                if (container) container.appendChild(el);
-                else msgs.appendChild(el);
+                const statsText = parts.join(" \u00b7 ");
+                const target = container || streamGroup || getMsgTarget();
+                const statsEl = target?.querySelector(".msg-row-stats");
+                if (statsEl) {
+                    statsEl.textContent = statsText;
+                }
+                // Note: no fallback append path — all messages have .msg-row-stats after Task 6.
             }
 
             let streamMdTimer = null;
@@ -3900,17 +3914,17 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
             // --- Regenerate button ---
             function addRegenButton() {
-                msgs.querySelectorAll(".regen-wrap").forEach((el) =>
-                    el.remove(),
-                );
+                // Clean up legacy standalone regen buttons (pre-refactor)
+                msgs.querySelectorAll(".regen-wrap").forEach((el) => el.remove());
                 if (sending || !activeId) return;
                 const assts = msgs.querySelectorAll(".m-asst");
                 if (!assts.length) return;
-                const wrap = document.createElement("div");
-                wrap.className = "regen-wrap";
-                wrap.innerHTML =
-                    '<button class="regen-btn" onclick="regenerate()">&#8635; Regenerate</button>';
-                msgs.appendChild(wrap);
+                const lastAsst = assts[assts.length - 1];
+                const regenBtn = lastAsst.querySelector(".regen-btn");
+                if (regenBtn) {
+                    regenBtn.disabled = false;
+                    regenBtn.style.opacity = "";
+                }
             }
 
             async function patchMsgIds() {
@@ -3938,10 +3952,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
             async function regenerate() {
                 if (sending || !activeId) return;
-                // Remove regen button
-                msgs.querySelectorAll(".regen-wrap").forEach((el) =>
-                    el.remove(),
-                );
+                // Disable the regen button immediately (re-enabled by addRegenButton after stream completes)
+                const assts = msgs.querySelectorAll(".m-asst");
+                if (assts.length) {
+                    const regenBtn = assts[assts.length - 1].querySelector(".regen-btn");
+                    if (regenBtn) regenBtn.disabled = true;
+                }
+                // (previous .regen-wrap cleanup removed — no longer used after Task 6 refactor)
                 // Incognito: re-send last user message from DOM (no server history)
                 if (incognitoMode) {
                     const userEls = [...msgs.querySelectorAll(".m-user")];
@@ -4066,6 +4083,142 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 "M10 4C5.6 4 2 7 .5 10c1.5 3 5.1 6 9.5 6s8-3 9.5-6c-1.5-3-5.1-6-9.5-6zm0 10a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm0-6.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z";
             const ICON_TOOLS_PATH =
                 "M17.4 4.2L14.5 7l-1.8-1.8L15.4 2A5.2 5.2 0 0 0 9 3c-.8.9-1.2 2-1.1 3.2L2.6 11.5a2 2 0 0 0 0 2.8l1.1 1.1a2 2 0 0 0 2.8 0l5.3-5.3c1.2.1 2.3-.3 3.2-1.1a5.2 5.2 0 0 0 1-6.4l-.1-.1zM5.5 14.2a.8.8 0 1 1 0-1.6.8.8 0 0 1 0 1.6z";
+            function iconCopy() {
+                return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+            }
+            function iconFork() {
+                return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>`;
+            }
+            function iconRegen() {
+                return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.32"/></svg>`;
+            }
+            function iconThumbUp() {
+                return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>`;
+            }
+            function iconThumbDown() {
+                return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>`;
+            }
+            function iconEdit() {
+                return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+            }
+            function iconPin() {
+                return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>`;
+            }
+
+            function buildMsgRow(opts) {
+                // opts: { role, msgId, statsText, feedback, isPinned }
+                const row = document.createElement("div");
+                row.className = "msg-row";
+
+                if (opts.role === "assistant") {
+                    const stats = document.createElement("div");
+                    stats.className = "msg-row-stats";
+                    stats.textContent = opts.statsText || "";
+                    row.appendChild(stats);
+
+                    const actions = document.createElement("div");
+                    actions.className = "msg-row-actions";
+
+                    const copyBtn = document.createElement("button");
+                    copyBtn.className = "msg-action-btn";
+                    copyBtn.title = "Copy";
+                    copyBtn.innerHTML = iconCopy();
+                    copyBtn.onclick = () => {
+                        const bub = copyBtn.closest(".m-asst, .msg-group")?.querySelector(".bub");
+                        if (bub) navigator.clipboard.writeText(bub.innerText || bub.textContent);
+                    };
+                    actions.appendChild(copyBtn);
+
+                    const forkBtn = document.createElement("button");
+                    forkBtn.className = "msg-action-btn fork-btn";
+                    forkBtn.title = "Fork from here";
+                    forkBtn.innerHTML = iconFork();
+                    forkBtn.onclick = function() { forkFromMsg(this); };
+                    actions.appendChild(forkBtn);
+
+                    const regenBtn = document.createElement("button");
+                    regenBtn.className = "msg-action-btn regen-btn";
+                    regenBtn.title = "Regenerate";
+                    regenBtn.innerHTML = iconRegen();
+                    regenBtn.disabled = true;
+                    regenBtn.style.opacity = "0.4";
+                    regenBtn.onclick = () => regenerate();
+                    actions.appendChild(regenBtn);
+
+                    const sep = document.createElement("span");
+                    sep.style.cssText = "width:1px;height:12px;background:var(--border);margin:0 2px";
+                    actions.appendChild(sep);
+
+                    const upBtn = document.createElement("button");
+                    upBtn.className = "msg-action-btn thumb-up" + (opts.feedback === 1 ? " voted-up" : "");
+                    upBtn.title = "Helpful";
+                    upBtn.innerHTML = iconThumbUp();
+                    upBtn.onclick = () => {
+                        const msgId = upBtn.closest("[data-msg-id]")?.dataset.msgId;
+                        if (!msgId) return;
+                        submitFeedback(msgId, upBtn.classList.contains("voted-up") ? 0 : 1, row);
+                    };
+                    actions.appendChild(upBtn);
+
+                    const downBtn = document.createElement("button");
+                    downBtn.className = "msg-action-btn thumb-down" + (opts.feedback === -1 ? " voted-down" : "");
+                    downBtn.title = "Not helpful";
+                    downBtn.innerHTML = iconThumbDown();
+                    downBtn.onclick = () => {
+                        const msgId = downBtn.closest("[data-msg-id]")?.dataset.msgId;
+                        if (!msgId) return;
+                        submitFeedback(msgId, downBtn.classList.contains("voted-down") ? 0 : -1, row);
+                    };
+                    actions.appendChild(downBtn);
+
+                    if (opts.isPinned) {
+                        const pinBtn = document.createElement("button");
+                        pinBtn.className = "msg-action-btn pin-active";
+                        pinBtn.title = "Pinned — click to view navigator";
+                        pinBtn.innerHTML = iconPin();
+                        pinBtn.onclick = () => openPinNavigator();
+                        actions.appendChild(pinBtn);
+                    }
+
+                    row.appendChild(actions);
+                } else if (opts.role === "user") {
+                    const spacer = document.createElement("div");
+                    spacer.style.flex = "1";
+                    row.appendChild(spacer);
+
+                    const actions = document.createElement("div");
+                    actions.className = "msg-row-actions";
+
+                    const copyBtn = document.createElement("button");
+                    copyBtn.className = "msg-action-btn";
+                    copyBtn.title = "Copy";
+                    copyBtn.innerHTML = iconCopy();
+                    copyBtn.onclick = () => {
+                        const bub = copyBtn.closest(".m-user")?.querySelector(".bub");
+                        if (bub) navigator.clipboard.writeText(bub.innerText || bub.textContent);
+                    };
+                    actions.appendChild(copyBtn);
+
+                    const forkBtn = document.createElement("button");
+                    forkBtn.className = "msg-action-btn fork-btn";
+                    forkBtn.title = "Fork from here";
+                    forkBtn.innerHTML = iconFork();
+                    forkBtn.onclick = function() { forkFromMsg(this); };
+                    actions.appendChild(forkBtn);
+
+                    const editBtn = document.createElement("button");
+                    editBtn.className = "msg-action-btn edit-btn";
+                    editBtn.title = "Edit";
+                    editBtn.innerHTML = iconEdit();
+                    editBtn.onclick = function() { startEdit(this.closest(".m-user")); };
+                    actions.appendChild(editBtn);
+
+                    row.appendChild(actions);
+                }
+
+                return row;
+            }
+
             function capIcon(path, fill) {
                 return (
                     '<svg class="cap-icon" viewBox="0 0 20 20"><path fill="' +

@@ -1239,36 +1239,7 @@
       }
   }
 
-  .regen-wrap {
-      display: flex;
-      justify-content: center;
-      margin-bottom: var(--sp-7);
-  }
-  .regen-btn {
-      background: none;
-      border: 1px solid var(--border);
-      color: var(--dim);
-      font-size: var(--text-xs);
-      padding: 0.3125rem 0.875rem;
-      border-radius: var(--r-lg);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 0.3125rem;
-      transition:
-          background var(--dur) var(--ease),
-          color var(--dur) var(--ease),
-          border-color var(--dur) var(--ease),
-          transform 0.1s var(--ease);
-      &:hover {
-          background: var(--hover);
-          color: var(--text);
-          border-color: var(--faint);
-      }
-      &:active {
-          transform: scale(0.95);
-      }
-  }
+  /* .regen-wrap and standalone .regen-btn removed — regen is now in .msg-row via .msg-action-btn.regen-btn */
 
   /* Connection status */
   #conn-status {
@@ -1319,6 +1290,58 @@
       padding: var(--sp-1) 0 0;
       line-height: 1.3;
   }
+
+  /* Message bottom row — always visible */
+  .msg-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid var(--border);
+      gap: var(--sp-4);
+  }
+  .msg-row-stats {
+      font-size: var(--text-xs);
+      color: var(--faint);
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+  }
+  .msg-row-actions {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex-shrink: 0;
+  }
+  .msg-action-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--dim);
+      padding: 3px 5px;
+      border-radius: var(--r-sm);
+      display: flex;
+      align-items: center;
+      transition: color 0.15s, background 0.15s;
+      line-height: 1;
+  }
+  .msg-action-btn:hover {
+      color: var(--text);
+      background: rgba(255,255,255,0.04);
+  }
+  .msg-action-btn.voted-up {
+      color: var(--accent);
+  }
+  .msg-action-btn.voted-down {
+      color: rgba(239,68,68,0.8);
+  }
+  .msg-action-btn.pin-active {
+      color: var(--accent);
+  }
+
   .live-stats {
       font-size: var(--text-sm);
       color: var(--faint);
