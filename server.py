@@ -2598,6 +2598,162 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         result_payload.pop("previous_response_id", None)
         return result_payload
 
+    def _build_vq_extraction_prompt(self, original_question, draft):
+        """Build the verification question extraction prompt for CoVe Step 2."""
+        q_str = original_question if isinstance(original_question, str) else str(original_question)[:500]
+        return {
+            "system_prompt": (
+                "You are a fact-checker. Given a question and a draft answer, generate "
+                "targeted verification questions to check the factual claims.\n\n"
+                "Rules:\n"
+                "- Each question must be independently answerable without seeing the draft\n"
+                "- Each question targets a single specific claim\n"
+                "- Phrase as standalone questions, not confirmations\n"
+                "- Maximum 4 questions\n"
+                "- If there are no specific factual claims to verify, respond with: NONE"
+            ),
+            "input": f"Question: {q_str}\nDraft answer: {draft}\n\nGenerate verification questions:"
+        }
+
+    def _build_cove_synthesis_prompt(self, original_question, draft, vq_answers):
+        """Build the CoVe Step 4 synthesis input."""
+        q_str = original_question if isinstance(original_question, str) else str(original_question)[:500]
+        vq_section = "\n\n".join(
+            f"Q: {vq}\nA: {ans}"
+            for vq, ans in vq_answers.items()
+        )
+        return (
+            f"Original question: {q_str}\n\n"
+            f"Initial draft answer (may contain errors):\n{draft}\n\n"
+            f"Verification results:\n{vq_section}\n\n"
+            "Using the verified answers, write the final response. Where verification "
+            "answers contradict the draft, use the verified information. Acknowledge "
+            "uncertainty where verification answers were inconclusive. Do not mention "
+            "that this is a verification process — just provide the accurate answer."
+        )
+
+    def _parse_verification_questions(self, text):
+        """Extract numbered verification questions from LLM output. Max 4."""
+        import re as _re
+        if "NONE" in text.upper():
+            return []
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        questions = []
+        for line in lines:
+            cleaned = _re.sub(r'^[\d\-\.\)]+\s*', '', line).strip()
+            if cleaned.endswith('?') and len(cleaned) > 10:
+                questions.append(cleaned)
+            if len(questions) >= 4:
+                break
+        return questions
+
+    def _chain_of_verification(self, payload, user_id, emit_status=None):
+        """4-step CoVe pipeline.
+        Returns bare str (no verifiable claims — draft) | dict (synthesis streaming payload) | None (failure).
+        Same return contract as _self_consistency: bare str | dict | None.
+        """
+        import concurrent.futures
+
+        original_reasoning = payload.get("reasoning")
+
+        base_silent = {
+            **payload,
+            "store": False,
+            "integrations": [],
+            "reasoning": {"type": "disabled"},
+            "stream": False,
+        }
+
+        try:
+            # Step 1: Draft
+            if emit_status:
+                emit_status("Drafting response...")
+            draft_data = self._lmstudio_chat(base_silent, user_id, timeout=60)
+            draft = self._extract_content(draft_data)
+            if not draft.strip():
+                draft = None
+            if not draft:
+                log.warning("CoVe Step 1: empty draft, falling back")
+                return None
+
+            # Step 2: Extract verification questions
+            if emit_status:
+                emit_status("Identifying claims to verify...")
+            vq_prompt_parts = self._build_vq_extraction_prompt(payload.get("input", ""), draft)
+            vq_payload = {
+                **base_silent,
+                "system_prompt": vq_prompt_parts["system_prompt"],
+                "input": vq_prompt_parts["input"],
+                "temperature": 0.0,
+                "max_output_tokens": 350,
+            }
+            vq_payload.pop("previous_response_id", None)
+            vq_data = self._lmstudio_chat(vq_payload, user_id, timeout=30)
+            vqs = self._parse_verification_questions(self._extract_content(vq_data))
+
+            if not vqs:
+                if emit_status:
+                    emit_status("No factual claims to verify")
+                    emit_status("Responding...")
+                return draft
+
+            if emit_status:
+                emit_status(f"Verifying {len(vqs)} fact{'s' if len(vqs) != 1 else ''}...")
+
+            # Step 3: Answer VQs independently in parallel
+            def answer_vq(vq):
+                clean_payload = {
+                    "model": payload["model"],
+                    "input": vq,
+                    "system_prompt": "Answer the following question directly and accurately. Be concise.",
+                    "temperature": 0.1,
+                    "max_output_tokens": 300,
+                    "store": False,
+                    "integrations": [],
+                    "reasoning": {"type": "disabled"},
+                    "stream": False,
+                }
+                try:
+                    return vq, self._extract_content(self._lmstudio_chat(clean_payload, user_id, timeout=30))
+                except Exception as e:
+                    log.warning(f"CoVe VQ answer failed: {e}")
+                    return vq, None
+
+            vq_answers = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(vqs), 4)) as ex:
+                futures = {ex.submit(answer_vq, vq): vq for vq in vqs}
+                for f in concurrent.futures.as_completed(futures):
+                    vq, answer = f.result()
+                    if answer is not None:
+                        vq_answers[vq] = answer
+
+            if not vq_answers:
+                log.warning("CoVe Step 3: all VQ answers failed, returning draft")
+                return draft
+
+            # Step 4: Synthesis
+            if emit_status:
+                emit_status("Finalizing verified response...")
+            synthesis_input = self._build_cove_synthesis_prompt(
+                payload.get("input", ""), draft, vq_answers
+            )
+            synthesis_payload = {
+                **base_silent,
+                "input": synthesis_input,
+                "system_prompt": "You are a careful and accurate assistant.",
+                "stream": True,
+            }
+            synthesis_payload.pop("previous_response_id", None)
+            if original_reasoning is not None:
+                synthesis_payload["reasoning"] = original_reasoning
+            else:
+                synthesis_payload.pop("reasoning", None)
+            return synthesis_payload
+
+        except Exception as e:
+            log.warning(f"CoVe pipeline failed: {e}")
+            return None
+
     # --- Memory: Insight scoring and retrieval ---
 
     CATEGORY_WEIGHTS = {
