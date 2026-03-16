@@ -4266,8 +4266,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     if (!r.ok) throw new Error("unpin failed");
                     const actions = pinBtnEl?.closest(".msg-row-actions");
                     if (actions) {
-                        pinBtnEl.remove();
+                        // Read msgId before detaching — closest() returns null on detached nodes
                         const msgId = pinBtnEl.closest("[data-msg-id]")?.dataset.msgId;
+                        pinBtnEl.remove();
                         if (msgId) {
                             const hoverBtn = document.createElement("button");
                             hoverBtn.className = "msg-action-btn hover-pin-btn";
@@ -4485,6 +4486,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 body.innerHTML = '<div style="color:var(--dim);font-size:var(--text-sm)">Loading...</div>';
                 try {
                     const r = await apiFetch("/api/pins");
+                    if (!r.ok) throw new Error("Failed to load pins");
                     const pins = await r.json();
                     if (!pins.length) {
                         body.innerHTML = '<div style="color:var(--faint);font-size:var(--text-sm);text-align:center;padding:var(--sp-8)">No pins yet</div>';
@@ -4571,7 +4573,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     });
 
                     // Reconcile isPinned indicators on already-rendered message rows
+                    // Build both a set (for fast lookup) and a map (msgId → pinId for dataset)
                     const pinnedIds = new Set(pins.map(p => String(p.message_id)).filter(Boolean));
+                    const pinIdByMsgId = new Map(pins.filter(p => p.message_id).map(p => [String(p.message_id), p.id]));
 
                     // Remove stale .pin-active buttons
                     msgs.querySelectorAll(".pin-active").forEach(btn => {
@@ -4589,6 +4593,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         pinBtn.className = "msg-action-btn pin-active";
                         pinBtn.title = "Pinned — click to view navigator";
                         pinBtn.innerHTML = iconPin();
+                        pinBtn.dataset.pinId = pinIdByMsgId.get(id) ?? "";
                         pinBtn.onclick = () => openPinNavigator();
                         actions.appendChild(pinBtn);
                     }
