@@ -638,6 +638,113 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    _CHAT_SETTINGS_ALLOWLIST = {
+        "system_prompt":    (str,   lambda v: isinstance(v, str) and len(v) <= 8000),
+        "temperature":      (float, lambda v: isinstance(v, (int, float)) and 0.0 <= v <= 2.0),
+        "top_p":            (float, lambda v: isinstance(v, (int, float)) and 0.0 <= v <= 1.0),
+        "top_k":            (int,   lambda v: isinstance(v, int) and 0 <= v <= 500),
+        "min_p":            (float, lambda v: isinstance(v, (int, float)) and 0.0 <= v <= 1.0),
+        "repeat_penalty":   (float, lambda v: isinstance(v, (int, float)) and 0.0 <= v <= 3.0),
+        "presence_penalty": (float, lambda v: isinstance(v, (int, float)) and 0.0 <= v <= 2.0),
+        "max_output_tokens":(int,   lambda v: isinstance(v, int) and (v == -1 or 1 <= v <= 32768)),
+        "reasoning":        (str,   lambda v: v in ("off", "medium", "high")),
+        "sc_enabled":       (bool,  lambda v: isinstance(v, bool)),
+        "cove_enabled":     (bool,  lambda v: isinstance(v, bool)),
+    }
+
+    def _get_chat_settings(self, chat_id):
+        user = self._require_auth()
+        if not user:
+            return
+        db = get_db()
+        row = db.execute(
+            "SELECT settings FROM chats WHERE id = ? AND user_id = ?",
+            (chat_id, user["id"])
+        ).fetchone()
+        if row is None:
+            return self._error(404, "chat not found")
+        try:
+            settings = json.loads(row[0]) if row[0] else {}
+        except (json.JSONDecodeError, TypeError):
+            settings = {}
+        self._json_response(200, settings)
+
+    def _save_chat_settings(self, chat_id, body):
+        user = self._require_auth()
+        if not user:
+            return
+        if not self._check_csrf():
+            return
+        db = get_db()
+        row = db.execute(
+            "SELECT settings FROM chats WHERE id = ? AND user_id = ?",
+            (chat_id, user["id"])
+        ).fetchone()
+        if row is None:
+            return self._error(404, "chat not found")
+        try:
+            existing = json.loads(row[0]) if row[0] else {}
+        except (json.JSONDecodeError, TypeError):
+            existing = {}
+        # Merge: null values remove keys; non-null values are validated
+        for key, value in body.items():
+            if value is None:
+                existing.pop(key, None)  # explicit null removes the key
+            elif key not in self._CHAT_SETTINGS_ALLOWLIST:
+                return self._error(400, f"unknown setting: {key}")
+            else:
+                _, validator = self._CHAT_SETTINGS_ALLOWLIST[key]
+                if not validator(value):
+                    return self._error(400, f"invalid value for {key}")
+                existing[key] = value
+        # Write NULL if empty, not '{}'
+        new_json = json.dumps(existing) if existing else None
+        db.execute(
+            "UPDATE chats SET settings = ? WHERE id = ? AND user_id = ?",
+            (new_json, chat_id, user["id"])
+        )
+        db.commit()
+        self._json_response(200, existing)
+
+    def _delete_chat_settings(self, chat_id):
+        user = self._require_auth()
+        if not user:
+            return
+        if not self._check_csrf():
+            return
+        db = get_db()
+        result = db.execute(
+            "UPDATE chats SET settings = NULL WHERE id = ? AND user_id = ?",
+            (chat_id, user["id"])
+        )
+        if result.rowcount == 0:
+            return self._error(404, "chat not found")
+        db.commit()
+        self._json_response(200, {})
+
+    def _resolve_chat_settings(self, chat_id, user_id, body):
+        """Merge per-chat DB settings into the request body as fallback values.
+        Layering (first non-null wins, per parameter):
+          client body → chat DB settings → global localStorage defaults → LM Studio instance config
+        DB settings only fill keys that the client body omitted or sent as None.
+        """
+        if not chat_id:
+            return
+        db = get_db()
+        row = db.execute(
+            "SELECT settings FROM chats WHERE id = ? AND user_id = ?",
+            (chat_id, user_id)
+        ).fetchone()
+        if not row or not row[0]:
+            return
+        try:
+            chat_settings = json.loads(row[0])
+        except (json.JSONDecodeError, TypeError):
+            return
+        for key, value in chat_settings.items():
+            if key not in body or body[key] is None:
+                body[key] = value
+
     def _secure_flag(self):
         """Return '; Secure' if running behind HTTPS, else empty string."""
         if os.environ.get("LM_CHAT_HTTPS") or self.headers.get("X-Forwarded-Proto") == "https":
@@ -772,6 +879,9 @@ class Handler(BaseHTTPRequestHandler):
             self._list_insights()
         elif self.path == "/api/insights/settings":
             self._get_insight_settings()
+        elif re.match(r'^/api/chats/([^/]+)/settings$', self.path):
+            chat_id = self.path.split("/")[3]
+            self._get_chat_settings(chat_id)
         else:
             self.send_error(404)
 
@@ -877,6 +987,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._delete_last_response(chat_id)
             elif len(parts) == 5 and parts[4] == "share":
                 self._unshare_chat(chat_id)
+            elif len(parts) == 5 and parts[4] == "settings":
+                self._delete_chat_settings(chat_id)
             elif len(parts) == 4:
                 self._delete_chat(chat_id)
             else:
@@ -886,6 +998,20 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/insights/"):
             insight_id = self.path.split("/")[3]
             self._delete_insight(insight_id)
+        else:
+            self.send_error(404)
+
+    def do_PATCH(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            if length > MAX_BODY_SIZE:
+                return self._error(413, "request too large")
+            body = json.loads(self.rfile.read(length)) if length else {}
+        except (ValueError, json.JSONDecodeError):
+            return self._error(400, "invalid request body")
+        if re.match(r'^/api/chats/([^/]+)/settings$', self.path):
+            chat_id = self.path.split("/")[3]
+            self._save_chat_settings(chat_id, body)
         else:
             self.send_error(404)
 
@@ -1308,6 +1434,7 @@ class Handler(BaseHTTPRequestHandler):
         body["integrations"] = self._inject_mcp_auth(
             body.get("integrations", DEFAULT_INTEGRATIONS), user["id"])
 
+        self._resolve_chat_settings(body.get("chat_id"), user["id"], body)
         payload = self._build_lmstudio_payload(body)
 
         try:
@@ -1399,6 +1526,7 @@ class Handler(BaseHTTPRequestHandler):
         body["integrations"] = self._inject_mcp_auth(
             body.get("integrations", DEFAULT_INTEGRATIONS), user["id"])
 
+        self._resolve_chat_settings(body.get("chat_id"), user["id"], body)
         payload = self._build_lmstudio_payload(body, system_prompt=system_prompt or None, stream=True)
 
         # Debug logging (skip content in incognito mode)
