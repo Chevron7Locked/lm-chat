@@ -1333,14 +1333,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
             // --- Prompt Variables ---
             function buildToolsVar() {
-                const active = MCPS.filter((s) => s.on && s.hint);
-                if (!active.length) return "";
-                return (
-                    "## AVAILABLE TOOLS\n\nUse your tools when they add value, not for everything:\n" +
-                    active
-                        .map((s) => `- **${s.name}**: ${s.hint}.`)
-                        .join("\n")
-                );
+                // LM Studio injects full tool schemas into the model's context
+                // when integrations are active. Our descriptions would be
+                // redundant tokens. When no tools are active, there's nothing
+                // to describe. Either way, return empty.
+                return "";
             }
 
             function expandVars(text) {
