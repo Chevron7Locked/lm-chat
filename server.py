@@ -2049,6 +2049,14 @@ class Handler(BaseHTTPRequestHandler):
             if r[5]: m["output"] = r[5]
             db_messages.append(m)
 
+        # Exclude pinned messages from compaction — they must survive regardless of window
+        pinned_ids = {r[0] for r in db.execute(
+            "SELECT message_id FROM pins WHERE chat_id = ? AND message_id IS NOT NULL",
+            (chat_id,)
+        )}
+        db_messages = [m for m in db_messages if m['id'] not in pinned_ids]
+        # Recompute half from compactable messages only (pinned don't count against the window)
+
         turn_count = sum(1 for m in db_messages if m["role"] in ("user", "assistant"))
         if turn_count < COMPACT_MIN_TURNS:
             return self._error(400, f"Conversation too short to compact (need at least {COMPACT_MIN_TURNS} turns).")
@@ -2356,6 +2364,28 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             results.append({"message_id": mid, "score": round(sim, 4), "content": (content or "")[:200], "role": role, "chat_id": chat_id, "chat_title": title})
 
         results.sort(key=lambda x: x["score"], reverse=True)
+
+        # Also search pins FTS
+        try:
+            pin_rows = db.execute("""
+                SELECT p.id, p.pin_title, p.chat_title, p.pinned_at,
+                       substr(p.content, 1, 300) as preview, p.chat_id, p.message_id
+                FROM pins p
+                JOIN (SELECT rowid FROM pins_fts WHERE pins_fts MATCH ?) fts ON p.rowid = fts.rowid
+                WHERE p.user_id = ?
+                ORDER BY p.pinned_at DESC
+                LIMIT 10
+            """, (query, user["id"])).fetchall()
+            for r in pin_rows:
+                results.append({
+                    "type": "pin",
+                    "id": r[0], "pin_title": r[1], "chat_title": r[2],
+                    "pinned_at": r[3], "preview": r[4],
+                    "chat_id": r[5], "message_id": r[6]
+                })
+        except Exception as e:
+            log.warning(f"Pin search failed: {e}")  # non-fatal
+
         self._json_response(200, {"results": results[:20], "mode": "semantic"})
 
     def _search_messages_like(self, user, query):
