@@ -32,7 +32,7 @@ jobs:
         run: ruff check --output-format=github .
 
       - name: Codespell
-        run: codespell server.py index.html
+        run: codespell server.py qr.py index.html style.css app.js
 
   smoke-test:
     name: Smoke Test
@@ -65,8 +65,10 @@ jobs:
           assert d['db'] == True, f'db not initialized: {d}'
           print(f'Health OK: version={d[\"version\"]}, db={d[\"db\"]}, lmstudio={d[\"lmstudio\"]}')
           "
-          # Serves frontend
-          HTTP_CODE=$(python -c "import urllib.request; r=urllib.request.urlopen('http://localhost:3001/', timeout=5); print(r.status)")
-          echo "Frontend: $HTTP_CODE"
-          [ "$HTTP_CODE" = "200" ] || exit 1
+          # Serves frontend and static assets
+          for path in / /style.css /app.js /manifest.json /sw.js /lm-chat-logo.svg; do
+            HTTP_CODE=$(python -c "import urllib.request; r=urllib.request.urlopen('http://localhost:3001${path}', timeout=5); print(r.status)")
+            echo "${path}: ${HTTP_CODE}"
+            [ "$HTTP_CODE" = "200" ] || exit 1
+          done
           kill $SERVER_PID
