@@ -106,7 +106,7 @@ LM Studio's desktop app uses all of this natively. lm-chat is the first web clie
 ### Chat
 
 - **SSE streaming** with live token stats (tokens/sec, time-to-first-token)
-- **MCP tool execution** — uses whatever MCP servers you've configured in LM Studio (Brave Search, Memory, Sequential Thinking, etc.), plus any remote MCP endpoint
+- **MCP tool execution** — uses whatever MCP servers you've configured in LM Studio (Brave Search, Memory, Sequential Thinking, etc.), plus any remote MCP endpoint. Supports multi-step agentic loops — the model can call tools, evaluate results, and call more tools autonomously until it has what it needs
 - **Native reasoning display** — thinking blocks from reasoning models (DeepSeek-R1, QwQ, etc.) in collapsible sections, with configurable reasoning depth (Off / Low / Medium / High)
 - **Stop, edit, resend, regenerate** — full conversation control
 - **Conversation forking** — branch from any message to explore alternatives
@@ -188,9 +188,10 @@ Your LM Studio MCP servers just work — configure them in `~/.lmstudio/mcp.json
 
 - **Hot model switching** — topbar dropdown or input pill
 - **Capability badges** — Vision, Tool Use auto-detected per model
-- **Full sampling control** — temperature, top_p, top_k, min_p, repeat_penalty, max output tokens
+- **Full sampling control** — temperature, top_p, top_k, min_p, repeat_penalty, presence_penalty, max output tokens
 - **Reasoning depth** — Off / Low / Medium / High for supported thinking models
-- **Context config display** — context length, eval batch size, parallel slots from model config
+- **Instance-aware routing** — uses your model's instance identifier (nickname) to avoid JIT reloads
+- **Context config display** — context length (read-only, from loaded instance), eval batch size, parallel slots
 - **Connection monitoring** — live status indicator with 30s health polling
 
 ![Model switching](docs/images/07-model-switching-desktop.png)
@@ -202,7 +203,7 @@ Unified full-page settings with tabbed navigation — one place for everything:
 
 | Tab | What's there |
 |-----|-------------|
-| **Chat** | System prompt presets, sampling parameters (temperature, top_p, top_k, min_p, repeat_penalty, max tokens, context length), reasoning depth, suggested follow-ups, delete all chats |
+| **Chat** | System prompt presets, sampling parameters (temperature, top_p, top_k, min_p, repeat_penalty, presence_penalty, max tokens), context length (read-only), reasoning depth, suggested follow-ups, delete all chats |
 | **Memory** | Toggle, view, edit, add, refine, clear |
 | **Starters** | Customize welcome screen shortcuts (icon, title, prompt text) |
 | **Server** | LM Studio URL, API key, loaded models, MCP tool toggles, remote MCP endpoints, debug logging |

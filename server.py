@@ -1715,7 +1715,7 @@ class Handler(BaseHTTPRequestHandler):
             "integrations": [],
         }
         try:
-            sum_data = self._lmstudio_chat(summary_payload, user["id"], timeout=60)
+            sum_data = self._lmstudio_chat(summary_payload, user["id"], timeout=120)
             summary = self._extract_content(sum_data)
             if not summary:
                 self._error(500, "Failed to generate summary.")

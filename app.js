@@ -4669,26 +4669,29 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     return;
                 }
                 const model = modelSel.value;
-                const ctxLen = parseInt($("s-ctx").value) || 16000;
+                addAsst("Compacting conversation...");
                 try {
                     const resp = await apiFetch(
                         `/api/chats/${activeId}/compact`,
                         {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                                model,
-                                context_length: ctxLen,
-                            }),
+                            body: JSON.stringify({ model }),
                         },
                     );
-                    const data = await resp.json();
-                    if (data.error) {
-                        addErr(data.error);
+                    if (!resp.ok) {
+                        const text = await resp.text();
+                        try {
+                            const j = JSON.parse(text);
+                            addErr(j.error || `Compact failed (${resp.status})`);
+                        } catch {
+                            addErr(`Compact failed (${resp.status})`);
+                        }
                         return;
                     }
+                    const data = await resp.json();
                     addAsst(
-                        `**Context compacted.** Summarized ${data.messages_summarized} messages.\n\n> ${data.summary}`,
+                        `**Context compacted.** Summarized ${data.messages_summarized} messages (deleted ${data.messages_deleted}).\n\n> ${data.summary}`,
                     );
                     addCopyButtons();
                     scroll.scrollTop = scroll.scrollHeight;
