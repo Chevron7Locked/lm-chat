@@ -1658,6 +1658,23 @@ class Handler(BaseHTTPRequestHandler):
             if not self._verify_chat_owner(db, chat_id, user["id"]):
                 return
 
+        # Send SSE headers before memory injection so SC/CoVe can emit status events
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.send_header("X-Accel-Buffering", "no")
+        self._send_security_headers()
+        self.end_headers()
+
+        def emit_status(text):
+            msg = f"event: status\ndata: {json.dumps({'text': text})}\n\n"
+            try:
+                self.wfile.write(msg.encode())
+                self.wfile.flush()
+            except Exception:
+                pass
+
         # Context: LM Studio manages history via response_id chaining.
         # Summary injection is redundant (model sees summary AND full history).
         # Manual /compact still works via _compact_chat for explicit user action.
@@ -1705,6 +1722,54 @@ class Handler(BaseHTTPRequestHandler):
         self._resolve_chat_settings(body.get("chat_id"), user["id"], body)
         payload = self._build_lmstudio_payload(body, system_prompt=system_prompt or None, stream=True)
 
+        # SC/CoVe interception
+        sc_enabled = body.get("sc_enabled") or False
+        cove_enabled = body.get("cove_enabled") or False
+
+        if sc_enabled or cove_enabled:
+            result = None
+            try:
+                if cove_enabled and sc_enabled:
+                    cove_result = self._chain_of_verification(payload, user["id"], emit_status)
+                    if isinstance(cove_result, dict):
+                        result = self._self_consistency(cove_result, user["id"], emit_status)
+                    else:
+                        result = cove_result
+                elif cove_enabled:
+                    result = self._chain_of_verification(payload, user["id"], emit_status)
+                elif sc_enabled:
+                    result = self._self_consistency(payload, user["id"], emit_status)
+            except Exception as e:
+                log.error(f"SC/CoVe failed: {e}")
+                result = None
+
+            if isinstance(result, str) and not result.strip():
+                result = None
+            if isinstance(result, str):
+                text = result
+                delta = json.dumps({"content": text})
+                try:
+                    self.wfile.write(f"event: message.delta\ndata: {delta}\n\n".encode())
+                    self.wfile.write(b"event: chat.end\ndata: {}\n\n")
+                    self.wfile.write(b"data: [DONE]\n\n")
+                    self.wfile.flush()
+                except Exception:
+                    pass
+                if chat_id and not is_incognito:
+                    db = get_db()
+                    self._persist_chat_messages(
+                        db, chat_id,
+                        user_input=body.get("input", ""),
+                        content=text,
+                        tool_calls=[],
+                        response_id=None,
+                        usage={},
+                    )
+                return
+            elif isinstance(result, dict):
+                payload = result
+            # None: fall through to normal request
+
         # Debug logging (skip content in incognito mode)
         if is_incognito:
             log.debug(f"REQ [incognito] model={payload.get('model')}")
@@ -1732,21 +1797,29 @@ class Handler(BaseHTTPRequestHandler):
         try:
             resp = urllib.request.urlopen(req, timeout=300)
         except urllib.error.HTTPError as e:
-            self._json_response(e.code, e.read())
+            err_body = e.read().decode("utf-8", errors="replace")
+            try:
+                err_detail = json.loads(err_body).get("error", {}).get("message", err_body)
+            except Exception:
+                err_detail = err_body
+            err_msg = json.dumps({"type": "error", "error": {"message": f"LM Studio error {e.code}: {err_detail}"}})
+            try:
+                self.wfile.write(f"data: {err_msg}\n\n".encode())
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+            except Exception:
+                pass
             return
         except Exception as e:
             log.error(f"chat stream: {e}")
-            self._error(502, "upstream service unavailable")
+            err_msg = json.dumps({"type": "error", "error": {"message": "upstream service unavailable"}})
+            try:
+                self.wfile.write(f"data: {err_msg}\n\n".encode())
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+            except Exception:
+                pass
             return
-
-        # Send SSE headers
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "close")
-        self.send_header("X-Accel-Buffering", "no")
-        self._send_security_headers()
-        self.end_headers()
 
         # Collect data for persistence
         content_parts = []
