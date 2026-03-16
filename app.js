@@ -4237,7 +4237,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     $("right-panel-title").textContent = "Chat Settings";
                     const actionBtn = $("right-panel-action-btn");
                     actionBtn.style.display = "";
-                    actionBtn.textContent = "Reset to defaults";
+                    actionBtn.textContent = "Reset";
                     actionBtn.onclick = resetChatSettings;
                     renderChatSettingsPanel();
                 } else if (mode === "pins") {
