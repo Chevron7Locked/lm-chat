@@ -973,6 +973,9 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/chats/") and self.path.endswith("/share"):
             chat_id = self.path.split("/")[3]
             self._share_chat(chat_id)
+        elif re.match(r'^/api/messages/(\d+)/feedback$', self.path):
+            message_id = int(self.path.split("/")[3])
+            self._post_message_feedback(message_id, body)
         else:
             self.send_error(404)
 
@@ -1490,6 +1493,7 @@ class Handler(BaseHTTPRequestHandler):
         system_prompt = body.get("system_prompt") or ""
 
         # Memory: inject user insights into system prompt (skip in incognito)
+        injected_insight_ids = []
         if not is_incognito:
             mem_db = None
             try:
@@ -1508,6 +1512,7 @@ class Handler(BaseHTTPRequestHandler):
                     except (ValueError, TypeError):
                         max_inject = 30
                     insights = self._get_top_insights(mem_db, user["id"], limit=max_inject)
+                    injected_insight_ids = [i["id"] for i in insights]
                     if insights:
                         memory_block = self._format_insights_for_prompt(insights)
                         # Append memories AFTER system prompt (not before) so the frozen
@@ -1655,7 +1660,7 @@ class Handler(BaseHTTPRequestHandler):
                 content = f"<think>{reasoning}</think>{content}"
             self._persist_chat_messages(
                 db, chat_id, body.get("input", ""), content, tool_calls,
-                response_id, stream_usage,
+                response_id, stream_usage, injected_insight_ids=injected_insight_ids,
             )
 
             # Index embeddings in background thread (truly non-blocking)
@@ -1745,10 +1750,14 @@ class Handler(BaseHTTPRequestHandler):
         db = get_db()
         if not self._verify_chat_owner(db, chat_id, user["id"]):
             return
-        rows = db.execute(
-            "SELECT id,role,content,name,args,output,token_count FROM messages WHERE chat_id=? ORDER BY created_at",
-            (chat_id,),
-        ).fetchall()
+        rows = db.execute("""
+            SELECT m.id, m.role, m.content, m.name, m.args, m.output, m.token_count,
+                   mf.rating
+            FROM messages m
+            LEFT JOIN message_feedback mf ON m.id = mf.message_id AND mf.user_id = ?
+            WHERE m.chat_id = ?
+            ORDER BY m.created_at
+        """, (user["id"], chat_id)).fetchall()
         msgs = []
         for r in rows:
             m = {"id": r[0], "role": r[1]}
@@ -1761,6 +1770,7 @@ class Handler(BaseHTTPRequestHandler):
                 try: m["output"] = json.loads(r[5])
                 except (json.JSONDecodeError, ValueError, TypeError): m["output"] = r[5]
             if r[6]: m["token_count"] = r[6]
+            if r[7] is not None: m["feedback"] = r[7]  # rating from message_feedback
             msgs.append(m)
         self._json_response(200, msgs)
 
@@ -2747,7 +2757,7 @@ Curated list:"""
         log.debug(f"memory: refined: {result}")
         self._json_response(200, result)
 
-    def _persist_chat_messages(self, db, chat_id, user_input, content, tool_calls, response_id, usage, now=None):
+    def _persist_chat_messages(self, db, chat_id, user_input, content, tool_calls, response_id, usage, now=None, injected_insight_ids=None):
         """Persist user message, tool calls, and assistant response."""
         if not now:
             now = time.time()
@@ -2776,15 +2786,103 @@ Curated list:"""
                  now),
             )
         if content:
-            db.execute(
+            assistant_message_id = db.execute(
                 "INSERT INTO messages (chat_id,role,content,token_count,created_at) VALUES (?,?,?,?,?)",
                 (chat_id, "assistant", content, completion_tokens or None, now),
-            )
+            ).lastrowid
+            if injected_insight_ids:
+                db.executemany(
+                    "INSERT INTO insight_activations (message_id, insight_id, created_at) VALUES (?,?,?)",
+                    [(assistant_message_id, iid, now) for iid in injected_insight_ids]
+                )
         db.execute(
             "UPDATE chats SET response_id=?, updated_at=? WHERE id=?",
             (response_id, now, chat_id),
         )
         db.commit()
+
+    def _apply_feedback(self, db, message_id, user_id, rating):
+        """Upsert feedback and adjust insight weights atomically.
+        rating: 1 (up), -1 (down), 0 (remove)
+        Returns new rating on success, None on auth failure.
+        """
+        try:
+            db.execute("BEGIN IMMEDIATE")
+        except Exception:
+            try:
+                db.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+        try:
+            ok = db.execute("""
+                SELECT 1 FROM messages m
+                JOIN chats c ON m.chat_id = c.id
+                WHERE m.id = ? AND c.user_id = ?
+            """, (message_id, user_id)).fetchone()
+            if not ok:
+                db.execute("ROLLBACK")
+                return None  # 403
+
+            prev = db.execute(
+                "SELECT rating FROM message_feedback WHERE message_id = ? AND user_id = ?",
+                (message_id, user_id)
+            ).fetchone()
+            prev_rating = prev[0] if prev else 0
+
+            if rating == 0:
+                db.execute(
+                    "DELETE FROM message_feedback WHERE message_id = ? AND user_id = ?",
+                    (message_id, user_id)
+                )
+            else:
+                db.execute("""
+                    INSERT INTO message_feedback (message_id, user_id, rating, created_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(message_id, user_id) DO UPDATE
+                      SET rating=excluded.rating, created_at=excluded.created_at
+                """, (message_id, user_id, rating, time.time()))
+
+            delta = rating - prev_rating
+            if delta != 0:
+                activations = db.execute(
+                    "SELECT insight_id FROM insight_activations WHERE message_id = ?",
+                    (message_id,)
+                ).fetchall()
+                for (insight_id,) in activations:
+                    if delta > 0:
+                        db.execute(
+                            "UPDATE user_insights SET ups = MAX(ups + 0.5, 0), last_feedback_at = ? WHERE id = ?",
+                            (time.time(), insight_id)
+                        )
+                    else:
+                        db.execute(
+                            "UPDATE user_insights SET downs = MAX(downs + 0.5, 0), last_feedback_at = ? WHERE id = ?",
+                            (time.time(), insight_id)
+                        )
+            db.execute("COMMIT")
+            return rating
+        except Exception:
+            try:
+                db.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+
+    def _post_message_feedback(self, message_id, body):
+        user = self._require_auth()
+        if not user:
+            return
+        if not self._check_csrf():
+            return
+        rating = body.get("rating")
+        if rating not in (-1, 0, 1):
+            return self._error(400, "rating must be -1, 0, or 1")
+        db = get_db()
+        result = self._apply_feedback(db, message_id, user["id"], rating)
+        if result is None:
+            return self._error(403, "not your message")
+        self._json_response(200, {"ok": True, "rating": result})
 
     def _json_response(self, code, data):
         if isinstance(data, (dict, list)):
