@@ -4219,6 +4219,10 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 return row;
             }
 
+            // Stubs — replaced by full implementations in CF-T8 and CF-T9
+            function submitFeedback() {}
+            function openPinNavigator() {}
+
             function capIcon(path, fill) {
                 return (
                     '<svg class="cap-icon" viewBox="0 0 20 20"><path fill="' +
