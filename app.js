@@ -4099,19 +4099,23 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     // Normalize: LM Studio native API uses 'key' not 'id'
                     cachedModels = [];
                     raw.forEach((m) => {
-                        const id = m.id || m.key || "";
-                        if (!id || id.includes("embed") || id.includes("arena"))
+                        const key = m.id || m.key || "";
+                        if (!key || key.includes("embed") || key.includes("arena"))
                             return;
                         const inst = (m.loaded_instances || [])[0];
                         const instCfg = inst?.config || {};
                         const instCtx = instCfg.context_length || 0;
                         const maxCtx = m.max_context_length || 0;
-                        // User-set identifier from loaded instance, or LM Studio display name
+                        // Use loaded instance id (user nickname) for API routing so
+                        // LM Studio matches the already-loaded instance instead of
+                        // JIT-loading a new one on every request.
                         const identifier = inst?.id || m.display_name || "";
+                        const id = inst?.id || key;
                         // Use instance context if reasonable (>=1024), otherwise fall back to model max
                         cachedModels.push({
                             ...m,
                             id,
+                            key,
                             identifier,
                             context_length: instCtx >= 1024 ? instCtx : maxCtx,
                             max_context_length: maxCtx,
@@ -4195,7 +4199,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     const ctx = inst?.context_length || m.context_length || "";
                     const d = document.createElement("div");
                     d.className = "model-item" + (isLoaded ? "" : " unloaded");
-                    d.innerHTML = `<span class="mi-name" title="${esc(m.id)}">${modelLabelHtml(m)}</span><span class="mi-status ${isLoaded ? "loaded" : "unloaded"}">${isLoaded ? "Loaded" : "Idle"}</span>${ctx ? `<span class="mi-ctx">${ctx}</span>` : ""}`;
+                    d.innerHTML = `<span class="mi-name" title="${esc(m.key)}">${modelLabelHtml(m)}</span><span class="mi-status ${isLoaded ? "loaded" : "unloaded"}">${isLoaded ? "Loaded" : "Idle"}</span>${ctx ? `<span class="mi-ctx">${ctx}</span>` : ""}`;
                     list.appendChild(d);
                 });
             }
