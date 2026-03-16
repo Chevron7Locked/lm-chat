@@ -40,7 +40,7 @@ When enabled via per-chat settings, the chat-level value takes precedence over g
 **Parameters:**
 - N = 3 (parallel samples)
 - Temperature = 0.7 for candidate generation (diversity without incoherence)
-- Early exit: all 3 requests fire in parallel. If the first 2 responses that return have >80% token overlap, skip the synthesis call and stream response 1 directly. The 3rd request may still be running but its result is discarded — this saves one synthesis call, not one generation.
+- Early exit: all 3 requests fire in parallel. If the first 2 responses that return (arrival order, not submission order) have >80% token overlap, skip the synthesis call and stream the first-returned response directly. The 3rd request may still be running but its result is discarded — this saves one synthesis call, not one generation.
 - Synthesis temperature = 0.0 (deterministic selection)
 - All candidate calls: `store: false`, `integrations: []`
 
@@ -79,7 +79,7 @@ User sends message
        3. Fire 3 parallel non-streaming requests (store:false)
        ↓
        [First 2 responses back — overlap check]
-       → >80% overlap: skip synthesis, stream response 1 as synthetic SSE
+       → >80% overlap: skip synthesis, stream first-returned response as synthetic SSE
        → <80% overlap: wait for response 3
                         Emit: event: status / data: {"text": "Selecting most consistent response..."}
                         Build synthesis payload (strip previous_response_id)
@@ -109,7 +109,43 @@ def emit_status(text):
 # before the normal streaming request is opened below.
 ```
 
-After SC/CoVe preprocessing, the final payload (synthesis input, no `previous_response_id`) is used to open the normal streaming connection to LM Studio. The existing SSE proxy loop (`for raw_line in resp: self.wfile.write(raw_line)`) runs unchanged.
+Both `_self_consistency` and `_chain_of_verification` share the same return contract: bare `str` | `dict` | `None`. The caller in `_handle_chat_stream` uses a shared branching helper and handles the combined SC+CoVe mode explicitly:
+
+```python
+# SC+CoVe combined: CoVe runs first, SC runs on CoVe's synthesis payload.
+# SC alone or CoVe alone run independently.
+if cove_enabled and sc_enabled:
+    cove_result = self._chain_of_verification(payload, user_id)
+    if isinstance(cove_result, dict):
+        # CoVe produced a synthesis payload — run SC on it
+        result = self._self_consistency(cove_result, user_id)
+    else:
+        # CoVe short-circuited (str) or failed (None) — use CoVe result directly
+        result = cove_result
+elif cove_enabled:
+    result = self._chain_of_verification(payload, user_id)
+elif sc_enabled:
+    result = self._self_consistency(payload, user_id)
+else:
+    result = None  # normal single-request path
+
+# Shared result handler
+if isinstance(result, str):
+    # Early-exit / no-VQ path: emit the complete response as a single synthetic SSE event,
+    # then send the [DONE] sentinel. No LM Studio streaming connection needed.
+    text = result or ""
+    delta = json.dumps({"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}})
+    self.wfile.write(f"data: {delta}\n\n".encode())
+    self.wfile.write(b"data: [DONE]\n\n")
+    self.wfile.flush()
+    return
+elif isinstance(result, dict):
+    # Synthesis payload: replaces original payload for the stream-open below.
+    payload = result
+# None or not sc/cove: payload is unchanged, normal stream-open proceeds.
+```
+
+After this block, the existing SSE proxy loop (`for raw_line in resp: self.wfile.write(raw_line)`) runs unchanged.
 
 **Reasoning models (Qwen3.5, DeepSeek-R1):**
 - Thinking tokens are generated per candidate — higher per-candidate cost
@@ -145,7 +181,9 @@ def _self_consistency(self, payload, user_id, n=3, temperature=0.7):
     """USC self-consistency: N parallel candidates → synthesis."""
     import concurrent.futures
 
-    base = {**payload, "store": False, "integrations": [], "temperature": temperature}
+    base = {**payload, "store": False, "integrations": [], "temperature": temperature,
+            "stream": False}  # candidate calls are non-streaming; explicit override prevents
+                               # any inherited stream:True from a combined CoVe+SC call
 
     # Fire N candidates in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
@@ -321,12 +359,29 @@ Responding...
 
 ```python
 def _chain_of_verification(self, payload, user_id):
-    """4-step CoVe pipeline. Returns (final_response, was_verified: bool)."""
+    """4-step CoVe pipeline.
+    Returns bare str when no verifiable claims found — caller emits as synthetic SSE.
+    Returns bare dict (streaming payload) on success — caller opens LM Studio connection.
+    Returns None on unrecoverable failure — caller falls back to normal single request.
+    Same return contract as _self_consistency: bare str | dict | None (no tuple wrapping).
+
+    IMPORTANT: wrap the entire function body in try/except to fulfill the None contract:
+        try:
+            <body>
+        except Exception as e:
+            log.warning(f"CoVe pipeline failed: {e}")
+            return None
+    Without this wrapper, a draft-call failure propagates as an exception instead of
+    falling back gracefully to the normal single-request path.
+    """
+    # Capture original reasoning setting for re-enable in Step 4 synthesis
+    original_reasoning = payload.get("reasoning")
+
     base_silent = {
         **payload,
         "store": False,
         "integrations": [],
-        "reasoning": {"type": "disabled"},  # disable thinking for steps 1-3; re-enable in synthesis if original had it
+        "reasoning": {"type": "disabled"},  # disable thinking for steps 1-3 only
     }
 
     # Step 1: Draft (never shown to user)
@@ -340,8 +395,8 @@ def _chain_of_verification(self, payload, user_id):
     vqs = self._parse_verification_questions(self._extract_content(vq_data))
 
     if not vqs:
-        # No verifiable claims — return draft as final
-        return draft, False
+        # No verifiable claims — return draft as final (bare str, same contract as SC early-exit)
+        return draft
 
     # Step 3: Answer VQs independently (parallel, clean context — NO draft)
     # CRITICAL: clean_payload must not include previous_response_id or system_prompt
@@ -373,13 +428,18 @@ def _chain_of_verification(self, payload, user_id):
             if answer is not None:
                 vq_answers[vq] = answer
 
-    # Step 4: Synthesis — strip previous_response_id (fresh context), enable streaming
+    # Step 4: Synthesis — strip previous_response_id (fresh context), enable streaming.
+    # Re-enable reasoning if the original payload had it (Steps 1-3 disabled it for cost).
     synthesis_input = self._build_cove_synthesis_prompt(
         payload["input"], draft, vq_answers
     )
     synthesis_payload = {**base_silent, "input": synthesis_input, "stream": True}
     synthesis_payload.pop("previous_response_id", None)
-    return synthesis_payload, True  # caller opens streaming connection with this payload
+    if original_reasoning is not None:
+        synthesis_payload["reasoning"] = original_reasoning  # restore original setting
+    else:
+        synthesis_payload.pop("reasoning", None)  # omit key → model default
+    return synthesis_payload  # bare dict, same contract as SC (no tuple wrapping)
 
 
 def _parse_verification_questions(self, text):
@@ -419,7 +479,7 @@ Neither SC nor CoVe sends `context_length` in the request (this causes JIT model
 - CoVe VQ extraction: 350 tokens max (200 is too tight — verbose models add preamble; truncation silently drops questions missing their `?` terminator)
 - CoVe VQ answers: 300 tokens max each
 - CoVe synthesis: inherit user's `max_output_tokens`
-- SC synthesis: inherits user's `max_output_tokens` (returns selected response verbatim — must be full length)
+- SC synthesis: inherits user's `max_output_tokens` if present in the original payload, otherwise falls through to model default (returns selected response verbatim — must be full length, so no cap is applied here)
 
 ### Both Features: Error Handling
 If any intermediate step fails (timeout, model error), fall back gracefully:
