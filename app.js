@@ -4218,8 +4218,27 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 return row;
             }
 
-            // Stubs — replaced by full implementations in CF-T8 and CF-T9
-            function submitFeedback() {}
+            // Stubs — submitFeedback replaced here (CF-T8); openPinNavigator replaced in CF-T9
+            async function submitFeedback(msgId, rating, rowEl) {
+                const upBtn = rowEl?.querySelector(".thumb-up");
+                const downBtn = rowEl?.querySelector(".thumb-down");
+                const wasUp = upBtn?.classList.contains("voted-up") ?? false;
+                const wasDown = downBtn?.classList.contains("voted-down") ?? false;
+                if (upBtn) upBtn.classList.toggle("voted-up", rating === 1);
+                if (downBtn) downBtn.classList.toggle("voted-down", rating === -1);
+                try {
+                    const r = await apiFetch(`/api/messages/${msgId}/feedback`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ rating })
+                    });
+                    if (!r.ok) throw new Error("feedback failed");
+                } catch(e) {
+                    if (upBtn) upBtn.classList.toggle("voted-up", wasUp);
+                    if (downBtn) downBtn.classList.toggle("voted-down", wasDown);
+                    console.error("Feedback error:", e);
+                }
+            }
             function openPinNavigator() {}
 
             // Right panel state: null | "settings" | "pins"
