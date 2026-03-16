@@ -22,7 +22,7 @@ lm-chat fills that gap. It's a web frontend that handles everything around LM St
 
 It's the only web client built on LM Studio's native API (`/api/v1/chat`), so you get MCP tools, server-managed conversation history, and model-aware features that aren't available through the OpenAI compatibility layer. No re-implementation, no compatibility hacks — just a tight integration with everything LM Studio already does well.
 
-Two files. No `pip install`, no `npm`, no build step. Just run it.
+No `pip install`, no `npm`, no build step. Just run it.
 
 ### Docker (recommended)
 
@@ -222,7 +222,7 @@ Optional (`LM_CHAT_AUTH=true`, enabled by default). Not bolted on — designed i
 - **Per-user API keys** — each user stores their own LM Studio auth token
 - **Per-user chat isolation** — users only see their own conversations
 - **Scrypt password hashing** with timing-safe comparison
-- **HttpOnly session cookies** with SameSite=Lax
+- **HttpOnly session cookies** with SameSite=Strict
 - **CSRF protection** via custom header validation
 - **CSP headers** — strict Content Security Policy on all pages
 - **Rate limiting** on login attempts
@@ -289,12 +289,15 @@ browser  ──HTTP──>  server.py  ──HTTP──>  LM Studio
                     Memory · Logging      Inference
 ```
 
-- **`server.py`** — stdlib Python. Proxies native API, persists chats, manages auth, indexes embeddings, handles memory distillation, structured logging. ~3.1k lines.
-- **`index.html`** — single-file SPA. All CSS, JS, and HTML inline. Zero build step. ~8.9k lines.
+- **`server.py`** — stdlib Python, zero dependencies. Proxies native API, persists chats, manages auth, indexes embeddings, handles memory distillation, structured logging. ~2.8k lines.
+- **`qr.py`** — pure-Python QR code generator for TOTP enrollment. ~345 lines.
+- **`index.html`** — HTML shell. ~790 lines.
+- **`style.css`** — all CSS, organized with `@layer` and native nesting. ~3.2k lines.
+- **`app.js`** — all client-side JS. ~4.9k lines.
 - **`manifest.json` + `sw.js`** — PWA support.
 - **`logs/`** — rotating debug logs (auto-created, gitignored).
 
-No frameworks. No transpilation. No node_modules. Two files do all the work — that's the whole app.
+No frameworks. No transpilation. No node_modules. No build step.
 
 ---
 
