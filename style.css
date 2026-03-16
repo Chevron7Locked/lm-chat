@@ -3296,3 +3296,55 @@
 .chat-settings-btn.has-overrides .dot {
     display: block;
 }
+
+/* Pin navigator */
+#pin-nav {
+    display: none;
+    border-top: 1px solid var(--border);
+    padding: var(--sp-3) var(--sp-4);
+    background: var(--surface);
+}
+#pin-nav.has-pins {
+    display: block;
+}
+#pin-nav-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 120px;
+    overflow-y: auto;
+}
+#pin-nav.collapsed #pin-nav-list {
+    display: none;
+}
+#pin-nav-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--faint);
+    padding: 0 2px;
+    line-height: 1;
+    transition: transform 0.15s;
+}
+#pin-nav:not(.collapsed) #pin-nav-toggle {
+    transform: rotate(90deg);
+}
+.pin-nav-item {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    font-size: var(--text-xs);
+    color: var(--dim);
+    transition: background 0.1s;
+}
+.pin-nav-item:hover {
+    background: rgba(255,255,255,0.04);
+    color: var(--text);
+}
+.m-asst:hover .hover-pin-btn,
+.msg-group:hover .hover-pin-btn {
+    display: flex !important;
+}

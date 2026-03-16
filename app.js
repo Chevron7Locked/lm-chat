@@ -2216,6 +2216,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     }, 1000);
                 }
                 await loadChatSettings(id);
+                await loadPinNavigator(id);
                 updateExportBtn();
             }
 
@@ -4179,6 +4180,21 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         actions.appendChild(pinBtn);
                     }
 
+                    // Hover-only pin action (for unpinned messages)
+                    if (!opts.isPinned) {
+                        const hoverPinBtn = document.createElement("button");
+                        hoverPinBtn.className = "msg-action-btn hover-pin-btn";
+                        hoverPinBtn.title = "Pin this response";
+                        hoverPinBtn.style.display = "none";
+                        hoverPinBtn.innerHTML = iconPin();
+                        hoverPinBtn.onclick = () => {
+                            const msgId = hoverPinBtn.closest("[data-msg-id]")?.dataset.msgId;
+                            if (!msgId) return;
+                            pinMessage(msgId, hoverPinBtn.closest(".msg-row"));
+                        };
+                        actions.appendChild(hoverPinBtn);
+                    }
+
                     row.appendChild(actions);
                 } else if (opts.role === "user") {
                     const spacer = document.createElement("div");
@@ -4218,6 +4234,56 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 return row;
             }
 
+            async function pinMessage(msgId, rowEl) {
+                try {
+                    const r = await apiFetch(`/api/messages/${msgId}/pin`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: "{}"
+                    });
+                    if (!r.ok) throw new Error("pin failed");
+                    const data = await r.json();
+                    const actions = rowEl?.querySelector(".msg-row-actions");
+                    if (actions) {
+                        actions.querySelector(".hover-pin-btn")?.remove();
+                        const pinBtn = document.createElement("button");
+                        pinBtn.className = "msg-action-btn pin-active";
+                        pinBtn.title = "Pinned";
+                        pinBtn.innerHTML = iconPin();
+                        pinBtn.dataset.pinId = data.id;
+                        pinBtn.onclick = () => openPinNavigator();
+                        actions.appendChild(pinBtn);
+                    }
+                    await loadPinNavigator(activeId);
+                } catch(e) {
+                    console.error("Pin error:", e);
+                }
+            }
+
+            async function unpinMessage(pinId, pinBtnEl) {
+                try {
+                    const r = await apiFetch(`/api/pins/${pinId}`, { method: "DELETE" });
+                    if (!r.ok) throw new Error("unpin failed");
+                    const actions = pinBtnEl?.closest(".msg-row-actions");
+                    if (actions) {
+                        pinBtnEl.remove();
+                        const msgId = pinBtnEl.closest("[data-msg-id]")?.dataset.msgId;
+                        if (msgId) {
+                            const hoverBtn = document.createElement("button");
+                            hoverBtn.className = "msg-action-btn hover-pin-btn";
+                            hoverBtn.title = "Pin this response";
+                            hoverBtn.style.display = "none";
+                            hoverBtn.innerHTML = iconPin();
+                            hoverBtn.onclick = () => pinMessage(msgId, hoverBtn.closest(".msg-row"));
+                            actions.appendChild(hoverBtn);
+                        }
+                    }
+                    await loadPinNavigator(activeId);
+                } catch(e) {
+                    console.error("Unpin error:", e);
+                }
+            }
+
             // Stubs — submitFeedback replaced here (CF-T8); openPinNavigator replaced in CF-T9
             async function submitFeedback(msgId, rating, rowEl) {
                 const upBtn = rowEl?.querySelector(".thumb-up");
@@ -4239,7 +4305,10 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     console.error("Feedback error:", e);
                 }
             }
-            function openPinNavigator() {}
+            function openPinNavigator() {
+                $("pin-nav")?.classList.remove("collapsed");
+                $("pin-nav")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            }
 
             // Right panel state: null | "settings" | "pins"
             let rightPanelState = null;
@@ -4271,6 +4340,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 $("right-panel").classList.remove("open");
                 $("right-panel-overlay").classList.remove("open");
             }
+            $("pins-btn")?.addEventListener("click", () => openRightPanel("pins"));
 
             // Chat settings: per-chat overrides state
             let chatSettingsCache = {};
@@ -4410,9 +4480,128 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 }
             }
 
-            // Stubs — replaced by full implementations in CF-T9
-            function renderGlobalPinsPanel() {}
-            function togglePinNavigator() {}
+            async function renderGlobalPinsPanel() {
+                const body = $("right-panel-body");
+                body.innerHTML = '<div style="color:var(--dim);font-size:var(--text-sm)">Loading...</div>';
+                try {
+                    const r = await apiFetch("/api/pins");
+                    const pins = await r.json();
+                    if (!pins.length) {
+                        body.innerHTML = '<div style="color:var(--faint);font-size:var(--text-sm);text-align:center;padding:var(--sp-8)">No pins yet</div>';
+                        return;
+                    }
+                    body.innerHTML = "";
+                    pins.forEach(p => {
+                        const item = document.createElement("div");
+                        item.style.cssText = "padding:var(--sp-4) 0;border-bottom:1px solid var(--border)";
+                        item.innerHTML = `
+                            <div style="font-size:var(--text-sm);color:var(--text);margin-bottom:var(--sp-2)">${esc(p.pin_title || p.preview)}</div>
+                            <div style="font-size:0.65rem;color:var(--faint)">${esc(p.chat_title)} · ${new Date(p.pinned_at * 1000).toLocaleDateString()}</div>
+                        `;
+                        const delBtn = document.createElement("button");
+                        delBtn.className = "msg-action-btn";
+                        delBtn.title = "Unpin";
+                        delBtn.style.cssText = "float:right;color:var(--faint);margin-left:var(--sp-3)";
+                        delBtn.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+                        delBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            apiFetch(`/api/pins/${p.id}`, { method: "DELETE" })
+                                .then(() => {
+                                    renderGlobalPinsPanel();
+                                    if (activeId) loadPinNavigator(activeId);
+                                })
+                                .catch((err) => console.error("Failed to unpin:", err));
+                        };
+                        item.appendChild(delBtn);
+                        item.style.cursor = "pointer";
+                        item.onclick = async () => {
+                            if (p.chat_id && p.message_id) {
+                                await loadChat(p.chat_id);
+                                scrollToMessage(p.message_id);
+                                closeRightPanel();
+                            } else {
+                                const existing = item.querySelector(".pin-content-expanded");
+                                if (!existing) {
+                                    const expanded = document.createElement("div");
+                                    expanded.className = "pin-content-expanded";
+                                    expanded.style.cssText = "margin-top:var(--sp-3);font-size:var(--text-xs);color:var(--dim);white-space:pre-wrap;border-top:1px solid var(--border);padding-top:var(--sp-3)";
+                                    expanded.textContent = p.preview || p.content || "(no content)";
+                                    item.appendChild(expanded);
+                                } else {
+                                    existing.remove();
+                                }
+                            }
+                        };
+                        body.appendChild(item);
+                    });
+                } catch(e) {
+                    body.innerHTML = '<div style="color:var(--faint);font-size:var(--text-sm)">Failed to load pins</div>';
+                }
+            }
+
+            function togglePinNavigator() {
+                $("pin-nav")?.classList.toggle("collapsed");
+            }
+
+            async function loadPinNavigator(chatId) {
+                if (!chatId) return;
+                try {
+                    const r = await apiFetch(`/api/chats/${chatId}/pins`);
+                    if (!r.ok) return;
+                    const pins = await r.json();
+                    const nav = $("pin-nav");
+                    const list = $("pin-nav-list");
+                    if (!pins.length) {
+                        nav.classList.remove("has-pins");
+                        return;
+                    }
+                    nav.classList.add("has-pins");
+                    list.innerHTML = "";
+                    pins.forEach(p => {
+                        const item = document.createElement("div");
+                        item.className = "pin-nav-item";
+                        item.innerHTML = `
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>
+                            </svg>
+                            <span>${esc(p.pin_title || "Pinned response")}</span>
+                        `;
+                        item.onclick = () => scrollToMessage(p.message_id);
+                        list.appendChild(item);
+                    });
+
+                    // Reconcile isPinned indicators on already-rendered message rows
+                    const pinnedIds = new Set(pins.map(p => String(p.message_id)).filter(Boolean));
+
+                    // Remove stale .pin-active buttons
+                    msgs.querySelectorAll(".pin-active").forEach(btn => {
+                        const id = btn.closest("[data-msg-id]")?.dataset.msgId;
+                        if (!id || !pinnedIds.has(id)) btn.remove();
+                    });
+
+                    for (const id of pinnedIds) {
+                        const msgEl = msgs.querySelector(`[data-msg-id="${id}"]`);
+                        if (!msgEl) continue;
+                        const actions = msgEl.querySelector(".msg-row-actions");
+                        if (!actions || actions.querySelector(".pin-active")) continue;
+                        actions.querySelector(".hover-pin-btn")?.remove();
+                        const pinBtn = document.createElement("button");
+                        pinBtn.className = "msg-action-btn pin-active";
+                        pinBtn.title = "Pinned — click to view navigator";
+                        pinBtn.innerHTML = iconPin();
+                        pinBtn.onclick = () => openPinNavigator();
+                        actions.appendChild(pinBtn);
+                    }
+                } catch(e) {
+                    console.error("Load pin navigator:", e);
+                }
+            }
+
+            function scrollToMessage(msgId) {
+                if (!msgId) return;
+                const el = msgs.querySelector(`[data-msg-id="${msgId}"]`);
+                if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
 
             function capIcon(path, fill) {
                 return (
@@ -5299,4 +5488,5 @@ Object.assign(window, {
     saveEdit, cancelEdit, forkFromMsg, retryLast, regenerate,
     triggerCompact, handleFiles, removeAttachment, unshareChat,
     closeRightPanel, openRightPanel, togglePinNavigator,
+    pinMessage, unpinMessage, loadPinNavigator, scrollToMessage,
 });
