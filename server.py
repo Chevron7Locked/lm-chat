@@ -153,9 +153,6 @@ def init_db():
         ("chats", "pinned", "INTEGER DEFAULT 0"),
         ("chats", "folder", "TEXT DEFAULT ''"),
         ("chats", "settings", "TEXT"),
-        ("user_insights", "ups", "REAL DEFAULT 0"),
-        ("user_insights", "downs", "REAL DEFAULT 0"),
-        ("user_insights", "last_feedback_at", "REAL"),
     ]
     for table, col, typedef in _MIGRATIONS:
         try:
@@ -189,6 +186,9 @@ def init_db():
         use_count INTEGER DEFAULT 0,
         state TEXT DEFAULT 'active',
         replaced_by TEXT,
+        ups REAL DEFAULT 0,
+        downs REAL DEFAULT 0,
+        last_feedback_at REAL,
         FOREIGN KEY (origin_chat_id) REFERENCES chats(id) ON DELETE SET NULL
     )""")
     db.execute("""CREATE INDEX IF NOT EXISTS idx_insights_user_state
