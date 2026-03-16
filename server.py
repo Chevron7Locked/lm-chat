@@ -1355,7 +1355,7 @@ class Handler(BaseHTTPRequestHandler):
             log.debug(f"REQ system_prompt: [{len(payload.get('system_prompt') or '')} chars]")
             inp = payload.get('input', '')
             log.debug(f"REQ input: {(str(inp)[:150]) if isinstance(inp, list) else (inp or '')[:150]}")
-            params = {k: payload[k] for k in ('temperature','top_p','top_k','min_p','repeat_penalty','max_output_tokens','reasoning') if k in payload}
+            params = {k: payload[k] for k in ('temperature','top_p','top_k','min_p','repeat_penalty','presence_penalty','max_output_tokens','reasoning') if k in payload}
             if params:
                 log.debug(f"REQ params: {params}")
 
@@ -1712,6 +1712,7 @@ class Handler(BaseHTTPRequestHandler):
             ),
             "stream": False,
             "store": False,
+            "integrations": [],
         }
         try:
             sum_data = self._lmstudio_chat(summary_payload, user["id"], timeout=60)
@@ -1758,6 +1759,7 @@ class Handler(BaseHTTPRequestHandler):
                         known_context=known, conversation=convo_for_distill
                     ),
                     "stream": False, "store": False,
+                    "integrations": [],
                     "temperature": 0.3,
                 }
                 distill_data = self._lmstudio_chat(distill_payload, user["id"], timeout=30)
@@ -2096,12 +2098,14 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             payload["min_p"] = body["min_p"]
         if body.get("repeat_penalty") is not None:
             payload["repeat_penalty"] = body["repeat_penalty"]
+        if body.get("presence_penalty") is not None:
+            payload["presence_penalty"] = body["presence_penalty"]
         if body.get("max_output_tokens") is not None and body["max_output_tokens"] > 0:
             payload["max_output_tokens"] = body["max_output_tokens"]
         if body.get("reasoning"):
             payload["reasoning"] = body["reasoning"]
-        if body.get("context_length") is not None and body["context_length"] > 0:
-            payload["context_length"] = body["context_length"]
+        # context_length omitted — it's a load-time parameter in LM Studio.
+        # Sending it per-request triggers JIT model reloads.
         if body.get("incognito"):
             payload["store"] = False
         return payload
@@ -2167,7 +2171,7 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         """Format insights as a system prompt section."""
         if not insights:
             return ""
-        lines = ["## About you"]
+        lines = ["## About the user"]
         for ins in insights:
             lines.append(f"- {ins['content']} [{ins['category']}]")
         return "\n".join(lines)
@@ -2293,6 +2297,7 @@ Distill insights (or respond "none" if nothing new):"""
             "input": prompt,
             "stream": False,
             "store": False,
+            "integrations": [],
             "temperature": 0.3,
         }
         try:
@@ -2495,6 +2500,7 @@ Curated list:"""
             "input": prompt,
             "stream": False,
             "store": False,
+            "integrations": [],
             "temperature": 0.2,
         }
         try:

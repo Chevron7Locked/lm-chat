@@ -725,19 +725,15 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
             });
 
             const MCPS = [
-                { id: "mcp/brave-search", name: "Brave Search", on: true },
-                { id: "mcp/memory", name: "Memory", on: true },
-                {
-                    id: "mcp/sequential-thinking",
-                    name: "Sequential Thinking",
-                    on: true,
-                },
-                { id: "mcp/context7", name: "Context7", on: true },
-                { id: "mcp/paper-search", name: "Paper Search", on: true },
-                { id: "mcp/firecrawl", name: "Firecrawl", on: false },
-                { id: "mcp/filesystem", name: "Filesystem", on: false },
-                { id: "mcp/playwright", name: "Playwright", on: false },
-                { id: "mcp/github", name: "GitHub", on: false },
+                { id: "mcp/brave-search", name: "Brave Search", on: true, hint: "Current events, recent releases, anything after your training cutoff, or when unsure about a fact" },
+                { id: "mcp/memory", name: "Memory", on: true, hint: "Store and retrieve persistent user context across conversations" },
+                { id: "mcp/sequential-thinking", name: "Sequential Thinking", on: true, hint: "Break down complex problems with structured step-by-step reasoning" },
+                { id: "mcp/context7", name: "Context7", on: true, hint: "Look up accurate, up-to-date API docs for libraries and frameworks before writing code" },
+                { id: "mcp/paper-search", name: "Paper Search", on: true, hint: "Find academic papers and real research for technical or scientific questions" },
+                { id: "mcp/firecrawl", name: "Firecrawl", on: false, hint: "Read full web page content when search snippets aren't enough" },
+                { id: "mcp/filesystem", name: "Filesystem", on: false, hint: "Read and write local files" },
+                { id: "mcp/playwright", name: "Playwright", on: false, hint: "Browser automation, screenshots, and web interaction" },
+                { id: "mcp/github", name: "GitHub", on: false, hint: "Manage GitHub issues, PRs, and repositories" },
             ];
 
             const STARTER_ICONS = {
@@ -1129,6 +1125,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
             lss("s-top-k", "lsc-top-k", "40");
             lss("s-min-p", "lsc-min-p", "0.05");
             lss("s-repeat-pen", "lsc-repeat-pen", "1.0");
+            lss("s-presence-pen", "lsc-presence-pen", "0");
             lss("s-max-tokens", "lsc-max-tokens", "-1");
 
             // Load memory toggle state
@@ -1160,14 +1157,7 @@ You're the friend who happens to know a lot about everything — software, hardw
 - Explain ML, inference, GPU, and hardware concepts naturally as they come up.
 - Use analogies from web dev, databases, gaming, or music production when they fit.
 
-## TOOL USAGE
-
-Use your tools when they add value, not for everything:
-- **brave-search**: Current events, recent releases, anything after your training cutoff, or when you're not sure about a fact.
-- **firecrawl**: When a search result needs deeper reading.
-- **paper-search**: When a conversation goes academic and you want to point to real research.
-- **context7**: When discussing specific libraries or frameworks and you want accurate API details.
-- **sequential-thinking**: When a question is genuinely complex and benefits from structured reasoning.
+{{tools}}
 
 ## WHAT NOT TO DO
 
@@ -1182,23 +1172,18 @@ Use your tools when they add value, not for everything:
 ## CORE RULES (NON-NEGOTIABLE)
 
 1. ALWAYS read a file before editing it. Never guess at file contents.
-2. ALWAYS check documentation with context7 before using any library API. Your training data has outdated signatures and deprecated methods.
-3. ALWAYS use sequential-thinking to plan before writing code. Think first, code second.
+2. ALWAYS check documentation before using any library API. Your training data has outdated signatures and deprecated methods.
+3. Think before you code. Plan the approach, then implement.
 4. NEVER write placeholder code, stubs, or "TODO" comments. Every function you write must be complete.
 5. NEVER hallucinate imports, function signatures, or API methods. Look them up.
 
-## TOOLS AND WHEN TO USE THEM
-
-- **context7**: Use BEFORE writing any code that touches a library or framework. Look up the real API.
-- **brave-search**: Use when you encounter errors, need implementation patterns, or are unsure how to approach a problem.
-- **sequential-thinking**: Use before coding (break down the task), when stuck (analyze alternatives), and after coding (review for bugs).
-- **firecrawl**: When brave-search finds a relevant page and you need the full content.
+{{tools}}
 
 ## WORKFLOW
 
 1. **Understand** — Read relevant files. Understand existing code structure and patterns.
-2. **Plan** (sequential-thinking) — What changes are needed? What could go wrong?
-3. **Research** — Check docs (context7) for any APIs you'll use.
+2. **Plan** — What changes are needed? What could go wrong?
+3. **Research** — Check docs for any APIs you'll use.
 4. **Implement** — Write complete, working code. Match existing style. No stubs.
 5. **Verify** — Read back modified files. Check for missing imports, edge cases.
 
@@ -1249,20 +1234,14 @@ You write like someone who's read everything and remembers what worked. You know
 ## CORE RULE (NON-NEGOTIABLE)
 You MUST conduct research using your tools for EVERY question. NEVER answer from memory alone. Your training data is stale and incomplete. Search first, then answer.
 
-## TOOLS AND WHEN TO USE THEM
-
-- **brave-search**: Your primary research tool. Run MULTIPLE searches with different angles — don't stop at one query.
-- **firecrawl**: After finding relevant URLs, read the FULL page content. Search snippets are not enough. Minimum 3 sources per research task.
-- **paper-search**: Use for any technical, scientific, or academic question. Search IN ADDITION to brave-search.
-- **context7**: When the question involves a specific library or framework.
-- **sequential-thinking**: Break down reasoning BEFORE searching. After gathering sources, synthesize and identify gaps.
+{{tools}}
 
 ## RESEARCH PROCESS
 
-1. **Think first** (sequential-thinking) — What do I need to find out? What are the sub-questions?
-2. **Search broadly** (brave-search + paper-search) — Multiple queries, different angles
-3. **Read deeply** (firecrawl) — Full pages, not snippets. Minimum 3 sources.
-4. **Identify gaps** (sequential-thinking) — What's still missing? Any contradictions?
+1. **Think first** — What do I need to find out? What are the sub-questions?
+2. **Search broadly** — Multiple queries, different angles. Use every relevant search tool available.
+3. **Read deeply** — Full pages, not snippets. Minimum 3 sources.
+4. **Identify gaps** — What's still missing? Any contradictions?
 5. **Search again** if gaps exist
 6. **Synthesize** — Combine findings into a clear, organized response
 
@@ -1358,6 +1337,17 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             };
 
             // --- Prompt Variables ---
+            function buildToolsVar() {
+                const active = MCPS.filter((s) => s.on && s.hint);
+                if (!active.length) return "";
+                return (
+                    "## AVAILABLE TOOLS\n\nUse your tools when they add value, not for everything:\n" +
+                    active
+                        .map((s) => `- **${s.name}**: ${s.hint}.`)
+                        .join("\n")
+                );
+            }
+
             function expandVars(text) {
                 const now = new Date();
                 const days = [
@@ -1384,6 +1374,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         }),
                     )
                     .replace(/\{\{model\}\}/g, modelSel.value || "unknown")
+                    .replace(/\{\{tools\}\}/g, buildToolsVar())
                     .replace(/\{\{memories\}\}/g, ""); // handled server-side
             }
 
@@ -2860,11 +2851,14 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const repPen = parseFloat($("s-repeat-pen").value);
                 if (!isNaN(repPen) && repPen !== 1.0)
                     body.repeat_penalty = repPen;
+                const presPen = parseFloat($("s-presence-pen").value);
+                if (!isNaN(presPen) && presPen > 0)
+                    body.presence_penalty = presPen;
                 const maxTok = parseInt($("s-max-tokens").value);
                 if (!isNaN(maxTok) && maxTok > 0)
                     body.max_output_tokens = maxTok;
-                const ctx = parseInt($("s-ctx").value);
-                if (!isNaN(ctx) && ctx > 0) body.context_length = ctx;
+                // context_length is a load-time parameter — sending it per-request
+                // triggers JIT model reloads in LM Studio. Read-only from instance config.
                 return body;
             }
 
@@ -4625,6 +4619,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         userMessage,
                     temperature: 0.3,
                     integrations: [],
+                    incognito: true,
                 };
                 apiFetch("/api/chat", {
                     method: "POST",
