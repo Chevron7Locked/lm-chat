@@ -4256,18 +4256,30 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             // Chat settings: per-chat overrides state
             let chatSettingsCache = {};
             let chatSettingsDebounce = null;
+            let chatSettingsPending = {};
 
             async function loadChatSettings(chatId) {
-                if (!chatId) { chatSettingsCache = {}; return; }
+                const btn = $("chat-settings-btn");
+                if (!chatId) {
+                    chatSettingsCache = {};
+                    if (btn) btn.classList.remove("has-overrides");
+                    return;
+                }
                 try {
                     const r = await apiFetch(`/api/chats/${chatId}/settings`);
-                    if (!r.ok) { chatSettingsCache = {}; return; }
+                    if (!r.ok) {
+                        chatSettingsCache = {};
+                        if (btn) btn.classList.remove("has-overrides");
+                        return;
+                    }
                     chatSettingsCache = await r.json();
-                    const btn = $("chat-settings-btn");
                     if (btn) btn.classList.toggle("has-overrides", Object.keys(chatSettingsCache).length > 0);
                 } catch(e) {
                     chatSettingsCache = {};
+                    if (btn) btn.classList.remove("has-overrides");
                 }
+                // If the settings panel is open, refresh it with the new chat's settings
+                if (rightPanelState === "settings") renderChatSettingsPanel();
             }
 
             function renderChatSettingsPanel() {
@@ -4348,13 +4360,16 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
             function saveChatSetting(key, value) {
                 if (!activeId) return;
+                chatSettingsPending[key] = value;
                 if (chatSettingsDebounce) clearTimeout(chatSettingsDebounce);
                 chatSettingsDebounce = setTimeout(async () => {
+                    const payload = { ...chatSettingsPending };
+                    chatSettingsPending = {};
                     try {
                         await apiFetch(`/api/chats/${activeId}/settings`, {
                             method: "PATCH",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ [key]: value })
+                            body: JSON.stringify(payload)
                         });
                         await loadChatSettings(activeId);
                     } catch(e) {
