@@ -722,6 +722,154 @@ class Handler(BaseHTTPRequestHandler):
         db.commit()
         self._json_response(200, {})
 
+    def _pin_message(self, message_id):
+        user = self._require_auth()
+        if not user:
+            return
+        if not self._check_csrf():
+            return
+        db = get_db()
+        row = db.execute("""
+            SELECT m.content, m.role, c.id, c.title
+            FROM messages m
+            JOIN chats c ON m.chat_id = c.id
+            WHERE m.id = ? AND c.user_id = ? AND m.role = 'assistant'
+        """, (message_id, user["id"])).fetchone()
+        if not row:
+            return self._error(404, "message not found or not an assistant message")
+        content, role, chat_id, chat_title = row
+        if not content:
+            return self._error(400, "message has no content to pin")
+        existing = db.execute(
+            "SELECT id FROM pins WHERE message_id = ? AND user_id = ?",
+            (message_id, user["id"])
+        ).fetchone()
+        if existing:
+            return self._json_response(200, {"id": existing[0], "already_pinned": True})
+        pin_id = uuid.uuid4().hex
+        now = time.time()
+        db.execute(
+            """INSERT INTO pins (id, user_id, message_id, chat_id, chat_title, content, pin_title, pinned_at)
+               VALUES (?, ?, ?, ?, ?, ?, NULL, ?)""",
+            (pin_id, user["id"], message_id, chat_id, chat_title, content, now)
+        )
+        db.commit()
+        t = threading.Thread(
+            target=self._generate_pin_title,
+            args=(pin_id, content, user["id"], chat_id),
+            daemon=True
+        )
+        t.start()
+        self._json_response(201, {
+            "id": pin_id, "message_id": message_id, "chat_id": chat_id,
+            "chat_title": chat_title, "pin_title": None, "pinned_at": now
+        })
+
+    def _delete_pin(self, pin_id):
+        user = self._require_auth()
+        if not user:
+            return
+        if not self._check_csrf():
+            return
+        db = get_db()
+        result = db.execute(
+            "DELETE FROM pins WHERE id = ? AND user_id = ?",
+            (pin_id, user["id"])
+        )
+        if result.rowcount == 0:
+            return self._error(404, "pin not found")
+        db.commit()
+        self._json_response(200, {"ok": True})
+
+    def _list_pins(self):
+        user = self._require_auth()
+        if not user:
+            return
+        db = get_db()
+        rows = db.execute(
+            """SELECT id, message_id, chat_id, chat_title, pin_title, pinned_at,
+                      substr(content, 1, 200) as preview
+               FROM pins WHERE user_id = ?
+               ORDER BY pinned_at DESC""",
+            (user["id"],)
+        ).fetchall()
+        pins = [
+            {
+                "id": r[0], "message_id": r[1], "chat_id": r[2],
+                "chat_title": r[3], "pin_title": r[4], "pinned_at": r[5],
+                "preview": r[6]
+            }
+            for r in rows
+        ]
+        self._json_response(200, pins)
+
+    def _get_chat_pins(self, chat_id):
+        user = self._require_auth()
+        if not user:
+            return
+        db = get_db()
+        rows = db.execute(
+            """SELECT id, pin_title, message_id, pinned_at, substr(content, 1, 40) as fallback
+               FROM pins
+               WHERE user_id = ? AND chat_id = ?
+               ORDER BY COALESCE(message_id, 9999999999) ASC, pinned_at ASC""",
+            (user["id"], chat_id)
+        ).fetchall()
+        pins = [
+            {
+                "id": r[0],
+                "pin_title": r[1] or r[4],
+                "message_id": r[2],
+                "pinned_at": r[3]
+            }
+            for r in rows
+        ]
+        self._json_response(200, pins)
+
+    def _update_pin_title(self, pin_id, body):
+        user = self._require_auth()
+        if not user:
+            return
+        if not self._check_csrf():
+            return
+        title = (body.get("title") or "").strip()[:80]
+        if not title:
+            return self._error(400, "title required")
+        db = get_db()
+        result = db.execute(
+            "UPDATE pins SET pin_title = ? WHERE id = ? AND user_id = ?",
+            (title, pin_id, user["id"])
+        )
+        if result.rowcount == 0:
+            return self._error(404, "pin not found")
+        db.commit()
+        self._json_response(200, {"ok": True, "title": title})
+
+    def _generate_pin_title(self, pin_id, content, user_id, chat_id):
+        """Background thread — must open its own DB connection via get_db()."""
+        try:
+            db = get_db()
+            row = db.execute("SELECT model FROM chats WHERE id = ?", (chat_id,)).fetchone()
+            model = row[0] if row else None
+            if not model:
+                return
+            prompt = f"Summarize this in 5-7 words as a short navigation label. No punctuation.\n\n{content[:500]}"
+            payload = {
+                "model": model,
+                "input": prompt,
+                "max_output_tokens": 20,
+                "temperature": 0.3,
+                "store": False,
+                "integrations": []
+            }
+            data = self._lmstudio_chat(payload, user_id, timeout=15)
+            title = self._extract_content(data).strip()[:80]
+            if title:
+                db.execute("UPDATE pins SET pin_title = ? WHERE id = ?", (title, pin_id))
+                db.commit()
+        except Exception as e:
+            log.warning(f"Pin title generation failed for pin {pin_id}: {e}")
+
     def _resolve_chat_settings(self, chat_id, user_id, body):
         """Merge per-chat DB settings into the request body as fallback values.
         Layering (first non-null wins, per parameter):
@@ -882,6 +1030,11 @@ class Handler(BaseHTTPRequestHandler):
         elif re.match(r'^/api/chats/([^/]+)/settings$', self.path):
             chat_id = self.path.split("/")[3]
             self._get_chat_settings(chat_id)
+        elif self.path == "/api/pins":
+            self._list_pins()
+        elif re.match(r'^/api/chats/([^/]+)/pins$', self.path):
+            chat_id = self.path.split("/")[3]
+            self._get_chat_pins(chat_id)
         else:
             self.send_error(404)
 
@@ -976,6 +1129,9 @@ class Handler(BaseHTTPRequestHandler):
         elif re.match(r'^/api/messages/(\d+)/feedback$', self.path):
             message_id = int(self.path.split("/")[3])
             self._post_message_feedback(message_id, body)
+        elif re.match(r'^/api/messages/(\d+)/pin$', self.path):
+            message_id = int(self.path.split("/")[3])
+            self._pin_message(message_id)
         else:
             self.send_error(404)
 
@@ -1001,6 +1157,9 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/insights/"):
             insight_id = self.path.split("/")[3]
             self._delete_insight(insight_id)
+        elif re.match(r'^/api/pins/([^/]+)$', self.path):
+            pin_id = self.path.split("/")[3]
+            self._delete_pin(pin_id)
         else:
             self.send_error(404)
 
@@ -1015,6 +1174,9 @@ class Handler(BaseHTTPRequestHandler):
         if re.match(r'^/api/chats/([^/]+)/settings$', self.path):
             chat_id = self.path.split("/")[3]
             self._save_chat_settings(chat_id, body)
+        elif re.match(r'^/api/pins/([^/]+)/title$', self.path):
+            pin_id = self.path.split("/")[3]
+            self._update_pin_title(pin_id, body)
         else:
             self.send_error(404)
 
