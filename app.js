@@ -1085,6 +1085,12 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     localStorage.setItem("lsc-ctx", String(m.context_length));
                 }
                 if (m.max_context_length) $("s-ctx").max = m.max_context_length;
+                // Sync presence_penalty from instance config if LM Studio exposes it
+                const cfg2 = m.instance_config || {};
+                if (cfg2.presence_penalty != null) {
+                    $("s-presence-pen").value = cfg2.presence_penalty;
+                    localStorage.setItem("lsc-presence-pen", String(cfg2.presence_penalty));
+                }
                 // Show instance config (read-only info from LM Studio)
                 const cfg = m.instance_config || {};
                 const el = $("model-config-info");
@@ -1125,7 +1131,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
             lss("s-top-k", "lsc-top-k", "40");
             lss("s-min-p", "lsc-min-p", "0.05");
             lss("s-repeat-pen", "lsc-repeat-pen", "1.0");
-            lss("s-presence-pen", "lsc-presence-pen", "0");
+            lss("s-presence-pen", "lsc-presence-pen", "1");
             lss("s-max-tokens", "lsc-max-tokens", "-1");
 
             // Load memory toggle state
@@ -2851,6 +2857,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     body.max_output_tokens = maxTok;
                 // context_length is a load-time parameter — sending it per-request
                 // triggers JIT model reloads in LM Studio. Read-only from instance config.
+                // Add per-chat SC/CoVe settings if overrides are set.
+                // chatSettingsCache is populated by loadChatSettings (core features Task 7).
+                // typeof guard prevents ReferenceError if core features plan Task 7 not yet applied.
+                if (typeof chatSettingsCache !== "undefined") {
+                    if (chatSettingsCache.sc_enabled != null) body.sc_enabled = chatSettingsCache.sc_enabled;
+                    if (chatSettingsCache.cove_enabled != null) body.cove_enabled = chatSettingsCache.cove_enabled;
+                }
                 return body;
             }
 
@@ -3406,6 +3419,12 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             if (uInp) updateCtxGauge(uInp, uCtx);
                         }
                         break;
+                    case "status": {
+                        const text = parsed.text || "";
+                        const span = $("thinking")?.querySelector("span");
+                        if (span) span.textContent = text;
+                        break;
+                    }
                 }
             }
 
