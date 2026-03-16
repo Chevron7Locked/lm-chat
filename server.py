@@ -152,6 +152,10 @@ def init_db():
         ("messages", "token_count", "INTEGER"),
         ("chats", "pinned", "INTEGER DEFAULT 0"),
         ("chats", "folder", "TEXT DEFAULT ''"),
+        ("chats", "settings", "TEXT"),
+        ("user_insights", "ups", "REAL DEFAULT 0"),
+        ("user_insights", "downs", "REAL DEFAULT 0"),
+        ("user_insights", "last_feedback_at", "REAL"),
     ]
     for table, col, typedef in _MIGRATIONS:
         try:
@@ -191,6 +195,55 @@ def init_db():
         ON user_insights(user_id, state)""")
     db.execute("""CREATE INDEX IF NOT EXISTS idx_insights_user_cat
         ON user_insights(user_id, category)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS insight_activations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id  INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    insight_id  TEXT    NOT NULL REFERENCES user_insights(id) ON DELETE CASCADE,
+    created_at  REAL    NOT NULL
+)""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_activations_message ON insight_activations(message_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_activations_insight ON insight_activations(insight_id)")
+    db.execute("""CREATE TABLE IF NOT EXISTS message_feedback (
+    message_id  INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id     TEXT    NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    rating      INTEGER NOT NULL CHECK(rating IN (-1, 1)),
+    created_at  REAL    NOT NULL,
+    PRIMARY KEY (message_id, user_id)
+)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS pins (
+    id          TEXT    PRIMARY KEY,
+    user_id     TEXT    NOT NULL REFERENCES users(id)     ON DELETE CASCADE,
+    message_id  INTEGER          REFERENCES messages(id)  ON DELETE SET NULL,
+    chat_id     TEXT             REFERENCES chats(id)     ON DELETE SET NULL,
+    chat_title  TEXT    NOT NULL,
+    content     TEXT    NOT NULL,
+    pin_title   TEXT,
+    pinned_at   REAL    NOT NULL
+)""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_pins_user    ON pins(user_id, pinned_at DESC)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_pins_chat    ON pins(user_id, chat_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_pins_message ON pins(message_id)")
+    db.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS pins_fts USING fts5(
+    content,
+    chat_title,
+    pin_title,
+    content='pins',
+    content_rowid='rowid'
+)""")
+    db.execute("""CREATE TRIGGER IF NOT EXISTS pins_ai AFTER INSERT ON pins BEGIN
+    INSERT INTO pins_fts(rowid, content, chat_title, pin_title)
+    VALUES (new.rowid, new.content, new.chat_title, new.pin_title);
+END""")
+    db.execute("""CREATE TRIGGER IF NOT EXISTS pins_ad AFTER DELETE ON pins BEGIN
+    INSERT INTO pins_fts(pins_fts, rowid, content, chat_title, pin_title)
+    VALUES ('delete', old.rowid, old.content, old.chat_title, old.pin_title);
+END""")
+    db.execute("""CREATE TRIGGER IF NOT EXISTS pins_au AFTER UPDATE ON pins BEGIN
+    INSERT INTO pins_fts(pins_fts, rowid, content, chat_title, pin_title)
+    VALUES ('delete', old.rowid, old.content, old.chat_title, old.pin_title);
+    INSERT INTO pins_fts(rowid, content, chat_title, pin_title)
+    VALUES (new.rowid, new.content, new.chat_title, new.pin_title);
+END""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_messages_chat_role ON messages(chat_id, role)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_chats_user_id ON chats(user_id)")
@@ -238,6 +291,7 @@ def get_db():
     db.execute("PRAGMA temp_store=MEMORY")
     db.execute("PRAGMA foreign_keys=ON")
     db.create_function("ln", 1, math.log)
+    db.create_function("exp", 1, math.exp)
     _thread_local.db = db
     return db
 
@@ -2769,7 +2823,11 @@ if __name__ == "__main__":
             )
             # Migrate any data from auth-disabled "default" user to new admin
             migrated = 0
-            KNOWN_TABLES = {"chats", "messages", "embeddings", "user_settings", "user_insights", "shared_chats"}
+            KNOWN_TABLES = {
+                "chats", "messages", "users", "sessions", "embeddings",
+                "user_settings", "rate_limits", "user_insights", "shared_chats",
+                "message_feedback", "pins",  # new in v0.3.0
+            }
             for table in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
                 tname = table[0]
                 if tname not in KNOWN_TABLES:
