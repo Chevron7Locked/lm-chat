@@ -2215,6 +2215,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         }
                     }, 1000);
                 }
+                await loadChatSettings(id);
                 updateExportBtn();
             }
 
@@ -4221,6 +4222,164 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             function submitFeedback() {}
             function openPinNavigator() {}
 
+            // Right panel state: null | "settings" | "pins"
+            let rightPanelState = null;
+
+            function openRightPanel(mode) {
+                if (rightPanelState === mode) {
+                    closeRightPanel();
+                    return;
+                }
+                rightPanelState = mode;
+                $("right-panel").classList.add("open");
+                $("right-panel-overlay").classList.add("open");
+                if (mode === "settings") {
+                    $("right-panel-title").textContent = "Chat Settings";
+                    const actionBtn = $("right-panel-action-btn");
+                    actionBtn.style.display = "";
+                    actionBtn.textContent = "Reset to defaults";
+                    actionBtn.onclick = resetChatSettings;
+                    renderChatSettingsPanel();
+                } else if (mode === "pins") {
+                    $("right-panel-title").textContent = "Pinned";
+                    $("right-panel-action-btn").style.display = "none";
+                    renderGlobalPinsPanel();
+                }
+            }
+
+            function closeRightPanel() {
+                rightPanelState = null;
+                $("right-panel").classList.remove("open");
+                $("right-panel-overlay").classList.remove("open");
+            }
+
+            // Chat settings: per-chat overrides state
+            let chatSettingsCache = {};
+            let chatSettingsDebounce = null;
+
+            async function loadChatSettings(chatId) {
+                if (!chatId) { chatSettingsCache = {}; return; }
+                try {
+                    const r = await apiFetch(`/api/chats/${chatId}/settings`);
+                    if (!r.ok) { chatSettingsCache = {}; return; }
+                    chatSettingsCache = await r.json();
+                    const btn = $("chat-settings-btn");
+                    if (btn) btn.classList.toggle("has-overrides", Object.keys(chatSettingsCache).length > 0);
+                } catch(e) {
+                    chatSettingsCache = {};
+                }
+            }
+
+            function renderChatSettingsPanel() {
+                const body = $("right-panel-body");
+                const s = chatSettingsCache;
+                body.innerHTML = `
+                    <div class="sg">
+                        <label>System Prompt</label>
+                        <textarea id="cs-sys" rows="4" placeholder="(using global)"></textarea>
+                    </div>
+                    <div class="sg sg-row">
+                        <div class="sg-half"><label>Temperature</label>
+                            <input type="number" id="cs-temp" min="0" max="2" step="0.1" placeholder="(global)" value="${s.temperature ?? ""}"></div>
+                        <div class="sg-half"><label>Top P</label>
+                            <input type="number" id="cs-top-p" min="0" max="1" step="0.05" placeholder="(global)" value="${s.top_p ?? ""}"></div>
+                    </div>
+                    <div class="sg sg-row">
+                        <div class="sg-half"><label>Top K</label>
+                            <input type="number" id="cs-top-k" min="0" max="500" step="1" placeholder="(global)" value="${s.top_k ?? ""}"></div>
+                        <div class="sg-half"><label>Min P</label>
+                            <input type="number" id="cs-min-p" min="0" max="1" step="0.01" placeholder="(global)" value="${s.min_p ?? ""}"></div>
+                    </div>
+                    <div class="sg sg-row">
+                        <div class="sg-half"><label>Repeat Penalty</label>
+                            <input type="number" id="cs-repeat-pen" min="0" max="3" step="0.05" placeholder="(global)" value="${s.repeat_penalty ?? ""}"></div>
+                        <div class="sg-half"><label>Presence Penalty</label>
+                            <input type="number" id="cs-presence-pen" min="0" max="2" step="0.1" placeholder="(global)" value="${s.presence_penalty ?? ""}"></div>
+                    </div>
+                    <div class="sg"><label>Max Output Tokens</label>
+                        <input type="number" id="cs-max-tokens" min="-1" max="32768" step="256" placeholder="(global)" value="${s.max_output_tokens ?? ""}">
+                    </div>
+                    <div class="sg"><label>Reasoning</label>
+                        <select id="cs-reasoning">
+                            <option value="">(global)</option>
+                            <option value="off" ${s.reasoning==="off"?"selected":""}>Off</option>
+                            <option value="medium" ${s.reasoning==="medium"?"selected":""}>Medium</option>
+                            <option value="high" ${s.reasoning==="high"?"selected":""}>High</option>
+                        </select>
+                    </div>
+                    <div class="sg" style="border-top:1px solid var(--border);padding-top:var(--sp-6);margin-top:var(--sp-6)">
+                        <div class="toggle-row"><span>Self-Consistency</span>
+                            <label class="sw"><input type="checkbox" id="cs-sc" ${s.sc_enabled?"checked":""}><span class="slider"></span></label>
+                        </div>
+                        <div class="toggle-row" style="margin-top:var(--sp-4)"><span>Chain of Verification</span>
+                            <label class="sw"><input type="checkbox" id="cs-cove" ${s.cove_enabled?"checked":""}><span class="slider"></span></label>
+                        </div>
+                    </div>
+                `;
+                const ta = $("cs-sys");
+                if (ta) ta.value = s.system_prompt || "";
+
+                const fields = [
+                    ["cs-sys",          "system_prompt",    (v) => v || null,               "textarea"],
+                    ["cs-temp",         "temperature",      (v) => v===""?null:+v,          "input"],
+                    ["cs-top-p",        "top_p",            (v) => v===""?null:+v,          "input"],
+                    ["cs-top-k",        "top_k",            (v) => v===""?null:parseInt(v), "input"],
+                    ["cs-min-p",        "min_p",            (v) => v===""?null:+v,          "input"],
+                    ["cs-repeat-pen",   "repeat_penalty",   (v) => v===""?null:+v,          "input"],
+                    ["cs-presence-pen", "presence_penalty", (v) => v===""?null:+v,          "input"],
+                    ["cs-max-tokens",   "max_output_tokens",(v) => v===""?null:parseInt(v), "input"],
+                    ["cs-reasoning",    "reasoning",        (v) => v||null,                 "select"],
+                    ["cs-sc",           "sc_enabled",       (v) => v,                       "checkbox"],
+                    ["cs-cove",         "cove_enabled",     (v) => v,                       "checkbox"],
+                ];
+                fields.forEach(([id, key, transform, type]) => {
+                    const el = $(id);
+                    if (!el) return;
+                    el.addEventListener("change", () => {
+                        const raw = type === "checkbox" ? el.checked : el.value;
+                        saveChatSetting(key, transform(raw));
+                    });
+                    if (type !== "textarea") return;
+                    el.addEventListener("input", () => {
+                        saveChatSetting(key, transform(el.value));
+                    });
+                });
+            }
+
+            function saveChatSetting(key, value) {
+                if (!activeId) return;
+                if (chatSettingsDebounce) clearTimeout(chatSettingsDebounce);
+                chatSettingsDebounce = setTimeout(async () => {
+                    try {
+                        await apiFetch(`/api/chats/${activeId}/settings`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ [key]: value })
+                        });
+                        await loadChatSettings(activeId);
+                    } catch(e) {
+                        console.error("Failed to save chat setting:", e);
+                    }
+                }, 400);
+            }
+
+            async function resetChatSettings() {
+                if (!activeId) return;
+                try {
+                    await apiFetch(`/api/chats/${activeId}/settings`, { method: "DELETE" });
+                    chatSettingsCache = {};
+                    renderChatSettingsPanel();
+                    const btn = $("chat-settings-btn");
+                    if (btn) btn.classList.remove("has-overrides");
+                } catch(e) {
+                    console.error("Failed to reset chat settings:", e);
+                }
+            }
+
+            // Stubs — replaced by full implementations in CF-T9
+            function renderGlobalPinsPanel() {}
+            function togglePinNavigator() {}
+
             function capIcon(path, fill) {
                 return (
                     '<svg class="cap-icon" viewBox="0 0 20 20"><path fill="' +
@@ -5105,4 +5264,5 @@ Object.assign(window, {
     toggleModelDD, toggleTopModelDD, toggleUserDD, startEdit,
     saveEdit, cancelEdit, forkFromMsg, retryLast, regenerate,
     triggerCompact, handleFiles, removeAttachment, unshareChat,
+    closeRightPanel, openRightPanel, togglePinNavigator,
 });

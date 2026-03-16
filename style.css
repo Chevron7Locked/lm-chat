@@ -3236,3 +3236,63 @@
       }
   }
 }
+
+/* Right panel */
+.right-panel {
+    position: fixed;
+    top: 0;
+    right: -320px;
+    width: 300px;
+    height: 100%;
+    background: var(--sidebar);
+    border-left: 1px solid var(--border);
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    transition: right 0.25s ease;
+    overflow: hidden;
+}
+.right-panel.open {
+    right: 0;
+}
+.right-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-5) var(--sp-6);
+    border-bottom: 1px solid var(--border);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    flex-shrink: 0;
+}
+#right-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--sp-6);
+}
+#right-panel-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 199;
+}
+#right-panel-overlay.open {
+    display: block;
+}
+.chat-settings-btn {
+    position: relative;
+}
+.chat-settings-btn .dot {
+    display: none;
+    width: 6px;
+    height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    position: absolute;
+    top: 2px;
+    right: 2px;
+}
+.chat-settings-btn.has-overrides .dot {
+    display: block;
+}
