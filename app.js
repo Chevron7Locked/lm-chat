@@ -3923,7 +3923,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const regenBtn = lastAsst.querySelector(".regen-btn");
                 if (regenBtn) {
                     regenBtn.disabled = false;
-                    regenBtn.style.opacity = "";
                 }
             }
 
@@ -4141,7 +4140,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     regenBtn.title = "Regenerate";
                     regenBtn.innerHTML = iconRegen();
                     regenBtn.disabled = true;
-                    regenBtn.style.opacity = "0.4";
                     regenBtn.onclick = () => regenerate();
                     actions.appendChild(regenBtn);
 

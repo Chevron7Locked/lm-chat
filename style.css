@@ -1332,6 +1332,11 @@
       color: var(--text);
       background: rgba(255,255,255,0.04);
   }
+  .msg-action-btn:disabled {
+      opacity: 0.35;
+      cursor: default;
+      pointer-events: none;
+  }
   .msg-action-btn.voted-up {
       color: var(--accent);
   }
