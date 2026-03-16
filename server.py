@@ -1340,7 +1340,7 @@ class Handler(BaseHTTPRequestHandler):
         # Local LLMs (Qwen, Llama, Mistral) have strong recency bias — instructions at
         # the end of the system prompt get more attention than those in the middle.
         if system_prompt:
-            system_prompt += "\n\n## REMINDERS\n- Be direct and concise. Lead with the answer.\n- Use your tools when they add value.\n- If unsure about a fact, say so or look it up."
+            system_prompt += "\n\n## REMINDERS\n- Lead with the answer, then elaborate.\n- Use your tools when they add value.\n- When uncertain about a fact, say so clearly rather than guessing. It is better to be honest about uncertainty than to sound confident and be wrong."
 
         body["integrations"] = self._inject_mcp_auth(
             body.get("integrations", DEFAULT_INTEGRATIONS), user["id"])
