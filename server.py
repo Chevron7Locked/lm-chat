@@ -101,6 +101,15 @@ def set_debug_mode(enabled):
     log.info(f"Debug mode: {'ON' if enabled else 'OFF'}")
 
 
+def _token_overlap(a, b):
+    """Simple Jaccard token overlap ratio between two strings."""
+    ta = set(a.lower().split())
+    tb = set(b.lower().split())
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
 def init_db():
     """Run once at startup: create tables and run migrations."""
     db = sqlite3.connect(DB_PATH)
@@ -2505,6 +2514,89 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             if text:
                 convo_text.append(f"{role}: {text}")
         return "\n".join(convo_text)[:max_chars]
+
+    def _build_usc_synthesis_prompt(self, original_question, candidates, is_factual=False):
+        """Build the USC synthesis prompt from N candidates."""
+        max_per = 4000  # chars; generous for most models
+        trimmed = [c[:max_per] for c in candidates]
+        sections = "\n\n".join(
+            f"--- Response {i+1} ---\n{t}"
+            for i, t in enumerate(trimmed)
+        )
+        question_str = original_question if isinstance(original_question, str) else str(original_question)[:500]
+        prompt = (
+            f'The user asked: "{question_str}"\n\n'
+            f"Here are {len(candidates)} independent responses generated for this question:\n\n"
+            f"{sections}\n\n"
+            "Review all responses. Return the single response that is most consistent with the "
+            "majority of the others — the one that best represents the central, agreed-upon answer. "
+            "Return only the selected response text, verbatim. Do not add commentary or explain your choice."
+        )
+        if is_factual:
+            prompt += (
+                "\n\nPrefer the response that is most specific and factually detailed "
+                "while still being consistent with the majority position."
+            )
+        return prompt
+
+    def _self_consistency(self, payload, user_id, emit_status=None, n=3, temperature=0.7):
+        """USC self-consistency: N parallel candidates → synthesis.
+        Returns bare str (early exit or failure) | dict (synthesis payload) | None (all failed).
+        emit_status: optional callable(text) to send SSE status events to the client.
+        """
+        import concurrent.futures
+
+        if emit_status:
+            emit_status(f"Generating response 1 of {n}...")
+
+        base = {
+            **payload,
+            "store": False,
+            "integrations": [],
+            "temperature": temperature,
+            "stream": False,
+        }
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
+            futures = [ex.submit(self._lmstudio_chat, base, user_id, 60) for _ in range(n)]
+            candidates = []
+            completed = 0
+            for f in concurrent.futures.as_completed(futures):
+                completed += 1
+                if emit_status and completed < n:
+                    emit_status(f"Generating response {completed + 1} of {n}...")
+                try:
+                    candidates.append(self._extract_content(f.result()))
+                except Exception as e:
+                    log.warning(f"SC candidate failed: {e}")
+
+        if len(candidates) < 2:
+            log.warning(f"SC: only {len(candidates)} candidates succeeded, falling back")
+            return candidates[0] if candidates else None
+
+        # Early exit: first two candidates agree closely
+        if _token_overlap(candidates[0], candidates[1]) > 0.80:
+            if emit_status:
+                emit_status("✓ Consistent answer found")
+            return candidates[0]
+
+        if emit_status:
+            emit_status("Selecting most consistent response...")
+
+        original_q = payload.get("input", "")
+        question_str = original_q if isinstance(original_q, str) else ""
+        factual_keywords = {"who", "when", "where", "born", "died", "founded", "invented", "created"}
+        is_factual = bool(factual_keywords & set(question_str.lower().split()))
+
+        synthesis_input = self._build_usc_synthesis_prompt(original_q, candidates, is_factual)
+        result_payload = {
+            **base,
+            "input": synthesis_input,
+            "temperature": 0.0,
+            "stream": True,
+        }
+        result_payload.pop("previous_response_id", None)
+        return result_payload
 
     # --- Memory: Insight scoring and retrieval ---
 
