@@ -4258,7 +4258,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             let chatSettingsDebounce = null;
             let chatSettingsPending = {};
 
-            async function loadChatSettings(chatId) {
+            async function loadChatSettings(chatId, { refreshPanel = true } = {}) {
                 const btn = $("chat-settings-btn");
                 if (!chatId) {
                     chatSettingsCache = {};
@@ -4278,8 +4278,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     chatSettingsCache = {};
                     if (btn) btn.classList.remove("has-overrides");
                 }
-                // If the settings panel is open, refresh it with the new chat's settings
-                if (rightPanelState === "settings") renderChatSettingsPanel();
+                // Re-render panel if open and caller requested it (skipped after saves to preserve focus)
+                if (refreshPanel && rightPanelState === "settings") renderChatSettingsPanel();
             }
 
             function renderChatSettingsPanel() {
@@ -4371,7 +4371,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify(payload)
                         });
-                        await loadChatSettings(activeId);
+                        await loadChatSettings(activeId, { refreshPanel: false });
                     } catch(e) {
                         console.error("Failed to save chat setting:", e);
                     }
