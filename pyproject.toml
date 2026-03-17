@@ -35,6 +35,9 @@ ignore-words-list = "totalin,ans"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--tb=short"
+markers = [
+    "smoke: Cross-browser smoke tests (run with --browser chromium --browser firefox --browser webkit)",
+]
 
 [tool.coverage.run]
 source = ["."]
@@ -44,6 +47,8 @@ omit = [
     "seed_test_data.py",
     "highlight.min.js",
 ]
+parallel = true
+concurrency = ["thread"]
 
 [tool.coverage.report]
 show_missing = true
