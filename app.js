@@ -3153,8 +3153,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 // If stream produced no content (error/abort), pop the
                 // orphaned user turn so it doesn't confuse future context.
                 if (incognitoMode) {
-                    if (streamContent) {
-                        incognitoHistory.push({ role: "assistant", content: streamContent });
+                    if (streamState.content) {
+                        incognitoHistory.push({ role: "assistant", content: streamState.content });
                         if (incognitoHistory.length > INCOGNITO_HISTORY_MAX)
                             incognitoHistory.splice(0, incognitoHistory.length - INCOGNITO_HISTORY_MAX);
                     } else if (incognitoHistory.length && incognitoHistory[incognitoHistory.length - 1].role === "user") {
@@ -3163,30 +3163,30 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 }
                 // Final markdown render
                 const asstWrap =
-                    streamBub ? streamBub.closest(".m-asst") : null;
-                if (streamBub) {
-                    streamBub.classList.remove("streaming");
+                    streamState.bub ? streamState.bub.closest(".m-asst") : null;
+                if (streamState.bub) {
+                    streamState.bub.classList.remove("streaming");
                     const { text: cleanText, followups } =
-                        extractFollowups(streamContent);
+                        extractFollowups(streamState.content);
                     if (followups.length) {
-                        streamContent = cleanText;
-                        streamBub.innerHTML = md(cleanText);
+                        streamState.content = cleanText;
+                        streamState.bub.innerHTML = md(cleanText);
                     } else {
-                        streamBub.innerHTML = md(streamContent);
+                        streamState.bub.innerHTML = md(streamState.content);
                     }
-                    if (window.hljs) streamBub.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
-                    streamBub = null;
-                    streamContent = "";
+                    if (window.hljs) streamState.bub.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
+                    streamState.bub = null;
+                    streamState.content = "";
                     if (followups.length)
-                        renderFollowups(followups, streamGroup || asstWrap);
+                        renderFollowups(followups, streamState.group || asstWrap);
                 }
                 // Append bottom row to just-completed response.
-                // asstWrap was captured before streamBub was nullified — safe to use here.
+                // asstWrap was captured before streamState.bub was nullified — safe to use here.
                 if (asstWrap && !asstWrap.querySelector(".msg-row")) {
                     asstWrap.appendChild(buildMsgRow({ role: "assistant" }));
                 }
                 // Add token stats after the assistant message
-                if (streamDeltaCount > 0) addMsgStats(streamGroup || asstWrap);
+                if (streamState.deltaCount > 0) addMsgStats(streamState.group || asstWrap);
                 addCopyButtons();
                 addRegenButton();
                 patchMsgIds();
@@ -3196,39 +3196,43 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 input.focus();
             }
 
-            // State for current streaming message
-            let streamBub = null,
-                streamContent = "",
-                inThink = false,
-                thinkBuf = "",
-                thinkBody = null,
-                inReasoning = false,
-                streamGroup = null;
-            // Token stats state
-            let streamStartTime = 0,
-                streamFirstTokenTime = 0,
-                streamDeltaCount = 0,
-                streamEndStats = null,
-                liveStatsEl = null;
-            let deltaTimestamps = []; // rolling window for live tok/s
+            const streamState = {
+                bub: null,
+                content: "",
+                inThink: false,
+                thinkBuf: "",
+                thinkBody: null,
+                inReasoning: false,
+                group: null,
+                startTime: 0,
+                firstTokenTime: 0,
+                deltaCount: 0,
+                endStats: null,
+                liveStatsEl: null,
+                deltaTimestamps: [],
+            };
+            function resetStreamState() {
+                streamState.bub = null;
+                streamState.content = "";
+                streamState.inThink = false;
+                streamState.thinkBuf = "";
+                streamState.thinkBody = null;
+                streamState.inReasoning = false;
+                streamState.group = null;
+                streamState.startTime = 0;
+                streamState.firstTokenTime = 0;
+                streamState.deltaCount = 0;
+                streamState.endStats = null;
+                streamState.liveStatsEl = null;
+                streamState.deltaTimestamps = [];
+            }
 
             async function readSSE(body, meta) {
                 const reader = body.getReader();
                 const dec = new TextDecoder();
                 let buf = "";
-                streamBub = null;
-                streamContent = "";
-                inThink = false;
-                thinkBuf = "";
-                thinkBody = null;
-                inReasoning = false;
-                streamGroup = null;
-                streamStartTime = performance.now();
-                streamFirstTokenTime = 0;
-                streamDeltaCount = 0;
-                streamEndStats = null;
-                liveStatsEl = null;
-                deltaTimestamps = [];
+                resetStreamState();
+                streamState.startTime = performance.now();
 
                 try {
                     while (true) {
@@ -3279,36 +3283,36 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         break;
                     case "reasoning.start":
                     case "reasoning.delta": {
-                        if (!inReasoning) {
-                            inReasoning = true;
+                        if (!streamState.inReasoning) {
+                            streamState.inReasoning = true;
                             // Create wrapper group for reasoning + response if not yet created
-                            if (!streamGroup) {
-                                streamGroup = document.createElement("div");
-                                streamGroup.className = "msg-group";
-                                getMsgTarget().appendChild(streamGroup);
+                            if (!streamState.group) {
+                                streamState.group = document.createElement("div");
+                                streamState.group.className = "msg-group";
+                                getMsgTarget().appendChild(streamState.group);
                             }
                             const uid =
                                 "th" + Math.random().toString(36).slice(2, 8);
                             const d = document.createElement("div");
                             d.className = "m-think";
                             d.innerHTML = thinkHtml(uid, "Thinking...", "", true);
-                            streamGroup.appendChild(d);
-                            thinkBody = d.querySelector(".think-body");
-                            thinkBuf = "";
+                            streamState.group.appendChild(d);
+                            streamState.thinkBody = d.querySelector(".think-body");
+                            streamState.thinkBuf = "";
                         }
                         if (event === "reasoning.delta") {
-                            thinkBuf += parsed.content || "";
-                            if (thinkBody) thinkBody.textContent = thinkBuf;
+                            streamState.thinkBuf += parsed.content || "";
+                            if (streamState.thinkBody) streamState.thinkBody.textContent = streamState.thinkBuf;
                             autoScroll();
                         }
                         break;
                     }
                     case "reasoning.end":
-                        if (inReasoning) {
-                            inReasoning = false;
-                            if (thinkBody) {
-                                thinkBody.classList.remove("open");
-                                thinkBody.parentElement.previousElementSibling.textContent =
+                        if (streamState.inReasoning) {
+                            streamState.inReasoning = false;
+                            if (streamState.thinkBody) {
+                                streamState.thinkBody.classList.remove("open");
+                                streamState.thinkBody.parentElement.previousElementSibling.textContent =
                                     "Show thinking";
                             }
                         }
@@ -3326,47 +3330,47 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         if (!delta) break;
 
                         // Close reasoning block when content starts arriving
-                        if (inReasoning) {
-                            inReasoning = false;
-                            if (thinkBody) {
-                                thinkBody.classList.remove("open");
-                                thinkBody.parentElement.previousElementSibling.textContent =
+                        if (streamState.inReasoning) {
+                            streamState.inReasoning = false;
+                            if (streamState.thinkBody) {
+                                streamState.thinkBody.classList.remove("open");
+                                streamState.thinkBody.parentElement.previousElementSibling.textContent =
                                     "Show thinking";
                             }
                         }
 
                         // Track token stats
                         const now = performance.now();
-                        streamDeltaCount++;
-                        if (!streamFirstTokenTime) streamFirstTokenTime = now;
-                        deltaTimestamps.push(now);
+                        streamState.deltaCount++;
+                        if (!streamState.firstTokenTime) streamState.firstTokenTime = now;
+                        streamState.deltaTimestamps.push(now);
                         // Keep rolling window of last 2 seconds
                         while (
-                            deltaTimestamps.length > 1 &&
-                            deltaTimestamps[0] < now - 2000
+                            streamState.deltaTimestamps.length > 1 &&
+                            streamState.deltaTimestamps[0] < now - 2000
                         )
-                            deltaTimestamps.shift();
+                            streamState.deltaTimestamps.shift();
                         // Update live stats display
-                        if (deltaTimestamps.length > 1) {
+                        if (streamState.deltaTimestamps.length > 1) {
                             const windowSec =
-                                (deltaTimestamps[deltaTimestamps.length - 1] -
-                                    deltaTimestamps[0]) /
+                                (streamState.deltaTimestamps[streamState.deltaTimestamps.length - 1] -
+                                    streamState.deltaTimestamps[0]) /
                                 1000;
                             if (windowSec > 0) {
                                 const tps = (
-                                    (deltaTimestamps.length - 1) / windowSec
+                                    (streamState.deltaTimestamps.length - 1) / windowSec
                                 ).toFixed(1);
                                 updateLiveStats(tps + " tok/s");
                             }
                         }
 
                         // Handle <think> tags in streaming content
-                        const combined = (inThink ? "" : streamContent) + delta;
-                        if (!inThink && !streamBub) {
+                        const combined = (streamState.inThink ? "" : streamState.content) + delta;
+                        if (!streamState.inThink && !streamState.bub) {
                             // Check if content starts with <think>
                             if (combined.trimStart().startsWith("<think>")) {
-                                inThink = true;
-                                thinkBuf = combined.trimStart().slice(7);
+                                streamState.inThink = true;
+                                streamState.thinkBuf = combined.trimStart().slice(7);
                                 // Create think element
                                 const uid =
                                     "th" +
@@ -3375,41 +3379,41 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                                 d.className = "m-think";
                                 d.innerHTML = thinkHtml(uid, "Thinking...", "", true);
                                 getMsgTarget().appendChild(d);
-                                thinkBody = d.querySelector(".think-body");
-                                thinkBody.textContent = thinkBuf;
+                                streamState.thinkBody = d.querySelector(".think-body");
+                                streamState.thinkBody.textContent = streamState.thinkBuf;
                                 autoScroll();
                                 break;
                             }
                         }
-                        if (inThink) {
-                            thinkBuf += delta;
+                        if (streamState.inThink) {
+                            streamState.thinkBuf += delta;
                             // Check for closing </think>
-                            const closeIdx = thinkBuf.indexOf("</think>");
+                            const closeIdx = streamState.thinkBuf.indexOf("</think>");
                             if (closeIdx !== -1) {
-                                const thinkText = thinkBuf
+                                const thinkText = streamState.thinkBuf
                                     .slice(0, closeIdx)
                                     .trim();
-                                if (thinkBody) {
-                                    thinkBody.textContent = thinkText;
-                                    thinkBody.classList.remove("open");
-                                    thinkBody.parentElement.previousElementSibling.textContent =
+                                if (streamState.thinkBody) {
+                                    streamState.thinkBody.textContent = thinkText;
+                                    streamState.thinkBody.classList.remove("open");
+                                    streamState.thinkBody.parentElement.previousElementSibling.textContent =
                                         "Show thinking";
                                 }
-                                inThink = false;
+                                streamState.inThink = false;
                                 // Remainder after </think> is normal content
-                                const remainder = thinkBuf.slice(closeIdx + 8);
-                                streamContent = remainder;
+                                const remainder = streamState.thinkBuf.slice(closeIdx + 8);
+                                streamState.content = remainder;
                                 if (remainder.trim()) {
                                     ensureStreamBub();
                                 }
                             } else {
-                                if (thinkBody) thinkBody.textContent = thinkBuf;
+                                if (streamState.thinkBody) streamState.thinkBody.textContent = streamState.thinkBuf;
                             }
                             autoScroll();
                             break;
                         }
 
-                        streamContent += delta;
+                        streamState.content += delta;
                         ensureStreamBub();
                         // Markdown rendering handled by streamMdTimer interval
                         autoScroll();
@@ -3446,9 +3450,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         const res = parsed.result || {};
                         const respId = parsed.response_id || res.response_id;
                         if (respId) meta.response_id = respId;
-                        // Merge result stats into parsed for streamEndStats consumers
+                        // Merge result stats into parsed for streamState.endStats consumers
                         const st = res.stats || {};
-                        streamEndStats = {
+                        streamState.endStats = {
                             ...parsed,
                             stats: st,
                             usage: {
@@ -3484,38 +3488,38 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
 
             function updateLiveStats(text) {
-                if (!liveStatsEl) {
-                    liveStatsEl = document.createElement("div");
-                    liveStatsEl.className = "live-stats";
-                    (streamGroup || getMsgTarget()).appendChild(liveStatsEl);
+                if (!streamState.liveStatsEl) {
+                    streamState.liveStatsEl = document.createElement("div");
+                    streamState.liveStatsEl.className = "live-stats";
+                    (streamState.group || getMsgTarget()).appendChild(streamState.liveStatsEl);
                 }
-                liveStatsEl.textContent = text;
+                streamState.liveStatsEl.textContent = text;
             }
 
             function addMsgStats(container) {
-                if (liveStatsEl) {
-                    liveStatsEl.remove();
-                    liveStatsEl = null;
+                if (streamState.liveStatsEl) {
+                    streamState.liveStatsEl.remove();
+                    streamState.liveStatsEl = null;
                 }
                 const parts = [];
-                const s = streamEndStats || {};
+                const s = streamState.endStats || {};
                 const stats = s.stats || {};
                 const usage = s.usage || {};
                 const tps = stats.tokens_per_second ||
-                    (streamDeltaCount > 2 && streamFirstTokenTime ?
-                        streamDeltaCount / ((performance.now() - streamFirstTokenTime) / 1000) : 0);
+                    (streamState.deltaCount > 2 && streamState.firstTokenTime ?
+                        streamState.deltaCount / ((performance.now() - streamState.firstTokenTime) / 1000) : 0);
                 if (tps > 0) parts.push(tps.toFixed(1) + " tok/s");
                 const ttft = stats.time_to_first_token_seconds ||
-                    (streamFirstTokenTime && streamStartTime ?
-                        (streamFirstTokenTime - streamStartTime) / 1000 : 0);
+                    (streamState.firstTokenTime && streamState.startTime ?
+                        (streamState.firstTokenTime - streamState.startTime) / 1000 : 0);
                 if (ttft > 0) parts.push("TTFT: " + ttft.toFixed(2) + "s");
                 const inp = usage.input_tokens || usage.prompt_tokens || 0;
-                const out = usage.output_tokens || usage.completion_tokens || streamDeltaCount;
+                const out = usage.output_tokens || usage.completion_tokens || streamState.deltaCount;
                 if (inp || out) parts.push((inp || "?") + "\u2192" + out + " tokens");
                 recordTokens(inp, out, tps);
                 if (!parts.length) return;
                 const statsText = parts.join(" \u00b7 ");
-                const target = container || streamGroup || getMsgTarget();
+                const target = container || streamState.group || getMsgTarget();
                 const statsEl = target?.querySelector(".msg-row-stats");
                 if (statsEl) {
                     statsEl.textContent = statsText;
@@ -3525,22 +3529,22 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
             let streamMdTimer = null;
             function ensureStreamBub() {
-                if (streamBub) return;
+                if (streamState.bub) return;
                 const d = document.createElement("div");
                 d.className = "m-asst";
                 d.innerHTML = '<div class="bub streaming"></div>';
-                // Append inside streamGroup if reasoning created one, otherwise directly to target
-                (streamGroup || getMsgTarget()).appendChild(d);
-                streamBub = d.querySelector(".bub");
+                // Append inside streamState.group if reasoning created one, otherwise directly to target
+                (streamState.group || getMsgTarget()).appendChild(d);
+                streamState.bub = d.querySelector(".bub");
                 // Clear any orphaned timer before creating a new one
                 if (streamMdTimer) cancelAnimationFrame(streamMdTimer);
                 // Throttled markdown rendering during stream (~10fps)
                 let lastRenderTime = 0;
                 function streamRender() {
-                    if (!streamBub || !streamContent) return;
+                    if (!streamState.bub || !streamState.content) return;
                     const now = performance.now();
                     if (now - lastRenderTime > 100) {
-                        streamBub.innerHTML = md(streamContent);
+                        streamState.bub.innerHTML = md(streamState.content);
                         autoScroll();
                         lastRenderTime = now;
                     }
@@ -3597,11 +3601,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 d.dataset.toolName = name || "";
                 d.innerHTML = `<span class="t-name" style="display:none">${esc(name || "tool")}</span><div class="t-toggle" role="button" tabindex="0"><span class="t-arrow">&#9656;</span> ${esc(label)}<span class="t-preview"></span><span class="t-dots"><i></i><i></i><i></i></span></div><div class="t-body" id="${uid}"><div class="t-args"></div></div>`;
                 // Append tool calls in order; text bubble will be re-appended after tools
-                const target = streamGroup || getMsgTarget();
+                const target = streamState.group || getMsgTarget();
                 ignoreScrollEvent = true;
                 target.appendChild(d);
                 // Move existing text bubble to end so it stays below tool calls
-                const streamEl = streamBub && streamBub.closest(".m-asst");
+                const streamEl = streamState.bub && streamState.bub.closest(".m-asst");
                 if (streamEl && streamEl.parentElement === target)
                     target.appendChild(streamEl);
                 ignoreScrollEvent = false;
