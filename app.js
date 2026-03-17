@@ -242,7 +242,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 AUTH_STATE.user = null;
                 document.getElementById("user-avatar").classList.add("hidden");
                 const gear = document.getElementById("global-settings-btn");
-                if (gear) gear.style.display = "";
+                if (gear) gear.classList.remove("hidden");
                 showAuthScreen(false);
             }
 
@@ -261,7 +261,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 document.getElementById("user-dd-name").textContent = name;
                 // Hide redundant gear — user menu has Settings
                 const gear = document.getElementById("global-settings-btn");
-                if (gear) gear.style.display = "none";
+                if (gear) gear.classList.add("hidden");
             }
 
             function toggleUserDD() {
@@ -710,7 +710,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     AUTH_STATE.user = null;
                     document.getElementById("user-avatar").classList.add("hidden");
                     const gear = document.getElementById("global-settings-btn");
-                    if (gear) gear.style.display = "";
+                    if (gear) gear.classList.remove("hidden");
                     showAuthScreen(false);
                     throw new Error("unauthorized");
                 }
@@ -5557,7 +5557,7 @@ function initEventHandlers() {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleUserDD(); }
     });
     // User DD buttons
-    document.querySelector('#user-dd button:first-child')?.addEventListener('click', () => {
+    document.querySelector('#user-dd button:first-of-type')?.addEventListener('click', () => {
         document.getElementById('user-dd')?.classList.remove('open');
         openSettings();
     });
