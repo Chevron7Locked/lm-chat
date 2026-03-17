@@ -948,104 +948,156 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- Routing ---
 
-    def do_GET(self):
-        if self.path == "/" or self.path == "/index.html":
-            self._serve_file("index.html", "text/html")
-        elif self.path == "/manifest.json":
-            self._serve_file("manifest.json", "application/json")
-        elif self.path == "/sw.js":
-            self._serve_file("sw.js", "application/javascript")
-        elif self.path == "/lm-chat-logo.svg":
-            self._serve_file("lm-chat-logo.svg", "image/svg+xml")
-        elif self.path == "/style.css":
-            self._serve_file("style.css", "text/css")
-        elif self.path == "/app.js":
-            self._serve_file("app.js", "application/javascript")
-        elif self.path == "/api/health":
-            status = {"ok": True, "version": VERSION, "db": False, "lmstudio": False}
-            try:
-                db = get_db()
-                db.execute("SELECT 1")
-                status["db"] = True
-            except Exception as e:
-                log.warning(f"Health check DB failed: {e}")
-            try:
-                req = urllib.request.Request(f"{LMSTUDIO}/api/v1/models", method="GET")
-                # Try env var token first, then any stored user key
-                token = LMSTUDIO_TOKEN
-                if not token:
-                    try:
-                        db2 = get_db()
-                        row = db2.execute("SELECT value FROM user_settings WHERE key='lm_apikey' AND value != '' LIMIT 1").fetchone()
-                        if row:
-                            token = row[0]
-                    except Exception as e:
-                        log.warning(f"Health check: cannot read API key from DB: {e}")
-                if token:
-                    req.add_header("Authorization", f"Bearer {token}")
-                with urllib.request.urlopen(req, timeout=3) as resp:
-                    resp.read()
-                status["lmstudio"] = True
-            except Exception:
-                pass
-            status["ok"] = status["db"] and status["lmstudio"]
-            code = 200 if status["ok"] else 503
-            self._json_response(code, status)
-        elif self.path.startswith("/share/"):
-            share_id = self.path.split("/")[2] if len(self.path.split("/")) > 2 else ""
-            self._serve_shared(share_id)
-        elif self.path == "/api/debug":
-            user = self._require_auth()
-            if not user:
+    _GET_ROUTES = [
+        (re.compile(r'^/$|^/index\.html$'),                                    lambda s,m,b: s._serve_file("index.html","text/html")),
+        (re.compile(r'^/manifest\.json$'),                                     lambda s,m,b: s._serve_file("manifest.json","application/json")),
+        (re.compile(r'^/sw\.js$'),                                             lambda s,m,b: s._serve_file("sw.js","application/javascript")),
+        (re.compile(r'^/lm-chat-logo\.svg$'),                                  lambda s,m,b: s._serve_file("lm-chat-logo.svg","image/svg+xml")),
+        (re.compile(r'^/style\.css$'),                                         lambda s,m,b: s._serve_file("style.css","text/css")),
+        (re.compile(r'^/app\.js$'),                                            lambda s,m,b: s._serve_file("app.js","application/javascript")),
+        (re.compile(r'^/api/health$'),                                         lambda s,m,b: s._health_check()),
+        (re.compile(r'^/share/(?P<id>[^/]+)$'),                                lambda s,m,b: s._serve_shared(m.group("id"))),
+        (re.compile(r'^/api/debug$'),                                          lambda s,m,b: s._get_debug()),
+        (re.compile(r'^/api/auth/me$'),                                        lambda s,m,b: s._auth_me()),
+        (re.compile(r'^/api/auth/users$'),                                     lambda s,m,b: s._auth_list_users()),
+        (re.compile(r'^/api/auth/settings$'),                                  lambda s,m,b: s._get_settings()),
+        (re.compile(r'^/api/models$'),                                         lambda s,m,b: s._proxy_get("/api/v1/models", (s._get_user() or {}).get("id"))),
+        (re.compile(r'^/api/chats$'),                                          lambda s,m,b: s._list_chats()),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/messages$'),                   lambda s,m,b: s._get_messages(m.group("id"))),
+        (re.compile(r'^/api/insights$'),                                       lambda s,m,b: s._list_insights()),
+        (re.compile(r'^/api/insights/settings$'),                              lambda s,m,b: s._get_insight_settings()),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/settings$'),                   lambda s,m,b: s._get_chat_settings(m.group("id"))),
+        (re.compile(r'^/api/pins$'),                                           lambda s,m,b: s._list_pins()),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/pins$'),                       lambda s,m,b: s._get_chat_pins(m.group("id"))),
+    ]
+
+    _POST_ROUTES = [
+        (re.compile(r'^/api/auth/setup$'),                                     lambda s,m,b: s._auth_setup(b)),
+        (re.compile(r'^/api/auth/login$'),                                     lambda s,m,b: s._auth_login(b)),
+        (re.compile(r'^/api/auth/logout$'),                                    lambda s,m,b: s._auth_logout()),
+        (re.compile(r'^/api/auth/invite$'),                                    lambda s,m,b: s._auth_invite(b)),
+        (re.compile(r'^/api/auth/change-password$'),                           lambda s,m,b: s._auth_change_password(b)),
+        (re.compile(r'^/api/auth/profile$'),                                   lambda s,m,b: s._auth_update_profile(b)),
+        (re.compile(r'^/api/auth/totp/setup$'),                                lambda s,m,b: s._totp_setup()),
+        (re.compile(r'^/api/auth/totp/verify$'),                               lambda s,m,b: s._totp_verify(b)),
+        (re.compile(r'^/api/auth/totp/disable$'),                              lambda s,m,b: s._totp_disable(b)),
+        (re.compile(r'^/api/auth/totp/login$'),                                lambda s,m,b: s._totp_login(b)),
+        (re.compile(r'^/api/auth/settings$'),                                  lambda s,m,b: s._save_settings(b)),
+        (re.compile(r'^/api/debug$'),                                          lambda s,m,b: s._post_debug(b)),
+        (re.compile(r'^/api/chat$'),                                           lambda s,m,b: s._handle_chat(b)),
+        (re.compile(r'^/api/chat/stream$'),                                    lambda s,m,b: s._handle_chat_stream(b)),
+        (re.compile(r'^/api/chats$'),                                          lambda s,m,b: s._create_chat(b)),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/title$'),                      lambda s,m,b: s._update_title(m.group("id"),b)),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/messages/truncate$'),          lambda s,m,b: s._truncate_messages(m.group("id"),b)),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/fork$'),                       lambda s,m,b: s._fork_chat(m.group("id"),b)),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/compact$'),                    lambda s,m,b: s._compact_chat(m.group("id"),b)),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/pin$'),                        lambda s,m,b: s._toggle_pin(m.group("id"))),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/folder$'),                     lambda s,m,b: s._set_folder(m.group("id"),b)),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/share$'),                      lambda s,m,b: s._share_chat(m.group("id"))),
+        (re.compile(r'^/api/search$'),                                         lambda s,m,b: s._search_messages(b)),
+        (re.compile(r'^/api/insights/distill$'),                               lambda s,m,b: s._distill_insights(b)),
+        (re.compile(r'^/api/insights/refine$'),                                lambda s,m,b: s._refine_insights(b)),
+        (re.compile(r'^/api/insights$'),                                       lambda s,m,b: s._add_insight(b)),
+        (re.compile(r'^/api/insights/(?P<id>[^/]+)/edit$'),                    lambda s,m,b: s._edit_insight(m.group("id"),b)),
+        (re.compile(r'^/api/insights/settings$'),                              lambda s,m,b: s._save_insight_settings(b)),
+        (re.compile(r'^/api/messages/(?P<id>\d+)/feedback$'),                  lambda s,m,b: s._post_message_feedback(int(m.group("id")),b)),
+        (re.compile(r'^/api/messages/(?P<id>\d+)/pin$'),                       lambda s,m,b: s._pin_message(int(m.group("id")))),
+    ]
+
+    _DELETE_ROUTES = [
+        (re.compile(r'^/api/auth/users/(?P<id>[^/]+)$'),                       lambda s,m,b: s._auth_delete_user(m.group("id"))),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/messages/last$'),              lambda s,m,b: s._delete_last_response(m.group("id"))),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/share$'),                      lambda s,m,b: s._unshare_chat(m.group("id"))),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/settings$'),                   lambda s,m,b: s._delete_chat_settings(m.group("id"))),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)$'),                            lambda s,m,b: s._delete_chat(m.group("id"))),
+        (re.compile(r'^/api/insights$'),                                       lambda s,m,b: s._clear_insights()),
+        (re.compile(r'^/api/insights/(?P<id>[^/]+)$'),                         lambda s,m,b: s._delete_insight(m.group("id"))),
+        (re.compile(r'^/api/pins/(?P<id>[^/]+)$'),                             lambda s,m,b: s._delete_pin(m.group("id"))),
+    ]
+
+    _PATCH_ROUTES = [
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/settings$'),                   lambda s,m,b: s._save_chat_settings(m.group("id"),b)),
+        (re.compile(r'^/api/pins/(?P<id>[^/]+)/title$'),                       lambda s,m,b: s._update_pin_title(m.group("id"),b)),
+    ]
+
+    def _health_check(self):
+        status = {"ok": True, "version": VERSION, "db": False, "lmstudio": False}
+        try:
+            db = get_db()
+            db.execute("SELECT 1")
+            status["db"] = True
+        except Exception as e:
+            log.warning(f"Health check DB failed: {e}")
+        try:
+            req = urllib.request.Request(f"{LMSTUDIO}/api/v1/models", method="GET")
+            # Try env var token first, then any stored user key
+            token = LMSTUDIO_TOKEN
+            if not token:
+                try:
+                    db2 = get_db()
+                    row = db2.execute("SELECT value FROM user_settings WHERE key='lm_apikey' AND value != '' LIMIT 1").fetchone()
+                    if row:
+                        token = row[0]
+                except Exception as e:
+                    log.warning(f"Health check: cannot read API key from DB: {e}")
+            if token:
+                req.add_header("Authorization", f"Bearer {token}")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                resp.read()
+            status["lmstudio"] = True
+        except Exception:
+            pass
+        status["ok"] = status["db"] and status["lmstudio"]
+        code = 200 if status["ok"] else 503
+        self._json_response(code, status)
+
+    def _get_debug(self):
+        user = self._require_auth()
+        if not user:
+            return
+        if not user.get("is_admin"):
+            return self._error(403, "admin only")
+        # Return current debug state + log file info
+        console_level = "DEBUG"
+        for h in log.handlers:
+            if getattr(h, "name", None) == "console":
+                console_level = logging.getLevelName(h.level)
+        log_files = []
+        if os.path.isdir(LOG_DIR):
+            for f in sorted(os.listdir(LOG_DIR)):
+                fp = os.path.join(LOG_DIR, f)
+                if os.path.isfile(fp):
+                    log_files.append({"name": f, "size": os.path.getsize(fp)})
+        self._json_response(200, {
+            "enabled": console_level == "DEBUG",
+            "log_dir": LOG_DIR,
+            "log_files": log_files,
+            "max_bytes": LOG_MAX_BYTES,
+            "backup_count": LOG_BACKUP_COUNT,
+        })
+
+    def _post_debug(self, body):
+        user = self._require_auth()
+        if not user:
+            return
+        if not user.get("is_admin"):
+            return self._error(403, "admin only")
+        enabled = body.get("enabled", True)
+        set_debug_mode(enabled)
+        self._json_response(200, {"enabled": enabled})
+
+    def _dispatch(self, method, body=None):
+        path = self.path.split("?")[0]
+        for pattern, handler in {"GET": self._GET_ROUTES, "POST": self._POST_ROUTES,
+                                  "DELETE": self._DELETE_ROUTES, "PATCH": self._PATCH_ROUTES}[method]:
+            m = pattern.match(path)
+            if m:
+                handler(self, m, body)
                 return
-            if not user.get("is_admin"):
-                return self._error(403, "admin only")
-            # Return current debug state + log file info
-            console_level = "DEBUG"
-            for h in log.handlers:
-                if getattr(h, "name", None) == "console":
-                    console_level = logging.getLevelName(h.level)
-            log_files = []
-            if os.path.isdir(LOG_DIR):
-                for f in sorted(os.listdir(LOG_DIR)):
-                    fp = os.path.join(LOG_DIR, f)
-                    if os.path.isfile(fp):
-                        log_files.append({"name": f, "size": os.path.getsize(fp)})
-            self._json_response(200, {
-                "enabled": console_level == "DEBUG",
-                "log_dir": LOG_DIR,
-                "log_files": log_files,
-                "max_bytes": LOG_MAX_BYTES,
-                "backup_count": LOG_BACKUP_COUNT,
-            })
-        elif self.path == "/api/auth/me":
-            self._auth_me()
-        elif self.path == "/api/auth/users":
-            self._auth_list_users()
-        elif self.path == "/api/auth/settings":
-            self._get_settings()
-        elif self.path == "/api/models":
-            u = self._get_user()
-            self._proxy_get("/api/v1/models", u["id"] if u else None)
-        elif self.path == "/api/chats":
-            self._list_chats()
-        elif self.path.startswith("/api/chats/") and "/messages" in self.path:
-            chat_id = self.path.split("/")[3]
-            self._get_messages(chat_id)
-        elif self.path == "/api/insights":
-            self._list_insights()
-        elif self.path == "/api/insights/settings":
-            self._get_insight_settings()
-        elif re.match(r'^/api/chats/([^/]+)/settings$', self.path):
-            chat_id = self.path.split("/")[3]
-            self._get_chat_settings(chat_id)
-        elif self.path == "/api/pins":
-            self._list_pins()
-        elif re.match(r'^/api/chats/([^/]+)/pins$', self.path):
-            chat_id = self.path.split("/")[3]
-            self._get_chat_pins(chat_id)
-        else:
-            self.send_error(404)
+        self.send_error(404)
+
+    def do_GET(self):
+        self._dispatch("GET")
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -1063,114 +1115,10 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length)) if length else {}
         except (ValueError, json.JSONDecodeError):
             return self._error(400, "invalid request body")
-
-        if self.path == "/api/auth/setup":
-            self._auth_setup(body)
-        elif self.path == "/api/auth/login":
-            self._auth_login(body)
-        elif self.path == "/api/auth/logout":
-            self._auth_logout()
-        elif self.path == "/api/auth/invite":
-            self._auth_invite(body)
-        elif self.path == "/api/auth/change-password":
-            self._auth_change_password(body)
-        elif self.path == "/api/auth/profile":
-            self._auth_update_profile(body)
-        elif self.path == "/api/auth/totp/setup":
-            self._totp_setup()
-        elif self.path == "/api/auth/totp/verify":
-            self._totp_verify(body)
-        elif self.path == "/api/auth/totp/disable":
-            self._totp_disable(body)
-        elif self.path == "/api/auth/totp/login":
-            self._totp_login(body)
-        elif self.path == "/api/auth/settings":
-            self._save_settings(body)
-        elif self.path == "/api/debug":
-            user = self._require_auth()
-            if not user:
-                return
-            if not user.get("is_admin"):
-                return self._error(403, "admin only")
-            enabled = body.get("enabled", True)
-            set_debug_mode(enabled)
-            self._json_response(200, {"enabled": enabled})
-        elif self.path == "/api/chat":
-            self._handle_chat(body)
-        elif self.path == "/api/chat/stream":
-            self._handle_chat_stream(body)
-        elif self.path == "/api/chats":
-            self._create_chat(body)
-        elif self.path.startswith("/api/chats/") and self.path.endswith("/title"):
-            chat_id = self.path.split("/")[3]
-            self._update_title(chat_id, body)
-        elif self.path.startswith("/api/chats/") and self.path.endswith("/messages/truncate"):
-            chat_id = self.path.split("/")[3]
-            self._truncate_messages(chat_id, body)
-        elif self.path.startswith("/api/chats/") and self.path.endswith("/fork"):
-            chat_id = self.path.split("/")[3]
-            self._fork_chat(chat_id, body)
-        elif self.path.startswith("/api/chats/") and self.path.endswith("/compact"):
-            chat_id = self.path.split("/")[3]
-            self._compact_chat(chat_id, body)
-        elif self.path.startswith("/api/chats/") and self.path.endswith("/pin"):
-            chat_id = self.path.split("/")[3]
-            self._toggle_pin(chat_id)
-        elif self.path.startswith("/api/chats/") and self.path.endswith("/folder"):
-            chat_id = self.path.split("/")[3]
-            self._set_folder(chat_id, body)
-        elif self.path == "/api/search":
-            self._search_messages(body)
-        elif self.path == "/api/insights/distill":
-            self._distill_insights(body)
-        elif self.path == "/api/insights/refine":
-            self._refine_insights(body)
-        elif self.path == "/api/insights":
-            self._add_insight(body)
-        elif self.path.startswith("/api/insights/") and self.path.endswith("/edit"):
-            insight_id = self.path.split("/")[3]
-            self._edit_insight(insight_id, body)
-        elif self.path == "/api/insights/settings":
-            self._save_insight_settings(body)
-        elif self.path.startswith("/api/chats/") and self.path.endswith("/share"):
-            chat_id = self.path.split("/")[3]
-            self._share_chat(chat_id)
-        elif re.match(r'^/api/messages/(\d+)/feedback$', self.path):
-            message_id = int(self.path.split("/")[3])
-            self._post_message_feedback(message_id, body)
-        elif re.match(r'^/api/messages/(\d+)/pin$', self.path):
-            message_id = int(self.path.split("/")[3])
-            self._pin_message(message_id)
-        else:
-            self.send_error(404)
+        self._dispatch("POST", body)
 
     def do_DELETE(self):
-        if self.path.startswith("/api/auth/users/"):
-            user_id = self.path.split("/")[4]
-            self._auth_delete_user(user_id)
-        elif self.path.startswith("/api/chats/"):
-            parts = self.path.split("/")
-            chat_id = parts[3]
-            if len(parts) >= 6 and parts[4] == "messages" and parts[5] == "last":
-                self._delete_last_response(chat_id)
-            elif len(parts) == 5 and parts[4] == "share":
-                self._unshare_chat(chat_id)
-            elif len(parts) == 5 and parts[4] == "settings":
-                self._delete_chat_settings(chat_id)
-            elif len(parts) == 4:
-                self._delete_chat(chat_id)
-            else:
-                self.send_error(404)
-        elif self.path == "/api/insights":
-            self._clear_insights()
-        elif self.path.startswith("/api/insights/"):
-            insight_id = self.path.split("/")[3]
-            self._delete_insight(insight_id)
-        elif re.match(r'^/api/pins/([^/]+)$', self.path):
-            pin_id = self.path.split("/")[3]
-            self._delete_pin(pin_id)
-        else:
-            self.send_error(404)
+        self._dispatch("DELETE")
 
     def do_PATCH(self):
         try:
@@ -1180,14 +1128,7 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length)) if length else {}
         except (ValueError, json.JSONDecodeError):
             return self._error(400, "invalid request body")
-        if re.match(r'^/api/chats/([^/]+)/settings$', self.path):
-            chat_id = self.path.split("/")[3]
-            self._save_chat_settings(chat_id, body)
-        elif re.match(r'^/api/pins/([^/]+)/title$', self.path):
-            pin_id = self.path.split("/")[3]
-            self._update_pin_title(pin_id, body)
-        else:
-            self.send_error(404)
+        self._dispatch("PATCH", body)
 
     # --- Auth endpoints ---
 
