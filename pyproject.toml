@@ -31,3 +31,23 @@ ignore = [
 [tool.codespell]
 skip = ".git*,*.min.js,*.min.css,*.svg"
 ignore-words-list = "totalin,ans"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+    "seed_db.py",
+    "seed_test_data.py",
+    "highlight.min.js",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# Baseline: 2026-03-17 — server.py + qr.py: 0% (tests run server.py as subprocess)
+# Raise fail_under incrementally as coverage improves (requires direct import fixtures)
+fail_under = 0
