@@ -3419,4 +3419,7 @@
     .starters-list-wrap { margin: var(--sp-3) 0; }
 
     .starters-actions { display: flex; gap: var(--sp-2); }
+
+    /* Syntax highlighting — override hljs theme to match design system */
+    .hljs { background: var(--code-bg) !important; }
 }

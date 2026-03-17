@@ -2376,6 +2376,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                                 const bub = document.createElement("div");
                                 bub.className = "bub";
                                 bub.innerHTML = md(cleanC);
+                                if (window.hljs) bub.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
                                 ad.appendChild(bub);
                                 ad.appendChild(buildMsgRow({
                                     role: "assistant",
@@ -2453,6 +2454,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const bub = document.createElement("div");
                 bub.className = "bub";
                 bub.innerHTML = md(t);
+                if (window.hljs) bub.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
                 d.appendChild(bub);
                 d.appendChild(buildMsgRow({
                     role: "assistant",
@@ -3157,6 +3159,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     } else {
                         streamBub.innerHTML = md(streamContent);
                     }
+                    if (window.hljs) streamBub.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
                     streamBub = null;
                     streamContent = "";
                     if (followups.length)

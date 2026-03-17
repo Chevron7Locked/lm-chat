@@ -955,6 +955,8 @@ class Handler(BaseHTTPRequestHandler):
         (re.compile(r'^/lm-chat-logo\.svg$'),                                  lambda s,m,b: s._serve_file("lm-chat-logo.svg","image/svg+xml")),
         (re.compile(r'^/style\.css$'),                                         lambda s,m,b: s._serve_file("style.css","text/css")),
         (re.compile(r'^/app\.js$'),                                            lambda s,m,b: s._serve_file("app.js","application/javascript")),
+        (re.compile(r'^/highlight\.min\.js$'),                                 lambda s,m,b: s._serve_file("highlight.min.js","application/javascript")),
+        (re.compile(r'^/highlight\.min\.css$'),                                lambda s,m,b: s._serve_file("highlight.min.css","text/css")),
         (re.compile(r'^/api/health$'),                                         lambda s,m,b: s._health_check()),
         (re.compile(r'^/share/(?P<id>[^/]+)$'),                                lambda s,m,b: s._serve_shared(m.group("id"))),
         (re.compile(r'^/api/debug$'),                                          lambda s,m,b: s._get_debug()),
