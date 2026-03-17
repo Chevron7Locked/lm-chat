@@ -43,15 +43,17 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     isSetup ?
                         "Set up your admin account to get started"
                     :   "Sign in to continue";
-                document.getElementById("a-name-wrap").style.display =
-                    isSetup ? "" : "none";
-                document.getElementById("a-pass2-wrap").style.display =
-                    isSetup ? "" : "none";
+                const nameWrap = document.getElementById("a-name-wrap");
+                if (isSetup) nameWrap.classList.remove("hidden");
+                else nameWrap.classList.add("hidden");
+                const pass2Wrap = document.getElementById("a-pass2-wrap");
+                if (isSetup) pass2Wrap.classList.remove("hidden");
+                else pass2Wrap.classList.add("hidden");
                 document.getElementById("auth-btn").textContent =
                     isSetup ? "Create Account" : "Sign In";
                 document.getElementById("auth-err").style.display = "none";
                 // Reset auth form to initial state (clear any TOTP step)
-                document.getElementById("a-totp-wrap").style.display = "none";
+                document.getElementById("a-totp-wrap").classList.add("hidden");
                 document.getElementById("a-user").parentElement.style.display =
                     "";
                 document.getElementById("a-pass").parentElement.style.display =
@@ -150,7 +152,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                             // Show TOTP input, hide username/password
                             document.getElementById(
                                 "a-totp-wrap",
-                            ).style.display = "";
+                            ).classList.remove("hidden");
                             document.getElementById(
                                 "a-user",
                             ).parentElement.style.display = "none";
@@ -238,7 +240,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 document.getElementById("user-dd").classList.remove("open");
                 await apiFetch("/api/auth/logout", { method: "POST" });
                 AUTH_STATE.user = null;
-                document.getElementById("user-avatar").style.display = "none";
+                document.getElementById("user-avatar").classList.add("hidden");
                 const gear = document.getElementById("global-settings-btn");
                 if (gear) gear.style.display = "";
                 showAuthScreen(false);
@@ -255,7 +257,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 const dd = document.getElementById("user-dd");
                 av.textContent = name.charAt(0).toUpperCase();
                 if (dd) av.appendChild(dd);
-                av.style.display = "flex";
+                av.classList.remove("hidden");
                 document.getElementById("user-dd-name").textContent = name;
                 // Hide redundant gear — user menu has Settings
                 const gear = document.getElementById("global-settings-btn");
@@ -706,7 +708,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     !_suppressAuth
                 ) {
                     AUTH_STATE.user = null;
-                    document.getElementById("user-avatar").style.display = "none";
+                    document.getElementById("user-avatar").classList.add("hidden");
                     const gear = document.getElementById("global-settings-btn");
                     if (gear) gear.style.display = "";
                     showAuthScreen(false);
@@ -2084,7 +2086,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     msgs.innerHTML = "";
                     renderList();
                     updateExportBtn();
-                    $("share-btn").style.display = "none";
+                    $("share-btn").classList.add("hidden");
                     input.focus();
                 } else {
                     exitIncognito();
@@ -4331,13 +4333,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 if (mode === "settings") {
                     $("right-panel-title").textContent = "Chat Settings";
                     const actionBtn = $("right-panel-action-btn");
-                    actionBtn.style.display = "";
+                    actionBtn.classList.remove("hidden");
                     actionBtn.textContent = "Reset";
                     actionBtn.onclick = resetChatSettings;
                     renderChatSettingsPanel();
                 } else if (mode === "pins") {
                     $("right-panel-title").textContent = "Pinned";
-                    $("right-panel-action-btn").style.display = "none";
+                    $("right-panel-action-btn").classList.add("hidden");
                     renderGlobalPinsPanel();
                 }
             }
@@ -4847,8 +4849,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             });
 
             function updateExportBtn() {
-                $("export-btn").style.display = activeId ? "" : "none";
-                $("share-btn").style.display = activeId ? "" : "none";
+                if (activeId) {
+                    $("export-btn").classList.remove("hidden");
+                    $("share-btn").classList.remove("hidden");
+                } else {
+                    $("export-btn").classList.add("hidden");
+                    $("share-btn").classList.add("hidden");
+                }
             }
 
             async function shareChat() {
@@ -5483,7 +5490,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             if ("serviceWorker" in navigator)
                 navigator.serviceWorker.register("/sw.js").catch(() => {});
 
-// --- Expose functions to HTML inline event handlers ---
+// --- Expose functions needed by dynamically-rendered HTML (innerHTML) ---
 Object.assign(window, {
     doAuth, closeSB, openSB, newChat, closeSettings, openSettings,
     filterChats, clearChatSearch, toggleSearchMode, toggleIncognito,
@@ -5501,3 +5508,115 @@ Object.assign(window, {
     closeRightPanel, openRightPanel, togglePinNavigator,
     pinMessage, unpinMessage, loadPinNavigator, scrollToMessage,
 });
+
+function initEventHandlers() {
+    // Auth
+    document.getElementById('auth-btn')?.addEventListener('click', () => doAuth());
+    document.getElementById('a-pass')?.addEventListener('keydown', e => { if (e.key === 'Enter') doAuth(); });
+
+    // Sidebar
+    document.getElementById('sb-overlay')?.addEventListener('click', () => closeSB());
+    document.getElementById('new-chat')?.addEventListener('click', () => newChat());
+    document.getElementById('close-sb')?.addEventListener('click', () => closeSB());
+    document.getElementById('chat-search')?.addEventListener('input', () => filterChats());
+    document.getElementById('chat-search-clear')?.addEventListener('click', () => clearChatSearch());
+    document.getElementById('search-mode')?.addEventListener('click', () => toggleSearchMode());
+
+    // Context gauge
+    const ctxGauge = document.getElementById('ctx-gauge');
+    ctxGauge?.addEventListener('click', () => triggerCompact());
+    ctxGauge?.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); triggerCompact(); }
+    });
+
+    // Topbar
+    document.getElementById('open-sb')?.addEventListener('click', () => openSB());
+    const modelSelWrap = document.getElementById('model-sel-wrap');
+    modelSelWrap?.addEventListener('click', () => toggleTopModelDD());
+    modelSelWrap?.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTopModelDD(); }
+    });
+
+    // Export
+    document.getElementById('export-btn')?.addEventListener('click', () => toggleExportDD());
+    const exportBtns = document.querySelectorAll('#export-dd button');
+    if (exportBtns[0]) exportBtns[0].addEventListener('click', () => exportChat('md'));
+    if (exportBtns[1]) exportBtns[1].addEventListener('click', () => exportChat('json'));
+
+    // Topbar actions
+    document.getElementById('incognito-btn')?.addEventListener('click', () => toggleIncognito());
+    document.getElementById('share-btn')?.addEventListener('click', () => shareChat());
+    document.querySelector('.tb[title="Keyboard shortcuts"]')?.addEventListener('click', () => showKBShortcuts());
+    document.getElementById('chat-settings-btn')?.addEventListener('click', () => openRightPanel('settings'));
+    document.getElementById('global-settings-btn')?.addEventListener('click', () => openSettings());
+
+    // User avatar/dropdown
+    const userAvatar = document.getElementById('user-avatar');
+    userAvatar?.addEventListener('click', () => toggleUserDD());
+    userAvatar?.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleUserDD(); }
+    });
+    // User DD buttons
+    document.querySelector('#user-dd button:first-child')?.addEventListener('click', () => {
+        document.getElementById('user-dd')?.classList.remove('open');
+        openSettings();
+    });
+    document.querySelector('#user-dd button:last-child')?.addEventListener('click', () => doLogout());
+
+    // Scroll
+    document.getElementById('scroll-bottom')?.addEventListener('click', () => scrollToBottom());
+
+    // Model pill in input area
+    const modelPill = document.getElementById('model-pill');
+    modelPill?.addEventListener('click', () => toggleModelDD());
+    modelPill?.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleModelDD(); }
+    });
+
+    // File input
+    document.querySelector('#attach-btn input[type="file"]')?.addEventListener('change', function() {
+        handleFiles(this.files);
+        this.value = '';
+    });
+
+    // Slash button
+    document.getElementById('slash-btn')?.addEventListener('click', () => {
+        const inp = document.getElementById('input');
+        if (inp) {
+            inp.value = '/';
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.focus();
+        }
+    });
+
+    // KB modal
+    document.getElementById('kb-overlay')?.addEventListener('click', () => hideKBShortcuts());
+
+    // Settings form
+    document.getElementById('s-preset')?.addEventListener('change', () => applyPreset());
+    document.getElementById('s-reasoning')?.addEventListener('change', function() {
+        localStorage.setItem('lsc-reasoning', this.value);
+    });
+    document.getElementById('s-followups')?.addEventListener('change', function() {
+        localStorage.setItem('lsc-followups', this.checked ? 'on' : 'off');
+    });
+    document.getElementById('s-memory')?.addEventListener('change', function() {
+        toggleMemory(this.checked);
+    });
+    document.querySelector('.danger[data-action="delete-all"]')?.addEventListener('click', () => deleteAll());
+
+    // Memory actions
+    document.getElementById('btn-refine')?.addEventListener('click', function() { refineInsights(this); });
+    document.querySelector('[data-action="add-insight"]')?.addEventListener('click', () => addInsightPrompt());
+    document.querySelector('[data-action="clear-insights"]')?.addEventListener('click', () => clearInsights());
+
+    // Starters
+    document.querySelector('[data-action="add-starter"]')?.addEventListener('click', () => addStarter());
+    document.querySelector('[data-action="reset-starters"]')?.addEventListener('click', () => resetStarters());
+
+    // Right panel
+    document.querySelector('#right-panel .tb[title="Close"]')?.addEventListener('click', () => closeRightPanel());
+    document.getElementById('right-panel-overlay')?.addEventListener('click', () => closeRightPanel());
+}
+
+document.addEventListener('DOMContentLoaded', initEventHandlers);
