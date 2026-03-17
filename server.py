@@ -294,6 +294,7 @@ def get_db():
             except Exception:
                 pass
     db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
     db.execute("PRAGMA busy_timeout=5000")
     db.execute("PRAGMA synchronous=NORMAL")
     db.execute("PRAGMA cache_size=-64000")
@@ -340,18 +341,18 @@ def get_session_user(db, token):
         "SELECT s.user_id,s.expires_at,u.id,u.username,u.display_name,u.is_admin,u.totp_enabled "
         "FROM sessions s JOIN users u ON s.user_id=u.id WHERE s.token=?", (token_hash,)
     ).fetchone()
-    if not row or row[1] < time.time():
-        if row and row[1] < time.time():
+    if not row or row["expires_at"] < time.time():
+        if row and row["expires_at"] < time.time():
             db.execute("DELETE FROM sessions WHERE token=?", (token_hash,))
             db.commit()
         return None
     # Sliding window: only extend if past 50% of session lifetime
-    remaining = row[1] - time.time()
+    remaining = row["expires_at"] - time.time()
     if remaining < SESSION_EXPIRY * 0.5:
         db.execute("UPDATE sessions SET expires_at=? WHERE token=?",
                    (time.time() + SESSION_EXPIRY, token_hash))
         db.commit()
-    return {"id": row[2], "username": row[3], "display_name": row[4], "is_admin": row[5], "totp_enabled": row[6] or 0}
+    return {"id": row["id"], "username": row["username"], "display_name": row["display_name"], "is_admin": row["is_admin"], "totp_enabled": row["totp_enabled"] or 0}
 
 
 # --- Rate limiting (SQLite-backed) ---
@@ -1203,18 +1204,18 @@ class Handler(BaseHTTPRequestHandler):
             "SELECT id,username,password_hash,salt,display_name,is_admin FROM users WHERE username=?",
             (username,),
         ).fetchone()
-        if not row or not verify_password(password, row[2], row[3]):
+        if not row or not verify_password(password, row["password_hash"], row["salt"]):
 
             return self._error(401, "invalid username or password")
         # Check if 2FA is enabled
-        totp_row = db.execute("SELECT totp_enabled FROM users WHERE id=?", (row[0],)).fetchone()
+        totp_row = db.execute("SELECT totp_enabled FROM users WHERE id=?", (row["id"],)).fetchone()
         if totp_row and totp_row[0]:
-            partial = sign_partial_token(row[0])
+            partial = sign_partial_token(row["id"])
             return self._json_response(200, {"needs_totp": True, "partial_token": partial})
         # Only clear rate limit after FULL authentication (no 2FA pending)
         clear_rate_limit(ip)
-        token = create_session(db, row[0])
-        user = {"id": row[0], "username": row[1], "display_name": row[4], "is_admin": row[5]}
+        token = create_session(db, row["id"])
+        user = {"id": row["id"], "username": row["username"], "display_name": row["display_name"], "is_admin": row["is_admin"]}
         self._json_response_with_cookie(200, {"user": user}, cookie_token=token)
 
     def _auth_logout(self):
@@ -1380,9 +1381,9 @@ class Handler(BaseHTTPRequestHandler):
         code = (body.get("code") or "").strip()
         db = get_db()
         row = db.execute("SELECT totp_secret,totp_enabled FROM users WHERE id=?", (user["id"],)).fetchone()
-        if not row or not row[1]:
+        if not row or not row["totp_enabled"]:
             return self._error(400, "2FA not enabled")
-        counter = verify_totp(row[0], code)
+        counter = verify_totp(row["totp_secret"], code)
         if counter is None:
             return self._error(400, "invalid code")
         db.execute("UPDATE users SET totp_enabled=0, totp_secret=NULL WHERE id=?", (user["id"],))
@@ -1408,15 +1409,15 @@ class Handler(BaseHTTPRequestHandler):
         if not row:
 
             return self._error(401, "invalid or reused code")
-        counter = verify_totp(row[0], code)
-        if counter is None or counter <= (row[4] or 0):
+        counter = verify_totp(row["totp_secret"], code)
+        if counter is None or counter <= (row["last_totp_counter"] or 0):
 
             return self._error(401, "invalid or reused code")
         db.execute("UPDATE users SET last_totp_counter=? WHERE id=?", (counter, user_id))
         db.commit()
         token = create_session(db, user_id)
         clear_rate_limit(ip)  # Clear rate limit after full 2FA success
-        user = {"id": user_id, "username": row[1], "display_name": row[2], "is_admin": row[3]}
+        user = {"id": user_id, "username": row["username"], "display_name": row["display_name"], "is_admin": row["is_admin"]}
         self._json_response_with_cookie(200, {"user": user}, cookie_token=token)
 
     # --- User Settings API (H4: server-side secrets) ---
