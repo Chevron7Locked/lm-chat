@@ -2800,20 +2800,24 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         """Retrieve top-N active insights sorted by weighted freshness score."""
         self._score_insights(db, user_id)
         rows = db.execute("""
-            SELECT id, content, category,
+            SELECT id, content, category, ups, downs,
                 (1.0 / (1.0 + (julianday('now') - julianday(last_used, 'unixepoch')) / 30.0))
-                * (1.0 + 0.3 * ln(1 + use_count)) AS score
+                * (1.0 + 0.3 * ln(1 + use_count)) AS base_score
             FROM user_insights
             WHERE user_id = ? AND state = 'active'
-            ORDER BY score DESC
+            ORDER BY base_score DESC
             LIMIT ?
         """, (user_id, limit * 2)).fetchall()
 
+        _LAPLACE_ALPHA = 1.0
+        _LAPLACE_BETA  = 2.0
         weighted = []
         for r in rows:
             cat_w = self.CATEGORY_WEIGHTS.get(r[2], 1.0)
+            ups, downs = r[3] or 0.0, r[4] or 0.0
+            bayesian = (ups + _LAPLACE_ALPHA) / (ups + downs + _LAPLACE_BETA)
             weighted.append({"id": r[0], "content": r[1], "category": r[2],
-                             "score": r[3] * cat_w})
+                             "score": r[5] * cat_w * bayesian})
         weighted.sort(key=lambda x: x["score"], reverse=True)
 
         result, chars = [], 0
