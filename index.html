@@ -34,15 +34,15 @@
                 <div id="auth-sub" class="auth-sub">Sign in to continue</div>
                 <div id="auth-err"></div>
                 <div class="sg">
-                    <label>Username</label
+                    <label for="a-user">Username</label
                     ><input type="text" id="a-user" autocomplete="username" />
                 </div>
                 <div class="sg hidden" id="a-name-wrap">
-                    <label>Display Name</label
+                    <label for="a-name">Display Name</label
                     ><input type="text" id="a-name" placeholder="Optional" />
                 </div>
                 <div class="sg">
-                    <label>Password</label
+                    <label for="a-pass">Password</label
                     ><input
                         type="password"
                         id="a-pass"
@@ -50,7 +50,7 @@
                     />
                 </div>
                 <div class="sg hidden" id="a-totp-wrap">
-                    <label>2FA Code</label
+                    <label for="a-totp">2FA Code</label
                     ><input
                         type="text"
                         id="a-totp"
@@ -61,7 +61,7 @@
                     />
                 </div>
                 <div class="sg hidden" id="a-pass2-wrap">
-                    <label>Confirm Password</label
+                    <label for="a-pass2">Confirm Password</label
                     ><input type="password" id="a-pass2" />
                 </div>
                 <button id="auth-btn">Sign In</button>
@@ -70,7 +70,7 @@
         </div>
 
         <div id="sb-overlay"></div>
-        <div id="sidebar">
+        <nav id="sidebar" aria-label="Conversations">
             <div class="sb-top">
                 <button id="new-chat">
                     <svg
@@ -127,9 +127,10 @@
                     ><span class="sf-saved" id="sf-saved">$0.00</span>
                 </div>
             </div>
-        </div>
+        </nav>
 
-        <div id="main">
+        <main id="main">
+            <h1 class="sr-only">LM Chat</h1>
             <div
                 id="ctx-gauge"
                 role="button"
@@ -432,7 +433,7 @@
                 </div>
             </div>
             <div id="sys-settings"></div>
-        </div>
+        </main>
 
         <div id="kb-overlay"></div>
         <div id="kb-modal">
@@ -667,7 +668,7 @@
         <script type="module" src="/app.js"></script>
 
         <!-- Right panel — shared slot for chat settings and global pins -->
-        <div id="right-panel" class="right-panel">
+        <aside id="right-panel" class="right-panel" aria-label="Chat settings">
             <div class="right-panel-header">
                 <span id="right-panel-title">Chat Settings</span>
                 <div class="rp-header-actions">
@@ -678,7 +679,7 @@
                 </div>
             </div>
             <div id="right-panel-body"></div>
-        </div>
+        </aside>
         <div id="right-panel-overlay"></div>
     </body>
 </html>

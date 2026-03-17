@@ -3365,6 +3365,17 @@
 }
 
 @layer utilities {
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
     .hidden { display: none !important; }
     .mb-5 { margin-bottom: var(--sp-5); }
     .mb-6 { margin-bottom: var(--sp-6); }
