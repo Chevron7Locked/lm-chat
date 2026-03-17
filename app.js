@@ -2238,7 +2238,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     }))
                 )
                     return;
-                await apiFetch(`/api/chats/${id}`, { method: "DELETE" });
+                try {
+                    const r = await apiFetch(`/api/chats/${id}`, { method: "DELETE" });
+                    if (!r.ok) throw new Error(`${r.status}`);
+                } catch (e) {
+                    addErr("Failed to delete chat.");
+                    return;
+                }
                 delete chatMeta[id];
                 if (activeId === id) {
                     activeId = null;
@@ -2258,11 +2264,20 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     }))
                 )
                     return;
-                await Promise.all(
-                    Object.keys(chatMeta).map((id) =>
-                        apiFetch(`/api/chats/${id}`, { method: "DELETE" }),
-                    ),
-                );
+                try {
+                    const results = await Promise.allSettled(
+                        Object.keys(chatMeta).map((id) =>
+                            apiFetch(`/api/chats/${id}`, { method: "DELETE" }),
+                        ),
+                    );
+                    const failed = results.filter(
+                        (r) => r.status === "rejected" || (r.value && !r.value.ok),
+                    );
+                    if (failed.length) addErr(`${failed.length} chat(s) could not be deleted.`);
+                } catch (e) {
+                    addErr("Failed to delete chats.");
+                    return;
+                }
                 chatMeta = {};
                 activeId = null;
                 renderList();
@@ -3992,11 +4007,18 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     return;
                 }
                 // Call server to delete last response
-                const resp = await apiFetch(
-                    `/api/chats/${activeId}/messages/last`,
-                    { method: "DELETE" },
-                );
-                const data = await resp.json();
+                let data;
+                try {
+                    const resp = await apiFetch(
+                        `/api/chats/${activeId}/messages/last`,
+                        { method: "DELETE" },
+                    );
+                    if (!resp.ok) { addErr("Failed to remove last message."); return; }
+                    data = await resp.json();
+                } catch (e) {
+                    addErr("Failed to regenerate: " + e.message);
+                    return;
+                }
                 if (!data.user_content) return;
                 // Remove last assistant + tool + stats/indicator messages from DOM (walk backwards until user msg)
                 while (msgs.lastChild) {
@@ -4863,16 +4885,22 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
             async function shareChat() {
                 if (!activeId) return;
-                const res = await apiFetch(
-                    "/api/chats/" + activeId + "/share",
-                    {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: "{}",
-                    },
-                );
-                if (!res.ok) return;
-                const data = await res.json();
+                let data;
+                try {
+                    const res = await apiFetch(
+                        "/api/chats/" + activeId + "/share",
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: "{}",
+                        },
+                    );
+                    if (!res.ok) { addErr("Failed to create share link."); return; }
+                    data = await res.json();
+                } catch (e) {
+                    addErr("Failed to create share link.");
+                    return;
+                }
                 const url = location.origin + data.url;
                 const dialog = document.createElement("div");
                 dialog.className = "share-dialog";
@@ -4890,9 +4918,15 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
 
             async function unshareChat(chatId, dialog) {
-                await apiFetch("/api/chats/" + chatId + "/share", {
-                    method: "DELETE",
-                });
+                try {
+                    const r = await apiFetch("/api/chats/" + chatId + "/share", {
+                        method: "DELETE",
+                    });
+                    if (!r.ok) throw new Error(`${r.status}`);
+                } catch (e) {
+                    addErr("Failed to delete share link.");
+                    return;
+                }
                 if (dialog) dialog.remove();
             }
 
