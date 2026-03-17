@@ -2710,7 +2710,7 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         import re as _re
         if "NONE" in text.upper():
             return []
-        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        lines = [ln.strip() for ln in text.split('\n') if ln.strip()]
         questions = []
         for line in lines:
             cleaned = _re.sub(r'^[\d\-\.\)]+\s*', '', line).strip()
