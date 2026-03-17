@@ -30,4 +30,4 @@ ignore = [
 
 [tool.codespell]
 skip = ".git*,*.min.js,*.min.css,*.svg"
-ignore-words-list = "totalin"
+ignore-words-list = "totalin,ans"
