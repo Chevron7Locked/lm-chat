@@ -1587,6 +1587,113 @@ class Handler(BaseHTTPRequestHandler):
             log.error(f"chat completion: {e}")
             self._error(502, "upstream service unavailable")
 
+    def _inject_memory(self, user: dict, system_prompt: str, is_incognito: bool) -> tuple:
+        """Inject user memory insights into system_prompt.
+        Returns (enriched_prompt, injected_ids).
+        """
+        if is_incognito:
+            return system_prompt, []
+        injected_ids = []
+        try:
+            mem_db = get_db()
+            mem_enabled = mem_db.execute(
+                "SELECT value FROM user_settings WHERE user_id=? AND key='memory_enabled'",
+                (user["id"],)
+            ).fetchone()
+            if mem_enabled is None or mem_enabled[0] != "false":
+                max_inject_row = mem_db.execute(
+                    "SELECT value FROM user_settings WHERE user_id=? AND key='memory_max_inject'",
+                    (user["id"],)
+                ).fetchone()
+                try:
+                    max_inject = int(max_inject_row[0]) if max_inject_row and max_inject_row[0] else 30
+                except (ValueError, TypeError):
+                    max_inject = 30
+                insights = self._get_top_insights(mem_db, user["id"], limit=max_inject)
+                injected_ids = [i["id"] for i in insights]
+                if insights:
+                    memory_block = self._format_insights_for_prompt(insights)
+                    system_prompt = (system_prompt + "\n\n" + memory_block) if system_prompt else memory_block
+                    self._touch_insights(mem_db, [i["id"] for i in insights])
+        except Exception as e:
+            log.error(f"memory injection: {e}")
+        return system_prompt, injected_ids
+
+    def _collect_stream(self, resp, is_incognito: bool) -> tuple:
+        """Proxy SSE stream to client, collecting data for persistence.
+        Returns (content_parts, reasoning_parts, tool_calls, response_id, stream_usage, stream_complete).
+        """
+        content_parts = []
+        reasoning_parts = []
+        tool_calls = []
+        current_tool = None
+        response_id = None
+        event_type = ""
+        stream_usage = {}
+        stream_complete = False
+
+        try:
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", errors="replace")
+                self.wfile.write(raw_line)
+                self.wfile.flush()
+
+                stripped = line.strip()
+                if stripped.startswith("event:"):
+                    event_type = stripped[6:].strip()
+                elif stripped.startswith("data:"):
+                    data_str = stripped[5:].strip()
+                    try:
+                        data = json.loads(data_str)
+                    except (json.JSONDecodeError, ValueError):
+                        data = {}
+
+                    if event_type != "message.delta" and not is_incognito:
+                        log.debug(f"SSE {event_type}")
+
+                    if event_type == "message.delta":
+                        content_parts.append(data.get("content") or "")
+                    elif event_type == "reasoning.delta":
+                        reasoning_parts.append(data.get("content") or "")
+                    elif event_type == "tool_call.start":
+                        current_tool = {
+                            "id": data.get("id", ""),
+                            "tool": data.get("tool", ""),
+                            "arguments": data.get("arguments", ""),
+                            "output": None,
+                        }
+                    elif event_type == "tool_call.arguments" and current_tool:
+                        current_tool["arguments"] += data.get("argumentsDelta", "")
+                    elif event_type == "tool_call.success" and current_tool:
+                        current_tool["output"] = data.get("output")
+                        tool_calls.append(current_tool)
+                        current_tool = None
+                    elif event_type == "tool_call.failure":
+                        if current_tool:
+                            current_tool["output"] = data.get("error", "Tool call failed")
+                            tool_calls.append(current_tool)
+                            current_tool = None
+                    elif event_type == "chat.end":
+                        result = data.get("result", {})
+                        response_id = data.get("response_id") or result.get("response_id")
+                        stats = result.get("stats", {})
+                        stream_usage = data.get("usage") or {
+                            "input_tokens": stats.get("input_tokens", 0),
+                            "output_tokens": stats.get("total_output_tokens", 0),
+                        }
+                        stream_complete = True
+                        if not is_incognito:
+                            log.debug(f"RESP chat.end resp_id={response_id} usage={stream_usage}")
+                            log.debug(f"RESP content: [{len(''.join(content_parts))} chars]")
+                            if tool_calls:
+                                log.debug(f"RESP tools: {len(tool_calls)} calls")
+        except (BrokenPipeError, ConnectionResetError):
+            log.debug("Stream aborted by client")
+        finally:
+            resp.close()
+
+        return content_parts, reasoning_parts, tool_calls, response_id, stream_usage, stream_complete
+
     def _handle_chat_stream(self, body):
         user = self._require_auth()
         if not user:
@@ -1630,35 +1737,7 @@ class Handler(BaseHTTPRequestHandler):
         system_prompt = body.get("system_prompt") or ""
 
         # Memory: inject user insights into system prompt (skip in incognito)
-        injected_insight_ids = []
-        if not is_incognito:
-            mem_db = None
-            try:
-                mem_db = get_db()
-                mem_enabled = mem_db.execute(
-                    "SELECT value FROM user_settings WHERE user_id=? AND key='memory_enabled'",
-                    (user["id"],)
-                ).fetchone()
-                if mem_enabled is None or mem_enabled[0] != "false":
-                    max_inject_row = mem_db.execute(
-                        "SELECT value FROM user_settings WHERE user_id=? AND key='memory_max_inject'",
-                        (user["id"],)
-                    ).fetchone()
-                    try:
-                        max_inject = int(max_inject_row[0]) if max_inject_row and max_inject_row[0] else 30
-                    except (ValueError, TypeError):
-                        max_inject = 30
-                    insights = self._get_top_insights(mem_db, user["id"], limit=max_inject)
-                    injected_insight_ids = [i["id"] for i in insights]
-                    if insights:
-                        memory_block = self._format_insights_for_prompt(insights)
-                        # Append memories AFTER system prompt (not before) so the frozen
-                        # system prompt prefix stays identical across turns, enabling
-                        # llama.cpp / LM Studio KV cache prefix reuse.
-                        system_prompt = system_prompt + "\n\n" + memory_block if system_prompt else memory_block
-                        self._touch_insights(mem_db, [i["id"] for i in insights])
-            except Exception as e:
-                log.error(f"memory injection: {e}")
+        system_prompt, injected_insight_ids = self._inject_memory(user, system_prompt, is_incognito)
         # Instruction sandwich: append core instruction reminder at end of system prompt.
         # Local LLMs (Qwen, Llama, Mistral) have strong recency bias — instructions at
         # the end of the system prompt get more attention than those in the middle.
@@ -1770,78 +1849,8 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return
 
-        # Collect data for persistence
-        content_parts = []
-        reasoning_parts = []
-        tool_calls = []
-        current_tool = None
-        response_id = None
-        event_type = ""
-        stream_usage = {}
-        stream_complete = False
-
-        try:
-            for raw_line in resp:
-                line = raw_line.decode("utf-8", errors="replace")
-                self.wfile.write(raw_line)
-                self.wfile.flush()
-
-                # Parse events for persistence
-                stripped = line.strip()
-                if stripped.startswith("event:"):
-                    event_type = stripped[6:].strip()
-                elif stripped.startswith("data:"):
-                    data_str = stripped[5:].strip()
-                    try:
-                        data = json.loads(data_str)
-                    except (json.JSONDecodeError, ValueError):
-                        data = {}
-
-                    # Log all events to find response_id (skip content in incognito)
-                    if event_type != "message.delta" and not is_incognito:
-                        log.debug(f"SSE {event_type}")
-
-                    if event_type == "message.delta":
-                        content_parts.append(data.get("content") or "")
-                    elif event_type == "reasoning.delta":
-                        reasoning_parts.append(data.get("content") or "")
-                    elif event_type == "tool_call.start":
-                        current_tool = {
-                            "id": data.get("id", ""),
-                            "tool": data.get("tool", ""),
-                            "arguments": data.get("arguments", ""),
-                            "output": None,
-                        }
-                    elif event_type == "tool_call.arguments" and current_tool:
-                        current_tool["arguments"] += data.get("argumentsDelta", "")
-                    elif event_type == "tool_call.success" and current_tool:
-                        current_tool["output"] = data.get("output")
-                        tool_calls.append(current_tool)
-                        current_tool = None
-                    elif event_type == "tool_call.failure":
-                        if current_tool:
-                            current_tool["output"] = data.get("error", "Tool call failed")
-                            tool_calls.append(current_tool)
-                            current_tool = None
-                    elif event_type == "chat.end":
-                        result = data.get("result", {})
-                        response_id = data.get("response_id") or result.get("response_id")
-                        stats = result.get("stats", {})
-                        stream_usage = data.get("usage") or {
-                            "input_tokens": stats.get("input_tokens", 0),
-                            "output_tokens": stats.get("total_output_tokens", 0),
-                        }
-                        stream_complete = True
-                        if not is_incognito:
-                            log.debug(f"RESP chat.end resp_id={response_id} usage={stream_usage}")
-                            log.debug(f"RESP content: [{len(''.join(content_parts))} chars]")
-                            if tool_calls:
-                                log.debug(f"RESP tools: {len(tool_calls)} calls")
-        except (BrokenPipeError, ConnectionResetError):
-            # Client disconnected — don't persist partial responses
-            log.debug("Stream aborted by client")
-        finally:
-            resp.close()
+        content_parts, reasoning_parts, tool_calls, response_id, stream_usage, stream_complete = \
+            self._collect_stream(resp, is_incognito)
 
         # Only persist complete responses (skip if client disconnected mid-stream)
         chat_id = body.get("chat_id")
