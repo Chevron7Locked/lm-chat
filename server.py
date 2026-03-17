@@ -2032,17 +2032,23 @@ class Handler(BaseHTTPRequestHandler):
         if not self._verify_chat_owner(db, source_id, user["id"]):
             return
         # Get source chat
-        src = db.execute("SELECT title FROM chats WHERE id=?", (source_id,)).fetchone()
+        src = db.execute("SELECT title, response_id FROM chats WHERE id=?", (source_id,)).fetchone()
         if not src:
             self._error(404, "chat not found")
             return
+        # Determine if we're forking at the last message; if so, carry the response_id
+        last_msg = db.execute(
+            "SELECT id FROM messages WHERE chat_id=? ORDER BY id DESC LIMIT 1",
+            (source_id,)
+        ).fetchone()
+        src_response_id = src[1] if (last_msg and last_msg[0] == up_to) else None
         # Create new chat
         new_id = f"c{uuid.uuid4().hex[:12]}"
         new_title = f"Fork: {src[0]}"
         now = time.time()
         db.execute(
-            "INSERT INTO chats (id,title,model,updated_at,user_id) VALUES (?,?,?,?,?)",
-            (new_id, new_title, body.get("model", ""), now, user["id"]),
+            "INSERT INTO chats (id,title,model,response_id,updated_at,user_id) VALUES (?,?,?,?,?,?)",
+            (new_id, new_title, body.get("model", ""), src_response_id, now, user["id"]),
         )
         # Copy messages up to and including the specified message id
         rows = db.execute(
