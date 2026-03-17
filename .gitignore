@@ -32,3 +32,8 @@ feature-checklist.txt
 .DS_Store
 Thumbs.db
 .superpowers/
+
+# AI tooling (never commit)
+.claude/
+.serena/
+docs/superpowers/
