@@ -2236,7 +2236,7 @@
 
       /* Messages — full width, larger text */
       #msgs {
-          padding: var(--sp-7) var(--sp-8) var(--sp-4);
+          padding: var(--sp-7) var(--sp-8) var(--sp-2);
           max-width: 100%;
       }
       .m-user .bub {
@@ -2276,7 +2276,7 @@
       /* Input area — flush to bottom edge */
       #input-area {
           padding: var(--sp-3) var(--sp-5);
-          padding-bottom: max(var(--sp-3), env(safe-area-inset-bottom, var(--sp-3)));
+          padding-bottom: env(safe-area-inset-bottom, 0px);
           max-width: 100%;
           background: var(--bg);
       }
@@ -3220,11 +3220,6 @@
 }
 
 @layer utilities {
-  @media (display-mode: standalone) {
-      #input-area {
-          padding-bottom: var(--sp-3);
-      }
-  }
   @media (prefers-reduced-motion: reduce) {
       *,
       *::before,
@@ -3297,51 +3292,51 @@
     display: block;
 }
 
-/* Pin navigator */
+/* Pin navigator — compact chip row under topbar */
 #pin-nav {
     display: none;
-    border-top: 1px solid var(--border);
-    padding: var(--sp-3) var(--sp-4);
-    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    flex-shrink: 0;
 }
 #pin-nav.has-pins {
-    display: block;
+    display: flex;
 }
 #pin-nav-list {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-    max-height: 120px;
-    overflow-y: auto;
-}
-#pin-nav.collapsed #pin-nav-list {
-    display: none;
-}
-#pin-nav-toggle {
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--faint);
-    padding: 0 2px;
-    line-height: 1;
-    transition: transform 0.15s;
-}
-#pin-nav:not(.collapsed) #pin-nav-toggle {
-    transform: rotate(90deg);
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-7);
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    &::-webkit-scrollbar { display: none; }
 }
 .pin-nav-item {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: var(--sp-3);
-    padding: var(--sp-2) var(--sp-3);
-    border-radius: var(--r-sm);
+    gap: var(--sp-2);
+    padding: 3px var(--sp-4);
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
     cursor: pointer;
     font-size: var(--text-xs);
     color: var(--dim);
-    transition: background 0.1s;
+    white-space: nowrap;
+    max-width: 14rem;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+    flex-shrink: 0;
+}
+.pin-nav-item span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .pin-nav-item:hover {
-    background: rgba(255,255,255,0.04);
+    background: var(--surface-raised);
+    border-color: rgba(192,132,252,0.25);
     color: var(--text);
 }
 .m-asst:hover .hover-pin-btn,
