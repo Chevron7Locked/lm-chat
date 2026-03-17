@@ -1020,6 +1020,8 @@ class Handler(BaseHTTPRequestHandler):
         (re.compile(r'^/api/pins/(?P<id>[^/]+)/title$'),                       lambda s,m,b: s._update_pin_title(m.group("id"),b)),
     ]
 
+    _ROUTES = {"GET": _GET_ROUTES, "POST": _POST_ROUTES, "DELETE": _DELETE_ROUTES, "PATCH": _PATCH_ROUTES}
+
     def _health_check(self):
         status = {"ok": True, "version": VERSION, "db": False, "lmstudio": False}
         try:
@@ -1088,8 +1090,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _dispatch(self, method, body=None):
         path = self.path.split("?")[0]
-        for pattern, handler in {"GET": self._GET_ROUTES, "POST": self._POST_ROUTES,
-                                  "DELETE": self._DELETE_ROUTES, "PATCH": self._PATCH_ROUTES}[method]:
+        routes = self._ROUTES.get(method)
+        if routes is None:
+            self.send_error(405)
+            return
+        for pattern, handler in routes:
             m = pattern.match(path)
             if m:
                 handler(self, m, body)
