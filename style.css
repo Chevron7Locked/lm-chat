@@ -49,12 +49,16 @@
       --border-active: rgba(192, 132, 252, 0.15);
       --text: #E2E8F0;
       --dim: #8494A7;
-      --faint: #4A5568;
+      --faint: #7A8FA3;    /* bumped for WCAG AA on --surface (#131B24): ~4.8:1 */
       --accent: #C084FC;
       --accent-hover: #D4A5FD;
       --accent-glow: rgba(192, 132, 252, 0.06);
       --green: #34D399;
       --code-bg: #060A0F;
+      /* Contextual surface tokens */
+      --input-bg:     #0E1318;   /* search/input fields — between --sidebar and --bg */
+      --footer-bg:    #050A0E;   /* stats footer bar — deepest surface */
+      --incognito-bg: #10141E;   /* body background in incognito mode */
       --err-bg: #1C1015;
       --err-border: #3B1A25;
       --err-text: #F0A0A0;
@@ -224,7 +228,7 @@
   }
   #chat-search {
       width: 100%;
-      background: #0E1318;
+      background: var(--input-bg);
       color: var(--text);
       border: 1px solid var(--border);
       border-radius: var(--r-md);
@@ -417,7 +421,7 @@
       color: var(--faint);
       border-top: 1px solid var(--border);
       line-height: 1.7;
-      background: #050A0E;
+      background: var(--footer-bg);
       & .sf-row {
           display: flex;
           justify-content: space-between;
@@ -660,7 +664,7 @@
       display: flex;
   }
   body.incognito {
-      background: #10141E;
+      background: var(--incognito-bg);
   }
 
 
