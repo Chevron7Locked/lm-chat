@@ -2919,62 +2919,70 @@ Distill insights (or respond "none" if nothing new):"""
         if not chat_id:
             return self._error(400, "chat_id required")
 
-        db = get_db()
-        if not self._verify_chat_owner(db, chat_id, user["id"]):
-            return
-
-        # Fetch conversation
-        msg_rows = db.execute(
-            "SELECT role, content, name, output FROM messages WHERE chat_id=? ORDER BY id",
-            (chat_id,),
-        ).fetchall()
-        if not msg_rows:
-            return self._json_response(200, {"insights": [], "message": "empty chat"})
-
-        convo_lines = []
-        for r in msg_rows:
-            role, content = r[0], r[1] or ""
-            if role == "tool":
-                name = r[2] or "tool"
-                output = r[3] or ""
-                convo_lines.append(f"[Tool: {name}] {output[:200]}")
-            elif content:
-                convo_lines.append(f"{role}: {content}")
-        conversation = "\n".join(convo_lines)[-3000:]  # last 3000 chars
-
-        # Fetch existing insights for dedup
-        existing = db.execute(
-            "SELECT content FROM user_insights WHERE user_id=? AND state='active'",
-            (user["id"],),
-        ).fetchall()
-        known_context = "\n".join(f"- {r[0]}" for r in existing) if existing else "(none yet)"
-
-        # LLM call
-        prompt = self.DISTILL_PROMPT.format(
-            known_context=known_context, conversation=conversation
-        )
-        payload = {
-            "model": model,
-            "input": prompt,
-            "stream": False,
-            "store": False,
-            "integrations": [],
-            "temperature": 0.3,
-        }
+        with Handler._distill_lock:
+            if chat_id in Handler._distilling:
+                return self._json_response(409, {"error": "distillation already in progress"})
+            Handler._distilling.add(chat_id)
         try:
-            data = self._lmstudio_chat(payload, user["id"], timeout=60)
-            raw_text = self._extract_content(data) or ""
-        except Exception as e:
-            log.error(f"LLM distillation failed: {e}")
-            return self._error(502, "LLM distillation failed")
+            db = get_db()
+            if not self._verify_chat_owner(db, chat_id, user["id"]):
+                return
 
-        try:
-            new_insights = self._parse_and_store_insights(db, user["id"], raw_text, chat_id)
-        except Exception as e:
-            log.error(f"Failed to store insights: {e}")
-            return self._error(500, "failed to store insights")
-        log.debug(f"memory: distilled {len(new_insights)} insights from chat {chat_id}")
-        self._json_response(200, {"insights": new_insights})
+            # Fetch conversation
+            msg_rows = db.execute(
+                "SELECT role, content, name, output FROM messages WHERE chat_id=? ORDER BY id",
+                (chat_id,),
+            ).fetchall()
+            if not msg_rows:
+                return self._json_response(200, {"insights": [], "message": "empty chat"})
+
+            convo_lines = []
+            for r in msg_rows:
+                role, content = r[0], r[1] or ""
+                if role == "tool":
+                    name = r[2] or "tool"
+                    output = r[3] or ""
+                    convo_lines.append(f"[Tool: {name}] {output[:200]}")
+                elif content:
+                    convo_lines.append(f"{role}: {content}")
+            conversation = "\n".join(convo_lines)[-3000:]  # last 3000 chars
+
+            # Fetch existing insights for dedup
+            existing = db.execute(
+                "SELECT content FROM user_insights WHERE user_id=? AND state='active'",
+                (user["id"],),
+            ).fetchall()
+            known_context = "\n".join(f"- {r[0]}" for r in existing) if existing else "(none yet)"
+
+            # LLM call
+            prompt = self.DISTILL_PROMPT.format(
+                known_context=known_context, conversation=conversation
+            )
+            payload = {
+                "model": model,
+                "input": prompt,
+                "stream": False,
+                "store": False,
+                "integrations": [],
+                "temperature": 0.3,
+            }
+            try:
+                data = self._lmstudio_chat(payload, user["id"], timeout=60)
+                raw_text = self._extract_content(data) or ""
+            except Exception as e:
+                log.error(f"LLM distillation failed: {e}")
+                return self._error(502, "LLM distillation failed")
+
+            try:
+                new_insights = self._parse_and_store_insights(db, user["id"], raw_text, chat_id)
+            except Exception as e:
+                log.error(f"Failed to store insights: {e}")
+                return self._error(500, "failed to store insights")
+            log.debug(f"memory: distilled {len(new_insights)} insights from chat {chat_id}")
+            self._json_response(200, {"insights": new_insights})
+        finally:
+            with Handler._distill_lock:
+                Handler._distilling.discard(chat_id)
 
     # --- Memory: CRUD endpoints ---
 
@@ -3365,6 +3373,8 @@ Curated list:"""
         self.wfile.write(data)
 
     _file_cache = {}  # {filename: (raw_bytes, gzipped_bytes, mtime, etag)}
+    _distill_lock: threading.Lock = threading.Lock()
+    _distilling: set = set()  # chat_ids currently being distilled
 
     def _serve_file(self, filename, content_type):
         path = os.path.join(os.path.dirname(__file__), filename)
