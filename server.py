@@ -1296,7 +1296,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "new password must be at least 8 characters")
         db = get_db()
         row = db.execute("SELECT password_hash,salt FROM users WHERE id=?", (user["id"],)).fetchone()
-        if not row or not verify_password(current_password, row[0], row[1]):
+        if not row or not verify_password(current_password, row["password_hash"], row["salt"]):
             return self._error(401, "current password is incorrect")
         pw_hash, salt = hash_password(new_password)
         db.execute("UPDATE users SET password_hash=?,salt=? WHERE id=?", (pw_hash, salt, user["id"]))
