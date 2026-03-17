@@ -325,7 +325,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 const isAdmin = AUTH_STATE.user && AUTH_STATE.user.is_admin;
                 const userTabHTML =
                     isAdmin ?
-                        `<button class="sys-tab${settingsTab === "users" ? " active" : ""}" onclick="switchSettingsTab('users')">Users</button>`
+                        `<button class="sys-tab${settingsTab === "users" ? " active" : ""}" data-action="switch-tab" data-tab="users">Users</button>`
                     :   "";
 
                 const tabDef = [
@@ -336,13 +336,13 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     ["profile", "Profile"],
                     ["security", "Security"],
                 ];
-                let header = `<div class="sys-header"><button class="sys-back" onclick="closeSettings()">&larr;</button><h2>Settings</h2></div>`;
+                let header = `<div class="sys-header"><button class="sys-back" data-action="close-settings">&larr;</button><h2>Settings</h2></div>`;
                 let tabs =
                     '<div class="sys-tabs">' +
                     tabDef
                         .map(
                             ([k, v]) =>
-                                `<button class="sys-tab${settingsTab === k ? " active" : ""}" onclick="switchSettingsTab('${k}')">${v}</button>`,
+                                `<button class="sys-tab${settingsTab === k ? " active" : ""}" data-action="switch-tab" data-tab="${k}">${v}</button>`,
                         )
                         .join("") +
                     userTabHTML +
@@ -365,6 +365,13 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 content += "</div>";
                 content += `<div style="text-align:center;padding:var(--sp-7) 0 var(--sp-4);font-size:0.6875rem;color:var(--faint)">LM Chat v${appVersion || "…"}</div>`;
                 el.innerHTML = header + tabs + content;
+
+                // Attach settings panel event listeners
+                el.querySelector('[data-action="close-settings"]')?.addEventListener('click', closeSettings);
+                el.querySelectorAll('[data-action="switch-tab"]').forEach(btn =>
+                    btn.addEventListener('click', () => switchSettingsTab(btn.dataset.tab))
+                );
+                attachSettingsTabListeners(el, settingsTab);
 
                 // Move live DOM nodes into their slots
                 if (settingsTab === "chat") {
@@ -390,6 +397,23 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 }
             }
 
+            function attachSettingsTabListeners(el, tab) {
+                if (tab === "profile") {
+                    el.querySelector('[data-action="save-profile"]')?.addEventListener('click', saveProfile);
+                    el.querySelector('[data-action="change-password"]')?.addEventListener('click', doSettingsChangePassword);
+                } else if (tab === "security") {
+                    el.querySelector('[data-action="disable-totp"]')?.addEventListener('click', disableTotp);
+                    el.querySelector('[data-action="start-totp-setup"]')?.addEventListener('click', startTotpSetup);
+                } else if (tab === "users") {
+                    el.querySelector('[data-action="create-user"]')?.addEventListener('click', doSettingsInvite);
+                } else if (tab === "server") {
+                    el.querySelector('[data-action="clear-api-key"]')?.addEventListener('click', clearApiKey);
+                    el.querySelector('[data-action="save-server-settings"]')?.addEventListener('click', saveServerSettings);
+                    el.querySelector('[data-action="add-remote-mcp"]')?.addEventListener('click', addRemoteMcp);
+                    el.querySelector('[data-action="toggle-debug"]')?.addEventListener('change', function() { toggleDebugMode(this.checked); });
+                }
+            }
+
             function renderProfileTab() {
                 const u = AUTH_STATE.user || {};
                 return `
@@ -397,7 +421,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
       <h3>Profile</h3>
       <div class="sys-field"><label>Username</label><input type="text" value="${esc(u.username || "")}" readonly></div>
       <div class="sys-field"><label>Display Name</label><input type="text" id="sp-name" value="${esc(u.display_name || "")}"></div>
-      <button class="sys-btn" onclick="saveProfile()">Save</button>
+      <button class="sys-btn" data-action="save-profile">Save</button>
       <div id="sp-msg"></div>
     </div>
     <div class="sys-section">
@@ -405,7 +429,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
       <div class="sys-field"><label>Current Password</label><input type="password" id="sp-curpw" autocomplete="current-password"></div>
       <div class="sys-field"><label>New Password</label><input type="password" id="sp-newpw" autocomplete="new-password"></div>
       <div class="sys-field"><label>Confirm New Password</label><input type="password" id="sp-confpw" autocomplete="new-password"></div>
-      <button class="sys-btn" onclick="doSettingsChangePassword()">Change Password</button>
+      <button class="sys-btn" data-action="change-password">Change Password</button>
       <div id="sp-pw-msg"></div>
     </div>`;
             }
@@ -482,7 +506,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
         <h3>Two-Factor Authentication</h3>
         <p style="color:var(--green);margin-bottom:var(--sp-7)">&#10003; 2FA is enabled</p>
         <div class="sys-field"><label>Enter current 2FA code to disable</label><input type="text" id="st-code" class="totp-verify-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="000000"></div>
-        <button class="sys-btn danger" onclick="disableTotp()">Disable 2FA</button>
+        <button class="sys-btn danger" data-action="disable-totp">Disable 2FA</button>
         <div id="st-msg"></div>
       </div>`;
                 }
@@ -491,7 +515,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
       <h3>Two-Factor Authentication</h3>
       <p style="color:var(--dim);margin-bottom:var(--sp-7)">Add an extra layer of security to your account</p>
       <div id="totp-setup-area">
-        <button class="sys-btn" onclick="startTotpSetup()">Enable 2FA</button>
+        <button class="sys-btn" data-action="start-totp-setup">Enable 2FA</button>
       </div>
       <div id="st-msg"></div>
     </div>`;
@@ -517,15 +541,21 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
     </div>
     <div style="margin:var(--sp-7) 0">
       <div style="font-size:var(--text-xs);color:var(--dim);margin-bottom:var(--sp-3)">Or enter this secret manually:</div>
-      <div class="totp-secret" data-secret="${esc(d.secret)}" onclick="navigator.clipboard.writeText(this.dataset.secret);this.style.opacity='.6';setTimeout(()=>this.style.opacity='1',300)" title="Click to copy">${esc(d.secret)}</div>
+      <div class="totp-secret" data-secret="${esc(d.secret)}" data-action="copy-totp-secret" title="Click to copy">${esc(d.secret)}</div>
     </div>
     <div style="margin-top:var(--sp-8)">
       <div style="font-size:var(--text-xs);color:var(--dim);margin-bottom:var(--sp-3)">Enter the 6-digit code from your app to verify:</div>
       <div style="display:flex;gap:var(--sp-5);align-items:center">
         <input type="text" id="st-verify-code" class="totp-verify-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" style="width:10rem">
-        <button class="sys-btn" onclick="verifyTotpSetup()">Verify</button>
+        <button class="sys-btn" data-action="verify-totp">Verify</button>
       </div>
     </div>`;
+                area.querySelector('[data-action="copy-totp-secret"]')?.addEventListener('click', function() {
+                    navigator.clipboard.writeText(this.dataset.secret);
+                    this.style.opacity = '.6';
+                    setTimeout(() => this.style.opacity = '1', 300);
+                });
+                area.querySelector('[data-action="verify-totp"]')?.addEventListener('click', verifyTotpSetup);
             }
 
             async function verifyTotpSetup() {
@@ -605,7 +635,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
       <div class="sys-field"><label>Username</label><input type="text" id="su-user" autocomplete="off"></div>
       <div class="sys-field"><label>Display Name</label><input type="text" id="su-name" placeholder="Optional" autocomplete="off"></div>
       <div class="sys-field"><label>Password</label><input type="password" id="su-pass" autocomplete="new-password"></div>
-      <button class="sys-btn" onclick="doSettingsInvite()">Create User</button>
+      <button class="sys-btn" data-action="create-user">Create User</button>
       <div id="su-msg"></div>
     </div>`;
             }
@@ -894,7 +924,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
     <div class="sys-section">
       <h3>LM Studio Connection</h3>
       <div class="sys-field"><label>Server URL</label><input type="text" id="ss-url" value="${esc(urlVal)}" placeholder="http://localhost:1234"></div>
-      <div class="sys-field"><label>API Key</label><div style="display:flex;gap:var(--sp-4)"><input type="password" id="ss-apikey" placeholder="${serverSettings.hasApiKey ? "••••••••  (saved)" : "Enter API key"}" autocomplete="off" style="flex:1">${serverSettings.hasApiKey ? '<button class="sys-btn" onclick="clearApiKey()" style="white-space:nowrap;background:var(--err-bg);color:var(--err-text)">Clear</button>' : ""}<button class="sys-btn" onclick="saveServerSettings()" style="white-space:nowrap">${serverSettings.hasApiKey ? "Update" : "Save"}</button></div></div>
+      <div class="sys-field"><label>API Key</label><div style="display:flex;gap:var(--sp-4)"><input type="password" id="ss-apikey" placeholder="${serverSettings.hasApiKey ? "••••••••  (saved)" : "Enter API key"}" autocomplete="off" style="flex:1">${serverSettings.hasApiKey ? '<button class="sys-btn" data-action="clear-api-key" style="white-space:nowrap;background:var(--err-bg);color:var(--err-text)">Clear</button>' : ""}<button class="sys-btn" data-action="save-server-settings" style="white-space:nowrap">${serverSettings.hasApiKey ? "Update" : "Save"}</button></div></div>
       <div id="ss-status" style="font-size:var(--text-xs);color:${statusColor};margin-top:var(--sp-4)">${statusText}</div>
       <div id="ss-conn" style="margin-top:var(--sp-6)"></div>
     </div>
@@ -910,13 +940,13 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
     <div class="sys-section">
       <h3>Remote MCP Servers</h3>
       <div id="remote-mcp-list"></div>
-      <button onclick="addRemoteMcp()" style="background:none;border:1px dashed var(--border);color:var(--dim);width:100%;padding:var(--sp-4);border-radius:0.5rem;cursor:pointer;font-size:var(--text-sm);margin-top:var(--sp-4)">+ Add Remote Server</button>
+      <button data-action="add-remote-mcp" style="background:none;border:1px dashed var(--border);color:var(--dim);width:100%;padding:var(--sp-4);border-radius:0.5rem;cursor:pointer;font-size:var(--text-sm);margin-top:var(--sp-4)">+ Add Remote Server</button>
       <div style="font-size:var(--text-xs);color:var(--faint);margin-top:var(--sp-4)">Requires "Allow per-request MCPs" in LM Studio Developer Settings</div>
     </div>
     <div class="sys-section">
       <h3>Debug Logging</h3>
       <div style="display:flex;align-items:center;gap:var(--sp-6)">
-        <label class="sw"><input type="checkbox" id="ss-debug" onchange="toggleDebugMode(this.checked)"><span class="slider"></span></label>
+        <label class="sw"><input type="checkbox" id="ss-debug" data-action="toggle-debug"><span class="slider"></span></label>
         <span style="font-size:var(--text-base)">Verbose debug mode</span>
       </div>
       <div id="ss-debug-info" style="font-size:var(--text-xs);color:var(--faint);margin-top:var(--sp-4)">Logs requests, SSE events, memory operations, and tool calls to <code style="font-size:0.6875rem">logs/</code></div>
@@ -1483,7 +1513,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         s.has_auth ?
                             '<span style="color:var(--accent);font-size:0.625rem;margin-left:var(--sp-3)" title="Auth token configured">&#128274;</span>'
                         :   "";
-                    d.innerHTML = `<input type=checkbox ${s.on ? "checked" : ""}><span>${esc(s.label)}</span>${authBadge}<span style="color:var(--faint);font-size:0.6875rem;margin-left:auto">${esc(s.url)}</span><button onclick="setMcpAuth(${i})" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-xs);padding:0 var(--sp-2)" title="Set auth token">&#128273;</button><button onclick="removeRemoteMcp(${i})" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-lg);padding:0 var(--sp-2)" title="Remove">&times;</button>`;
+                    d.innerHTML = `<input type=checkbox ${s.on ? "checked" : ""}><span>${esc(s.label)}</span>${authBadge}<span style="color:var(--faint);font-size:0.6875rem;margin-left:auto">${esc(s.url)}</span><button data-action="set-mcp-auth" data-idx="${i}" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-xs);padding:0 var(--sp-2)" title="Set auth token">&#128273;</button><button data-action="remove-remote-mcp" data-idx="${i}" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-lg);padding:0 var(--sp-2)" title="Remove">&times;</button>`;
+                    d.querySelector('[data-action="set-mcp-auth"]').addEventListener('click', () => setMcpAuth(i));
+                    d.querySelector('[data-action="remove-remote-mcp"]').addEventListener('click', () => removeRemoteMcp(i));
                     d.querySelector("input").onchange = (e) => {
                         remoteMcps[i].on = e.target.checked;
                         saveRemoteMcps();
@@ -2300,9 +2332,12 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 el.innerHTML = starters
                     .map((s, i) => {
                         const svg = STARTER_ICONS[s.icon];
-                        return `<button class="starter-card" onclick="useStarter(${i})"><span class="starter-icon">${svg || esc(s.icon || "💬")}</span><span class="starter-title">${esc(s.title)}</span></button>`;
+                        return `<button class="starter-card" data-action="use-starter" data-idx="${i}"><span class="starter-icon">${svg || esc(s.icon || "💬")}</span><span class="starter-title">${esc(s.title)}</span></button>`;
                     })
                     .join("");
+                el.querySelectorAll('[data-action="use-starter"]').forEach(btn =>
+                    btn.addEventListener('click', () => useStarter(parseInt(btn.dataset.idx)))
+                );
             }
             function hideStarters() {
                 const el = $("starters");
@@ -2325,9 +2360,16 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 el.innerHTML = list
                     .map(
                         (s, i) =>
-                            `<div style="display:flex;gap:var(--sp-3);margin-bottom:var(--sp-2);align-items:center"><input value="${esc(s.icon || "💬")}" style="width:2rem;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:0.25rem;padding:0.1875rem;font-size:var(--text-base)" onchange="updateStarter(${i},'icon',this.value)"><input value="${esc(s.title)}" placeholder="Title" style="width:4.375rem;background:var(--surface);border:1px solid var(--border);border-radius:0.25rem;padding:0.1875rem var(--sp-3);font-size:var(--text-xs);color:var(--text)" onchange="updateStarter(${i},'title',this.value)"><input value="${esc(s.prompt)}" placeholder="Prompt text..." style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:0.25rem;padding:0.1875rem var(--sp-3);font-size:var(--text-xs);color:var(--text)" onchange="updateStarter(${i},'prompt',this.value)"><button onclick="removeStarter(${i})" style="background:none;border:none;color:var(--faint);cursor:pointer;font-size:var(--text-base)">&times;</button></div>`,
+                            `<div style="display:flex;gap:var(--sp-3);margin-bottom:var(--sp-2);align-items:center" data-starter-row="${i}"><input data-field="icon" value="${esc(s.icon || "💬")}" style="width:2rem;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:0.25rem;padding:0.1875rem;font-size:var(--text-base)"><input data-field="title" value="${esc(s.title)}" placeholder="Title" style="width:4.375rem;background:var(--surface);border:1px solid var(--border);border-radius:0.25rem;padding:0.1875rem var(--sp-3);font-size:var(--text-xs);color:var(--text)"><input data-field="prompt" value="${esc(s.prompt)}" placeholder="Prompt text..." style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:0.25rem;padding:0.1875rem var(--sp-3);font-size:var(--text-xs);color:var(--text)"><button data-action="remove-starter" style="background:none;border:none;color:var(--faint);cursor:pointer;font-size:var(--text-base)">&times;</button></div>`,
                     )
                     .join("");
+                el.querySelectorAll('[data-starter-row]').forEach(row => {
+                    const idx = parseInt(row.dataset.starterRow);
+                    row.querySelectorAll('input[data-field]').forEach(inp =>
+                        inp.addEventListener('change', () => updateStarter(idx, inp.dataset.field, inp.value))
+                    );
+                    row.querySelector('[data-action="remove-starter"]')?.addEventListener('click', () => removeStarter(idx));
+                });
             }
 
             function updateStarter(i, field, value) {
@@ -2381,6 +2423,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             const td = document.createElement("div");
                             td.className = "m-think";
                             td.innerHTML = thinkHtml(uid, "Show thinking", esc(tm[1].trim()), false);
+                            bindThinkToggle(td);
                             grp.appendChild(td);
                             // Add response inside group
                             if (c) {
@@ -2539,8 +2582,20 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 }
                 const hasBody = !!bodyContent;
                 d.innerHTML =
-                    `<span class="t-name" style="display:none">${esc(name || "tool")}</span><div class="t-toggle" role="button" tabindex="0" ${hasBody ? `onclick="const b=document.getElementById('${uid}'),a=this.querySelector('.t-arrow');b.classList.toggle('open');a.classList.toggle('open')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"` : ""}>` +
+                    `<span class="t-name" style="display:none">${esc(name || "tool")}</span><div class="t-toggle" role="button" tabindex="0" ${hasBody ? `data-action="toggle-tool" data-uid="${uid}"` : ""}>` +
                     `<span class="t-arrow"${hasBody ? "" : ' style="visibility:hidden"'}>&#9656;</span> ${esc(label)}${preview ? `<span class="t-preview">${esc(preview)}</span>` : ""}</div>${hasBody ? `<div class="t-body" id="${uid}">${bodyContent}</div>` : ""}`;
+                if (hasBody) {
+                    const toggle = d.querySelector('[data-action="toggle-tool"]');
+                    toggle.addEventListener('click', function() {
+                        const b = document.getElementById(this.dataset.uid);
+                        const a = this.querySelector('.t-arrow');
+                        b.classList.toggle('open');
+                        a.classList.toggle('open');
+                    });
+                    toggle.addEventListener('keydown', function(event) {
+                        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }
+                    });
+                }
                 getMsgTarget().appendChild(d);
             }
             function addThink(t) {
@@ -2548,6 +2603,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const d = document.createElement("div");
                 d.className = "m-think";
                 d.innerHTML = thinkHtml(uid, "Show thinking", esc(t), false);
+                bindThinkToggle(d);
                 getMsgTarget().appendChild(d);
             }
             function addErr(t) {
@@ -2559,7 +2615,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             function addErrRetry(t) {
                 const d = document.createElement("div");
                 d.className = "m-err";
-                d.innerHTML = `<div class="bub">${esc(t)} <button onclick="retryLast()" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline;font-size:inherit;margin-left:var(--sp-3)">Retry</button></div>`;
+                d.innerHTML = `<div class="bub">${esc(t)} <button data-action="retry-last" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline;font-size:inherit;margin-left:var(--sp-3)">Retry</button></div>`;
+                d.querySelector('[data-action="retry-last"]').addEventListener('click', retryLast);
                 getMsgTarget().appendChild(d);
             }
             function retryLast() {
@@ -2735,9 +2792,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         div.innerHTML =
                             '<div class="att-file"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg><span>' +
                             esc(att.name) +
-                            '</span></div><button class="att-x" onclick="removeAttachment(' +
-                            i +
-                            ')">&times;</button>';
+                            '</span></div><button class="att-x" data-action="remove-attachment">&times;</button>';
+                        div.querySelector('[data-action="remove-attachment"]').addEventListener('click', () => removeAttachment(i));
                     }
                     el.appendChild(div);
                 });
@@ -3296,6 +3352,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             const d = document.createElement("div");
                             d.className = "m-think";
                             d.innerHTML = thinkHtml(uid, "Thinking...", "", true);
+                            bindThinkToggle(d);
                             streamState.group.appendChild(d);
                             streamState.thinkBody = d.querySelector(".think-body");
                             streamState.thinkBuf = "";
@@ -3378,6 +3435,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                                 const d = document.createElement("div");
                                 d.className = "m-think";
                                 d.innerHTML = thinkHtml(uid, "Thinking...", "", true);
+                                bindThinkToggle(d);
                                 getMsgTarget().appendChild(d);
                                 streamState.thinkBody = d.querySelector(".think-body");
                                 streamState.thinkBody.textContent = streamState.thinkBuf;
@@ -3747,7 +3805,19 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             function thinkHtml(uid, label, content, startOpen) {
                 const openClass = startOpen ? " open" : "";
                 const style = startOpen ? ' style="display:block"' : "";
-                return `<div class="think-toggle" role="button" tabindex="0" onclick="const b=document.getElementById('${uid}');b.classList.toggle('open');this.textContent=b.classList.contains('open')?'Hide thinking':'Show thinking'" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">${label}</div><div class="bub"><div id="${uid}" class="think-body${openClass}"${style}>${content}</div></div>`;
+                return `<div class="think-toggle" role="button" tabindex="0" data-action="toggle-think" data-uid="${uid}">${label}</div><div class="bub"><div id="${uid}" class="think-body${openClass}"${style}>${content}</div></div>`;
+            }
+            function bindThinkToggle(container) {
+                const toggle = container.querySelector('[data-action="toggle-think"]');
+                if (!toggle) return;
+                toggle.addEventListener('click', function() {
+                    const b = document.getElementById(this.dataset.uid);
+                    b.classList.toggle('open');
+                    this.textContent = b.classList.contains('open') ? 'Hide thinking' : 'Show thinking';
+                });
+                toggle.addEventListener('keydown', function(event) {
+                    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }
+                });
             }
             function cancelSend(restoreAttachments) {
                 sending = false;
@@ -4052,7 +4122,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 bub.style.display = "none";
                 const area = document.createElement("div");
                 area.className = "edit-area";
-                area.innerHTML = `<textarea>${esc(text)}</textarea><div class="edit-btns"><button class="cancel" onclick="cancelEdit(this)">Cancel</button><button class="save" onclick="saveEdit(this)">Save &amp; Send</button></div>`;
+                area.innerHTML = `<textarea>${esc(text)}</textarea><div class="edit-btns"><button class="cancel" data-action="cancel-edit">Cancel</button><button class="save" data-action="save-edit">Save &amp; Send</button></div>`;
+                area.querySelector('[data-action="cancel-edit"]').addEventListener('click', function() { cancelEdit(this); });
+                area.querySelector('[data-action="save-edit"]').addEventListener('click', function() { saveEdit(this); });
                 el.appendChild(area);
                 const ta = area.querySelector("textarea");
                 ta.style.height = Math.max(60, ta.scrollHeight) + "px";
@@ -4911,9 +4983,20 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 dialog.innerHTML =
                     '<div class="share-content"><h3>Share Conversation</h3><p style="color:var(--dim);font-size:var(--text-sm);margin:var(--sp-4) 0">Anyone with this link can view a read-only snapshot of this conversation.</p><div style="display:flex;gap:var(--sp-3)"><input id="share-url" value="' +
                     esc(url) +
-                    '" readonly style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:var(--sp-3) var(--sp-5);font-size:var(--text-sm);color:var(--text);font-family:inherit"><button onclick="navigator.clipboard.writeText(document.getElementById(\'share-url\').value);this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy\',1500)" class="sys-btn" style="white-space:nowrap">Copy</button></div><div style="display:flex;gap:var(--sp-4);margin-top:var(--sp-6);justify-content:flex-end"><button onclick="unshareChat(\'' +
+                    '" readonly style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:var(--sp-3) var(--sp-5);font-size:var(--text-sm);color:var(--text);font-family:inherit"><button data-action="copy-share-url" class="sys-btn" style="white-space:nowrap">Copy</button></div><div style="display:flex;gap:var(--sp-4);margin-top:var(--sp-6);justify-content:flex-end"><button data-action="delete-share-link" data-chat-id="' +
                     activeId +
-                    '\',this.closest(\'.share-dialog\'))" style="background:none;border:1px solid var(--err-border);color:var(--err-text);padding:var(--sp-2) var(--sp-6);border-radius:var(--r-sm);font-size:var(--text-xs);cursor:pointer;font-family:inherit">Delete Link</button><button onclick="this.closest(\'.share-dialog\').remove()" class="sys-btn">Done</button></div></div>';
+                    '" style="background:none;border:1px solid var(--err-border);color:var(--err-text);padding:var(--sp-2) var(--sp-6);border-radius:var(--r-sm);font-size:var(--text-xs);cursor:pointer;font-family:inherit">Delete Link</button><button data-action="close-share-dialog" class="sys-btn">Done</button></div></div>';
+                dialog.querySelector('[data-action="copy-share-url"]').addEventListener('click', function() {
+                    navigator.clipboard.writeText(document.getElementById('share-url').value);
+                    this.textContent = 'Copied!';
+                    setTimeout(() => this.textContent = 'Copy', 1500);
+                });
+                dialog.querySelector('[data-action="delete-share-link"]').addEventListener('click', function() {
+                    unshareChat(this.dataset.chatId, this.closest('.share-dialog'));
+                });
+                dialog.querySelector('[data-action="close-share-dialog"]').addEventListener('click', function() {
+                    this.closest('.share-dialog').remove();
+                });
                 document.body.appendChild(dialog);
                 // Close on backdrop click
                 dialog.addEventListener("click", (e) => {
