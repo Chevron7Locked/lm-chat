@@ -160,12 +160,6 @@
                 <img
                     src="/lm-chat-logo.svg"
                     alt="LM Chat"
-                    style="
-                        width:1.5rem;
-                        height:1.5rem;
-                        flex-shrink: 0;
-                        display: block;
-                    "
                 />
                 <button
                     id="open-sb"
@@ -313,6 +307,7 @@
                         <span class="dot"></span>
                     </button>
                     <button
+                        id="global-settings-btn"
                         class="tb"
                         onclick="openSettings()"
                         title="Settings"
@@ -647,15 +642,7 @@
                         step="256"
                         value="-1"
                     />
-                    <div
-                        style="
-                            font-size: 0.625rem;
-                            color: var(--faint);
-                            margin-top:var(--sp-1);
-                        "
-                    >
-                        -1 = unlimited
-                    </div>
+                    <div class="sg-hint">-1 = unlimited</div>
                 </div>
                 <div
                     class="sg"
@@ -722,15 +709,7 @@
                                 " /><span class="slider"></span
                         ></label>
                     </div>
-                    <div
-                        style="
-                            font-size: 0.625rem;
-                            color: var(--faint);
-                            margin-top:0.1875rem;
-                        "
-                    >
-                        Show follow-up questions after responses
-                    </div>
+                    <div class="sg-hint">Show follow-up questions after responses</div>
                 </div>
                 <button
                     class="danger"
@@ -756,15 +735,8 @@
                             ></span
                         ></label>
                     </div>
-                    <div
-                        style="
-                            font-size: 0.625rem;
-                            color: var(--faint);
-                            margin-bottom:var(--sp-5);
-                        "
-                    >
-                        LM Chat remembers facts about you across chats. Injected
-                        into every system prompt.
+                    <div class="sg-hint" style="margin-bottom:var(--sp-5)">
+                        LM Chat remembers facts about you across chats. Injected into every system prompt.
                     </div>
                     <div
                         id="memory-list"
@@ -793,15 +765,8 @@
             <div id="starters-settings-content">
                 <div class="sg">
                     <label>Prompt Starters</label>
-                    <div
-                        style="
-                            font-size: 0.625rem;
-                            color: var(--faint);
-                            margin-bottom:var(--sp-4);
-                        "
-                    >
-                        Shown on the welcome screen. Click to populate chat
-                        input.
+                    <div class="sg-hint" style="margin-bottom:var(--sp-4)">
+                        Shown on the welcome screen. Click to populate chat input.
                     </div>
                     <div id="starters-list" style="margin:var(--sp-3) 0"></div>
                     <div style="display: flex; gap:var(--sp-2)">
@@ -823,7 +788,7 @@
             <div class="right-panel-header">
                 <span id="right-panel-title">Chat Settings</span>
                 <div style="display:flex;gap:var(--sp-3);align-items:center">
-                    <button id="right-panel-action-btn" style="display:none" class="btn-sm">Reset</button>
+                    <button id="right-panel-action-btn" style="display: none" class="btn-sm">Reset</button>
                     <button class="tb" onclick="closeRightPanel()" title="Close">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                     </button>

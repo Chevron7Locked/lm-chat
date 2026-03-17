@@ -239,6 +239,8 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 await apiFetch("/api/auth/logout", { method: "POST" });
                 AUTH_STATE.user = null;
                 document.getElementById("user-avatar").style.display = "none";
+                const gear = document.getElementById("global-settings-btn");
+                if (gear) gear.style.display = "";
                 showAuthScreen(false);
             }
 
@@ -255,6 +257,9 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 if (dd) av.appendChild(dd);
                 av.style.display = "flex";
                 document.getElementById("user-dd-name").textContent = name;
+                // Hide redundant gear — user menu has Settings
+                const gear = document.getElementById("global-settings-btn");
+                if (gear) gear.style.display = "none";
             }
 
             function toggleUserDD() {
@@ -701,8 +706,9 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     !_suppressAuth
                 ) {
                     AUTH_STATE.user = null;
-                    document.getElementById("user-avatar").style.display =
-                        "none";
+                    document.getElementById("user-avatar").style.display = "none";
+                    const gear = document.getElementById("global-settings-btn");
+                    if (gear) gear.style.display = "";
                     showAuthScreen(false);
                     throw new Error("unauthorized");
                 }

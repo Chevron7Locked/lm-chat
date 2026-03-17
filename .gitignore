@@ -31,3 +31,4 @@ feature-checklist.txt
 # OS
 .DS_Store
 Thumbs.db
+.superpowers/

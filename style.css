@@ -447,6 +447,12 @@
       padding-top: max(var(--sp-5), var(--sat));
       border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   }
+  #topbar > img {
+      width: 1.5rem;
+      height: 1.5rem;
+      flex-shrink: 0;
+      display: block;
+  }
   #open-sb {
       background: none;
       border: none;
@@ -1724,6 +1730,11 @@
           height: 10rem;
           resize: vertical;
       }
+      & .sg-hint {
+          font-size: 0.625rem;
+          color: var(--faint);
+          margin-top: var(--sp-1);
+      }
   }
   .sg-row {
       display: flex;
@@ -2262,14 +2273,9 @@
       .fork-btn {
           width: var(--sp-9);
           height: var(--sp-9);
+          opacity: 0.4;
       }
       .m-user .edit-btn {
-          opacity: 0.4;
-      }
-      .fork-btn {
-          opacity: 0.4;
-      }
-      .m-asst .fork-btn {
           opacity: 0.4;
       }
 
