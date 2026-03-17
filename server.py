@@ -617,7 +617,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _check_csrf(self):
         """Check CSRF header on mutating requests. Returns True if OK, sends 403 and returns False if not."""
-        if self.command in ("POST", "DELETE") and self.headers.get("X-Requested-With") != "lm-chat":
+        if self.command in ("POST", "PATCH", "DELETE") and self.headers.get("X-Requested-With") != "lm-chat":
             self._error(403, "missing CSRF header")
             return False
         return True
