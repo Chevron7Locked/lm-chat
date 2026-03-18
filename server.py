@@ -929,6 +929,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", csp or CSP)
         self.send_header("Referrer-Policy", referrer)
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()")
 
     def _json_response_with_cookie(self, code, data, cookie_token=None, clear_cookie=False):
         """Like _json_response but can set/clear cookie before end_headers."""

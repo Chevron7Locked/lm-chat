@@ -6,16 +6,18 @@ on:
   schedule:
     - cron: "0 6 * * 1" # weekly Monday 6am UTC
 
-permissions:
-  contents: read
-  actions: read
-  security-events: write
-  id-token: write
+# Declare default permissions as read-only (required by Scorecard's workflow validator)
+permissions: read-all
 
 jobs:
   scorecard:
     name: Supply Chain Security
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write  # upload SARIF to Security tab
+      id-token: write         # publish results + badge signing
     steps:
       - uses: actions/checkout@v6
         with:
