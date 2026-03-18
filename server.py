@@ -5,7 +5,8 @@ Serves a PWA-ready single-page app, proxies to LM Studio, persists chats in SQLi
 
 import base64, gzip, hashlib, hmac, html as html_mod, json, logging, math, os, re, secrets, signal, sqlite3, struct, sys, threading, time, uuid, urllib.request, urllib.error
 import http.cookies
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 from qr import generate_qr_svg
@@ -683,8 +684,6 @@ class Handler(BaseHTTPRequestHandler):
         user = self._require_auth()
         if not user:
             return
-        if not self._check_csrf():
-            return
         db = get_db()
         row = db.execute(
             "SELECT settings FROM chats WHERE id = ? AND user_id = ?",
@@ -720,8 +719,6 @@ class Handler(BaseHTTPRequestHandler):
         user = self._require_auth()
         if not user:
             return
-        if not self._check_csrf():
-            return
         db = get_db()
         result = db.execute(
             "UPDATE chats SET settings = NULL WHERE id = ? AND user_id = ?",
@@ -735,8 +732,6 @@ class Handler(BaseHTTPRequestHandler):
     def _pin_message(self, message_id):
         user = self._require_auth()
         if not user:
-            return
-        if not self._check_csrf():
             return
         db = get_db()
         row = db.execute("""
@@ -779,8 +774,6 @@ class Handler(BaseHTTPRequestHandler):
         user = self._require_auth()
         if not user:
             return
-        if not self._check_csrf():
-            return
         db = get_db()
         result = db.execute(
             "DELETE FROM pins WHERE id = ? AND user_id = ?",
@@ -822,7 +815,7 @@ class Handler(BaseHTTPRequestHandler):
             """SELECT id, pin_title, message_id, pinned_at, substr(content, 1, 40) as fallback
                FROM pins
                WHERE user_id = ? AND chat_id = ?
-               ORDER BY COALESCE(message_id, 9999999999) ASC, pinned_at ASC""",
+               ORDER BY message_id IS NULL ASC, message_id ASC, pinned_at ASC""",
             (user["id"], chat_id)
         ).fetchall()
         pins = [
@@ -839,8 +832,6 @@ class Handler(BaseHTTPRequestHandler):
     def _update_pin_title(self, pin_id, body):
         user = self._require_auth()
         if not user:
-            return
-        if not self._check_csrf():
             return
         title = (body.get("title") or "").strip()[:80]
         if not title:
@@ -984,7 +975,6 @@ class Handler(BaseHTTPRequestHandler):
         (re.compile(r'^/api/auth/logout$'),                                    lambda s,m,b: s._auth_logout()),
         (re.compile(r'^/api/auth/invite$'),                                    lambda s,m,b: s._auth_invite(b)),
         (re.compile(r'^/api/auth/change-password$'),                           lambda s,m,b: s._auth_change_password(b)),
-        (re.compile(r'^/api/auth/profile$'),                                   lambda s,m,b: s._auth_update_profile(b)),
         (re.compile(r'^/api/auth/totp/setup$'),                                lambda s,m,b: s._totp_setup()),
         (re.compile(r'^/api/auth/totp/verify$'),                               lambda s,m,b: s._totp_verify(b)),
         (re.compile(r'^/api/auth/totp/disable$'),                              lambda s,m,b: s._totp_disable(b)),
@@ -994,7 +984,6 @@ class Handler(BaseHTTPRequestHandler):
         (re.compile(r'^/api/chat$'),                                           lambda s,m,b: s._handle_chat(b)),
         (re.compile(r'^/api/chat/stream$'),                                    lambda s,m,b: s._handle_chat_stream(b)),
         (re.compile(r'^/api/chats$'),                                          lambda s,m,b: s._create_chat(b)),
-        (re.compile(r'^/api/chats/(?P<id>[^/]+)/title$'),                      lambda s,m,b: s._update_title(m.group("id"),b)),
         (re.compile(r'^/api/chats/(?P<id>[^/]+)/messages/truncate$'),          lambda s,m,b: s._truncate_messages(m.group("id"),b)),
         (re.compile(r'^/api/chats/(?P<id>[^/]+)/fork$'),                       lambda s,m,b: s._fork_chat(m.group("id"),b)),
         (re.compile(r'^/api/chats/(?P<id>[^/]+)/compact$'),                    lambda s,m,b: s._compact_chat(m.group("id"),b)),
@@ -1006,7 +995,6 @@ class Handler(BaseHTTPRequestHandler):
         (re.compile(r'^/api/insights/refine$'),                                lambda s,m,b: s._refine_insights(b)),
         (re.compile(r'^/api/insights$'),                                       lambda s,m,b: s._add_insight(b)),
         (re.compile(r'^/api/insights/(?P<id>[^/]+)/edit$'),                    lambda s,m,b: s._edit_insight(m.group("id"),b)),
-        (re.compile(r'^/api/insights/settings$'),                              lambda s,m,b: s._save_insight_settings(b)),
         (re.compile(r'^/api/messages/(?P<id>\d+)/feedback$'),                  lambda s,m,b: s._post_message_feedback(int(m.group("id")),b)),
         (re.compile(r'^/api/messages/(?P<id>\d+)/pin$'),                       lambda s,m,b: s._pin_message(int(m.group("id")))),
     ]
@@ -1024,6 +1012,9 @@ class Handler(BaseHTTPRequestHandler):
 
     _PATCH_ROUTES = [
         (re.compile(r'^/api/chats/(?P<id>[^/]+)/settings$'),                   lambda s,m,b: s._save_chat_settings(m.group("id"),b)),
+        (re.compile(r'^/api/chats/(?P<id>[^/]+)/title$'),                      lambda s,m,b: s._update_title(m.group("id"),b)),
+        (re.compile(r'^/api/auth/profile$'),                                   lambda s,m,b: s._auth_update_profile(b)),
+        (re.compile(r'^/api/insights/settings$'),                              lambda s,m,b: s._save_insight_settings(b)),
         (re.compile(r'^/api/pins/(?P<id>[^/]+)/title$'),                       lambda s,m,b: s._update_pin_title(m.group("id"),b)),
     ]
 
@@ -1205,15 +1196,14 @@ class Handler(BaseHTTPRequestHandler):
         db = get_db()
         cleanup_expired_sessions(db)
         row = db.execute(
-            "SELECT id,username,password_hash,salt,display_name,is_admin FROM users WHERE username=?",
+            "SELECT id,username,password_hash,salt,display_name,is_admin,totp_enabled FROM users WHERE username=?",
             (username,),
         ).fetchone()
         if not row or not verify_password(password, row["password_hash"], row["salt"]):
 
             return self._error(401, "invalid username or password")
         # Check if 2FA is enabled
-        totp_row = db.execute("SELECT totp_enabled FROM users WHERE id=?", (row["id"],)).fetchone()
-        if totp_row and totp_row[0]:
+        if row["totp_enabled"]:
             partial = sign_partial_token(row["id"])
             return self._json_response(200, {"needs_totp": True, "partial_token": partial})
         # Only clear rate limit after FULL authentication (no 2FA pending)
@@ -1274,10 +1264,7 @@ class Handler(BaseHTTPRequestHandler):
             if not target:
                 db.rollback()
                 return self._error(404, "user not found")
-            chat_ids = [r[0] for r in db.execute("SELECT id FROM chats WHERE user_id=?", (target_id,)).fetchall()]
-            for cid in chat_ids:
-                db.execute("DELETE FROM messages WHERE chat_id=?", (cid,))
-            db.execute("DELETE FROM chats WHERE user_id=?", (target_id,))
+            db.execute("DELETE FROM chats WHERE user_id=?", (target_id,))  # messages cascade via FK
             db.execute("DELETE FROM shared_chats WHERE user_id=?", (target_id,))
             db.execute("DELETE FROM user_settings WHERE user_id=?", (target_id,))
             db.execute("DELETE FROM sessions WHERE user_id=?", (target_id,))
@@ -2013,8 +2000,6 @@ class Handler(BaseHTTPRequestHandler):
         if to_delete:
             placeholders = ",".join("?" * len(to_delete))
             db.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", to_delete)
-
-        if to_delete:
             db.execute("UPDATE chats SET response_id=NULL, updated_at=? WHERE id=?", (time.time(), chat_id))
         db.commit()
         self._json_response(200, {"user_content": user_content})
@@ -2212,8 +2197,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._verify_chat_owner(db, chat_id, user["id"]):
             return
         db.execute("DELETE FROM shared_chats WHERE chat_id=?", (chat_id,))
-        db.execute("DELETE FROM messages WHERE chat_id=?", (chat_id,))
-        db.execute("DELETE FROM chats WHERE id=?", (chat_id,))
+        db.execute("DELETE FROM chats WHERE id=?", (chat_id,))  # messages cascade via FK
         db.commit()
         self._json_response(200, {"ok": True})
 
@@ -2311,7 +2295,6 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _build_share_html(self, title, messages, created_at):
-        from datetime import datetime
         date_str = datetime.fromtimestamp(created_at).strftime("%B %d, %Y")
         # HTML-escape the title
         safe_title = html_mod.escape(title)
@@ -2585,8 +2568,6 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         Returns bare str (early exit or failure) | dict (synthesis payload) | None (all failed).
         emit_status: optional callable(text) to send SSE status events to the client.
         """
-        import concurrent.futures
-
         if emit_status:
             emit_status(f"Generating response 1 of {n}...")
 
@@ -2598,11 +2579,11 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             "stream": False,
         }
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
+        with ThreadPoolExecutor(max_workers=n) as ex:
             futures = [ex.submit(self._lmstudio_chat, base, user_id, 60) for _ in range(n)]
             candidates = []
             completed = 0
-            for f in concurrent.futures.as_completed(futures):
+            for f in as_completed(futures):
                 completed += 1
                 if emit_status and completed < n:
                     emit_status(f"Generating response {completed + 1} of {n}...")
@@ -2693,8 +2674,6 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         Returns bare str (no verifiable claims — draft) | dict (synthesis streaming payload) | None (failure).
         Same return contract as _self_consistency: bare str | dict | None.
         """
-        import concurrent.futures
-
         original_reasoning = payload.get("reasoning")
 
         base_silent = {
@@ -2761,9 +2740,9 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
                     return vq, None
 
             vq_answers = {}
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(vqs), 4)) as ex:
+            with ThreadPoolExecutor(max_workers=min(len(vqs), 4)) as ex:
                 futures = {ex.submit(answer_vq, vq): vq for vq in vqs}
-                for f in concurrent.futures.as_completed(futures):
+                for f in as_completed(futures):
                     vq, answer = f.result()
                     if answer is not None:
                         vq_answers[vq] = answer
@@ -3366,8 +3345,6 @@ Curated list:"""
         user = self._require_auth()
         if not user:
             return
-        if not self._check_csrf():
-            return
         rating = body.get("rating")
         if rating not in (-1, 0, 1):
             return self._error(400, "rating must be -1, 0, or 1")
@@ -3388,7 +3365,8 @@ Curated list:"""
         self.end_headers()
         self.wfile.write(data)
 
-    _file_cache = {}  # {filename: (raw_bytes, gzipped_bytes, mtime, etag)}
+    _file_cache: dict = {}  # {filename: (raw_bytes, gzipped_bytes, mtime, etag)}
+    _file_cache_lock: threading.Lock = threading.Lock()
     _distill_lock: threading.Lock = threading.Lock()
     _distilling: set = set()  # chat_ids currently being distilled
 
@@ -3399,15 +3377,16 @@ Curated list:"""
         except FileNotFoundError:
             self.send_error(404)
             return
-        cached = self._file_cache.get(filename)
-        if cached and cached[2] == st.st_mtime:
-            raw, gz, etag = cached[0], cached[1], cached[3]
-        else:
-            with open(path, "rb") as f:
-                raw = f.read()
-            gz = gzip.compress(raw, compresslevel=6)
-            etag = hashlib.md5(raw).hexdigest()
-            self._file_cache[filename] = (raw, gz, st.st_mtime, etag)
+        with self._file_cache_lock:
+            cached = self._file_cache.get(filename)
+            if cached and cached[2] == st.st_mtime:
+                raw, gz, etag = cached[0], cached[1], cached[3]
+            else:
+                with open(path, "rb") as f:
+                    raw = f.read()
+                gz = gzip.compress(raw, compresslevel=6)
+                etag = hashlib.md5(raw).hexdigest()
+                self._file_cache[filename] = (raw, gz, st.st_mtime, etag)
         # ETag: return 304 if client has current version
         if self.headers.get("If-None-Match") == etag:
             self.send_response(304)

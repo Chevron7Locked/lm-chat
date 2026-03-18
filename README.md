@@ -290,11 +290,11 @@ browser  ──HTTP──>  server.py  ──HTTP──>  LM Studio
                     Memory · Logging      Inference
 ```
 
-- **`server.py`** — stdlib Python, zero dependencies. Proxies native API, persists chats, manages auth, indexes embeddings, handles memory distillation, structured logging. ~2.8k lines.
+- **`server.py`** — stdlib Python, zero dependencies. Proxies native API, persists chats, manages auth, indexes embeddings, handles memory distillation, structured logging. ~3.6k lines.
 - **`qr.py`** — pure-Python QR code generator for TOTP enrollment. ~345 lines.
-- **`index.html`** — HTML shell. ~790 lines.
-- **`style.css`** — all CSS, organized with `@layer` and native nesting. ~3.2k lines.
-- **`app.js`** — all client-side JS. ~4.9k lines.
+- **`index.html`** — HTML shell. ~685 lines.
+- **`style.css`** — all CSS, organized with `@layer` and native nesting. ~3.4k lines.
+- **`app.js`** — all client-side JS. ~5.7k lines.
 - **`manifest.json` + `sw.js`** — PWA support.
 - **`logs/`** — rotating debug logs (auto-created, gitignored).
 

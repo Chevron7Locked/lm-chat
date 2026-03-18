@@ -437,7 +437,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
             async function saveProfile() {
                 const name = $("sp-name").value.trim();
                 const r = await apiFetch("/api/auth/profile", {
-                    method: "POST",
+                    method: "PATCH",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ display_name: name }),
                 });
@@ -1376,14 +1376,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             };
 
             // --- Prompt Variables ---
-            function buildToolsVar() {
-                // LM Studio injects full tool schemas into the model's context
-                // when integrations are active. Our descriptions would be
-                // redundant tokens. When no tools are active, there's nothing
-                // to describe. Either way, return empty.
-                return "";
-            }
-
             function expandVars(text) {
                 const now = new Date();
                 const days = [
@@ -1410,7 +1402,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         }),
                     )
                     .replace(/\{\{model\}\}/g, modelSel.value || "unknown")
-                    .replace(/\{\{tools\}\}/g, buildToolsVar())
+                    .replace(/\{\{tools\}\}/g, "") // LM Studio injects tool schemas server-side; {{tools}} expands to empty
                     .replace(/\{\{memories\}\}/g, ""); // handled server-side
             }
 
@@ -2080,7 +2072,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             async function toggleMemory(enabled) {
                 try {
                     const resp = await apiFetch("/api/insights/settings", {
-                        method: "POST",
+                        method: "PATCH",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             memory_enabled: enabled ? "true" : "false",
@@ -2962,10 +2954,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     body.max_output_tokens = maxTok;
                 // context_length is a load-time parameter — sending it per-request
                 // triggers JIT model reloads in LM Studio. Read-only from instance config.
-                // Add per-chat SC/CoVe settings if overrides are set.
-                // chatSettingsCache is populated by loadChatSettings (core features Task 7).
-                // typeof guard prevents ReferenceError if core features plan Task 7 not yet applied.
-                if (typeof chatSettingsCache !== "undefined") {
+                // Apply per-chat SC/CoVe overrides when set via the chat settings panel.
+                if (chatSettingsCache) {
                     if (chatSettingsCache.sc_enabled != null) body.sc_enabled = chatSettingsCache.sc_enabled;
                     if (chatSettingsCache.cove_enabled != null) body.cove_enabled = chatSettingsCache.cove_enabled;
                 }
@@ -3068,7 +3058,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         (titleText.length > 50 ? "..." : "");
                     meta.model = modelSel.value;
                     apiFetch(`/api/chats/${activeId}/title`, {
-                        method: "POST",
+                        method: "PATCH",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ title: meta.title }),
                     });
@@ -3582,7 +3572,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 if (statsEl) {
                     statsEl.textContent = statsText;
                 }
-                // Note: no fallback append path — all messages have .msg-row-stats after Task 6.
+                // All assistant messages include .msg-row-stats; no fallback path needed.
             }
 
             let streamMdTimer = null;
@@ -4059,7 +4049,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     const regenBtn = assts[assts.length - 1].querySelector(".regen-btn");
                     if (regenBtn) regenBtn.disabled = true;
                 }
-                // (previous .regen-wrap cleanup removed — no longer used after Task 6 refactor)
                 // Incognito: re-send last user message from DOM (no server history)
                 if (incognitoMode) {
                     const userEls = [...msgs.querySelectorAll(".m-user")];
@@ -5328,7 +5317,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         if (chatMeta[chatId]) {
                             chatMeta[chatId].title = title;
                             apiFetch(`/api/chats/${chatId}/title`, {
-                                method: "POST",
+                                method: "PATCH",
                                 headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({ title }),
                             });
@@ -5663,9 +5652,8 @@ function initEventHandlers() {
 
     // Export
     document.getElementById('export-btn')?.addEventListener('click', () => toggleExportDD());
-    const exportBtns = document.querySelectorAll('#export-dd button');
-    if (exportBtns[0]) exportBtns[0].addEventListener('click', () => exportChat('md'));
-    if (exportBtns[1]) exportBtns[1].addEventListener('click', () => exportChat('json'));
+    document.querySelector('[data-action="export-md"]')?.addEventListener('click', () => exportChat('md'));
+    document.querySelector('[data-action="export-json"]')?.addEventListener('click', () => exportChat('json'));
 
     // Topbar actions
     document.getElementById('incognito-btn')?.addEventListener('click', () => toggleIncognito());

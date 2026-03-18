@@ -70,22 +70,18 @@
       --danger-bg: #2D1215;
       --danger-bg-hover: #3D1A1E;
       --danger-text: #F0A0A0;
-      /* Error gradient endpoint */
-      --err-bg-deep: #100A10;
       /* Memory category colors */
-      --cat-skill: #C084FC;
+      --cat-skill: var(--accent);
       --cat-project: #E0B040;
       --cat-opinion: #D06090;
-      --cat-context: #8090A0;
       /* Context gauge warning */
       --gauge-warn: #D04040;
-      /* Incognito purple */
-      --purple: #C084FC;
+      /* Incognito purple — alias of accent */
+      --purple: var(--accent);
       --purple-glow: rgba(192, 132, 252, 0.06);
       --purple-border: rgba(192, 132, 252, 0.10);
       --green-glow: rgba(52, 211, 153, 0.05);
       /* Elevation shadows */
-      --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
       --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
       --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
       /* Spacing — rem scale */
@@ -140,11 +136,9 @@
       font-family: -apple-system, system-ui, "Segoe UI", sans-serif;
       font-size: var(--text-lg);
       overflow: hidden;
+      display: flex;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
-  }
-  body {
-      display: flex;
   }
 }
 
@@ -1293,14 +1287,6 @@
   }
 
   /* Token stats */
-  .msg-stats {
-      font-size: var(--text-sm);
-      color: var(--faint);
-      text-align: right;
-      padding: var(--sp-1) 0 0;
-      line-height: 1.3;
-  }
-
   /* Message bottom row — always visible */
   .msg-row {
       display: flex;
@@ -2621,9 +2607,6 @@
           font-size: var(--text-lg);
           line-height: 1.65;
       }
-      & .msg-stats {
-          color: rgba(192, 132, 252, 0.35);
-      }
       & .m-tool .t-toggle {
           color: rgba(192, 132, 252, 0.35);
       }
@@ -3310,58 +3293,58 @@
     .chat-settings-btn.has-overrides .dot {
         display: block;
     }
-}
 
-/* Pin navigator — compact chip row under topbar */
-#pin-nav {
-    display: none;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg);
-    flex-shrink: 0;
-}
-#pin-nav.has-pins {
-    display: flex;
-}
-#pin-nav-list {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: var(--sp-2);
-    padding: var(--sp-2) var(--sp-7);
-    overflow-x: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-    &::-webkit-scrollbar { display: none; }
-}
-.pin-nav-item {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--sp-2);
-    padding: 3px var(--sp-4);
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    cursor: pointer;
-    font-size: var(--text-xs);
-    color: var(--dim);
-    white-space: nowrap;
-    max-width: 14rem;
-    transition: background 0.1s, color 0.1s, border-color 0.1s;
-    flex-shrink: 0;
-}
-.pin-nav-item span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.pin-nav-item:hover {
-    background: var(--surface-raised);
-    border-color: rgba(192,132,252,0.25);
-    color: var(--text);
-}
-.m-asst:hover .hover-pin-btn,
-.msg-group:hover .hover-pin-btn {
-    display: flex !important;
+    /* Pin navigator — compact chip row under topbar */
+    #pin-nav {
+        display: none;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
+        flex-shrink: 0;
+    }
+    #pin-nav.has-pins {
+        display: flex;
+    }
+    #pin-nav-list {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: var(--sp-2);
+        padding: var(--sp-2) var(--sp-7);
+        overflow-x: auto;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+        &::-webkit-scrollbar { display: none; }
+    }
+    .pin-nav-item {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--sp-2);
+        padding: 3px var(--sp-4);
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        cursor: pointer;
+        font-size: var(--text-xs);
+        color: var(--dim);
+        white-space: nowrap;
+        max-width: 14rem;
+        transition: background 0.1s, color 0.1s, border-color 0.1s;
+        flex-shrink: 0;
+    }
+    .pin-nav-item span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .pin-nav-item:hover {
+        background: var(--surface-raised);
+        border-color: rgba(192,132,252,0.25);
+        color: var(--text);
+    }
+    .m-asst:hover .hover-pin-btn,
+    .msg-group:hover .hover-pin-btn {
+        display: flex !important;
+    }
 }
 
 @layer utilities {
