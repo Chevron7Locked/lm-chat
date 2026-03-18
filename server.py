@@ -163,6 +163,9 @@ def init_db():
         ("chats", "pinned", "INTEGER DEFAULT 0"),
         ("chats", "folder", "TEXT DEFAULT ''"),
         ("chats", "settings", "TEXT"),
+        ("user_insights", "ups", "REAL DEFAULT 0"),
+        ("user_insights", "downs", "REAL DEFAULT 0"),
+        ("user_insights", "last_feedback_at", "REAL"),
     ]
     for table, col, typedef in _MIGRATIONS:
         try:
