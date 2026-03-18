@@ -12,6 +12,7 @@ concurrency:
 
 permissions:
   contents: read
+  security-events: write
 
 jobs:
   lint:
@@ -72,3 +73,77 @@ jobs:
             [ "$HTTP_CODE" = "200" ] || exit 1
           done
           kill $SERVER_PID
+
+  sast:
+    name: SAST
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Bandit + pip-audit
+        run: pip install bandit[toml]==1.9.3 pip-audit==2.9.0
+
+      - name: Bandit — Python security scan
+        run: bandit -r server.py qr.py -f sarif -o bandit.sarif
+        continue-on-error: true
+
+      - name: Upload Bandit SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: bandit.sarif
+          category: bandit
+
+      - name: pip-audit — dependency CVE scan
+        run: pip-audit --requirement <(pip freeze) --format=json --output pip-audit.json || true
+
+      - name: Summarise pip-audit
+        run: |
+          python3 -c "
+          import json, sys
+          data = json.load(open('pip-audit.json'))
+          vulns = data.get('vulnerabilities', [])
+          if vulns:
+              print(f'::warning::pip-audit found {len(vulns)} vulnerable package(s)')
+              for v in vulns:
+                  print(f'  {v[\"name\"]}=={v[\"version\"]}: {[a[\"id\"] for a in v[\"aliases\"]]}')
+          else:
+              print('pip-audit: no vulnerabilities found')
+          "
+
+  dockerfile:
+    name: Dockerfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Hadolint — Dockerfile lint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          format: sarif
+          output-file: hadolint.sarif
+          no-fail: true
+
+      - name: Upload Hadolint SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: hadolint.sarif
+          category: hadolint
+
+  secrets:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks — secret detection
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
