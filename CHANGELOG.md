@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.2] — 2026-03-18
+
+### Fixed
+- `init_db()` crash on fresh install: `idx_shared_chats_chat_id` index was created before the `shared_chats` table existed
+- `_kill_stale_server()` no longer kills unrelated processes on the same port (checks cmdline for `server.py` before sending SIGTERM)
+- `hashlib.md5` ETag call annotated with `usedforsecurity=False` (not a security use; suppresses scanner false positive)
+- Test suite: 9 tests used `POST` on `PATCH`-only endpoints (`/api/chats/{id}/title`, `/api/auth/profile`, `/api/insights/settings`)
+
+### Changed
+- Design system: message action buttons fade in on hover (always visible on touch); message density increased; active sidebar item uses `--surface-raised`; typography floor enforced at `--text-xs` (12px) across all form labels and secondary text; LM Studio brand purple corrected throughout (`rgba(192,132,252,…)` replacing stale indigo values)
+- Form fields standardised: all inputs/selects now use `--text-base` (14px), `--sp-4/--sp-5` padding, `--r-md` radius, and `transition: border-color/box-shadow` — eliminates the size jump between settings panel and password-change fields
+- Markdown heading hierarchy restored: `h1`→`--text-2xl`, `h2`→`--text-xl`, `h3`→`--text-lg`
+- Right panel width made fluid (`clamp(16rem, 14rem + 2vw, 20rem)`) and transition uses `var(--ease)`
+- Status indicator dots: colored `box-shadow` glows removed (invisible on Windows, inconsistent cross-platform)
+
 ## [0.3.1] — 2026-03-17
 
 ### Added

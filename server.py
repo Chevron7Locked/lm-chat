@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 from qr import generate_qr_svg
 
-VERSION = "0.4.0"
+VERSION = "0.4.2"
 LMSTUDIO = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_TOKEN = os.environ.get("LMSTUDIO_TOKEN", "")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -258,6 +258,7 @@ END""")
     db.execute("CREATE INDEX IF NOT EXISTS idx_messages_chat_role ON messages(chat_id, role)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_chats_user_id ON chats(user_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_message_id ON embeddings(message_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)")
     db.execute("""CREATE TABLE IF NOT EXISTS shared_chats (
         share_id TEXT PRIMARY KEY,
         chat_id TEXT NOT NULL,
@@ -266,6 +267,7 @@ END""")
         messages TEXT NOT NULL,
         created_at REAL NOT NULL
     )""")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_shared_chats_chat_id ON shared_chats(chat_id)")
     # Ensure "default" user exists for auth-disabled mode (FK constraints require it)
     db.execute(
         """INSERT OR IGNORE INTO users (id, username, password_hash, salt, display_name, is_admin, created_at)
@@ -309,12 +311,12 @@ def get_db():
 
 # --- Password helpers ---
 
-def hash_password(password):
+def hash_password(password: str) -> tuple[str, str]:
     salt = os.urandom(16)
     h = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1, dklen=64)
     return h.hex(), salt.hex()
 
-def verify_password(password, hash_hex, salt_hex):
+def verify_password(password: str, hash_hex: str, salt_hex: str) -> bool:
     salt = bytes.fromhex(salt_hex)
     h = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1, dklen=64)
     return hmac.compare_digest(h.hex(), hash_hex)
@@ -322,11 +324,11 @@ def verify_password(password, hash_hex, salt_hex):
 
 # --- Session helpers ---
 
-def _hash_token(token):
+def _hash_token(token: str) -> str:
     """Hash session token for storage (SHA-256). Token has 256 bits of entropy so fast hash is safe."""
     return hashlib.sha256(token.encode()).hexdigest()
 
-def create_session(db, user_id, commit=True):
+def create_session(db: sqlite3.Connection, user_id: str, commit: bool = True) -> str:
     token = secrets.token_hex(32)
     token_hash = _hash_token(token)
     expires = time.time() + SESSION_EXPIRY
@@ -336,7 +338,7 @@ def create_session(db, user_id, commit=True):
         db.commit()
     return token  # return plaintext to client; only hash is stored
 
-def get_session_user(db, token):
+def get_session_user(db: sqlite3.Connection, token: str) -> dict | None:
     token_hash = _hash_token(token)
     row = db.execute(
         "SELECT s.user_id,s.expires_at,u.id,u.username,u.display_name,u.is_admin,u.totp_enabled "
@@ -358,7 +360,7 @@ def get_session_user(db, token):
 
 # --- Rate limiting (SQLite-backed) ---
 
-def check_rate_limit(ip):
+def check_rate_limit(ip: str) -> bool:
     """Check rate limit AND record a failed attempt atomically. Returns True if allowed."""
     db = get_db()
     try:
@@ -387,12 +389,12 @@ def check_rate_limit(ip):
             pass
         raise
 
-def clear_rate_limit(ip):
+def clear_rate_limit(ip: str) -> None:
     db = get_db()
     db.execute("DELETE FROM rate_limits WHERE ip=?", (ip,))
     db.commit()
 
-def cleanup_expired_sessions(db):
+def cleanup_expired_sessions(db: sqlite3.Connection) -> None:
     now = time.time()
     db.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
     db.execute("DELETE FROM rate_limits WHERE first_attempt < ?", (now - RATE_LIMIT_WINDOW,))
@@ -452,8 +454,8 @@ def maybe_cleanup_sessions():
         cleanup_expired_sessions(db)
         _api_limiter.cleanup()
         _stream_limiter.cleanup()
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug(f"Session cleanup failed (non-fatal): {e}")
 
 # --- Server-side TOTP setup storage (C3: secret never in client token) ---
 
@@ -493,20 +495,20 @@ def consume_totp_setup(setup_id):
 
 USERNAME_RE = re.compile(r'^[a-zA-Z0-9_]{3,32}$')
 
-def validate_username(username):
+def validate_username(username: str | None) -> bool:
     return bool(USERNAME_RE.match(username or ""))
 
-def validate_password(password):
+def validate_password(password: str | None) -> bool:
     return isinstance(password, str) and len(password) >= 8
 
 
 # --- TOTP helpers (RFC 6238) ---
 
-def generate_totp_secret():
+def generate_totp_secret() -> str:
     """Generate 20-byte random secret, return as base32 (no padding)."""
     return base64.b32encode(os.urandom(20)).decode().rstrip('=')
 
-def verify_totp(secret, code, window=1):
+def verify_totp(secret: str, code: str, window: int = 1) -> int | None:
     """Verify 6-digit TOTP code. Returns the counter value on success, None on failure."""
     padded = secret + '=' * (-len(secret) % 8)
     key = base64.b32decode(padded)
@@ -522,18 +524,18 @@ def verify_totp(secret, code, window=1):
             return counter
     return None
 
-def make_totp_uri(username, secret):
+def make_totp_uri(username: str, secret: str) -> str:
     """Build otpauth:// URI for QR code."""
     return f"otpauth://totp/lm-chat:{username}?secret={secret}&issuer=lm-chat"
 
-def sign_partial_token(user_id):
+def sign_partial_token(user_id: str) -> str:
     """Create HMAC-signed partial token for 2FA login (5 min expiry). Base64-encoded to avoid exposing user_id."""
     ts = str(int(time.time()))
     msg = f"{user_id}:{ts}"
     sig = hmac.new(TOTP_SIGNING_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()[:16]
     return base64.urlsafe_b64encode(f"{user_id}:{ts}:{sig}".encode()).decode()
 
-def verify_partial_token(token_str):
+def verify_partial_token(token_str: str) -> str | None:
     """Verify and extract user_id from partial token. Returns user_id or None."""
     try:
         decoded = base64.urlsafe_b64decode(token_str.encode()).decode()
@@ -559,7 +561,7 @@ def verify_partial_token(token_str):
 
 # --- Context management ---
 
-def get_embedding(text, token=None):
+def get_embedding(text: str, token: str | None = None) -> list[float] | None:
     """Get embedding vector from LM Studio. Returns list of floats or None."""
     payload = {"model": "_any_", "input": text[:2000]}
     headers = {"Content-Type": "application/json"}
@@ -742,7 +744,7 @@ class Handler(BaseHTTPRequestHandler):
         """, (message_id, user["id"])).fetchone()
         if not row:
             return self._error(404, "message not found or not an assistant message")
-        content, role, chat_id, chat_title = row
+        content, _, chat_id, chat_title = row
         if not content:
             return self._error(400, "message has no content to pin")
         existing = db.execute(
@@ -1277,6 +1279,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return self._error(500, "failed to delete user")
         self._json_response(200, {"ok": True})
+
     def _auth_change_password(self, body):
         user = self._require_auth()
         if not user:
@@ -1492,6 +1495,7 @@ class Handler(BaseHTTPRequestHandler):
                 saved[key] = str_val
         db.commit()
         self._json_response(200, saved)
+
     def _get_user_lm_apikey(self, user_id):
         """Get stored LM Studio API key for a user."""
         db = get_db()
@@ -1876,6 +1880,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     log.debug("Background embedding indexing failed", exc_info=True)
             threading.Thread(target=_index_embeddings, args=(chat_id, _embed_token), daemon=True).start()
+
     def _create_chat(self, body):
         user = self._require_auth()
         if not user:
@@ -2063,6 +2068,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         db.commit()
         self._json_response(200, {"id": new_id, "title": new_title})
+
     def _compact_chat(self, chat_id, body):
         user = self._require_auth()
         if not user:
@@ -2175,6 +2181,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             log.error(f"Compact failed: {e}")
             self._error(500, "compact failed")
+
     def _update_title(self, chat_id, body):
         user = self._require_auth()
         if not user:
@@ -2656,13 +2663,12 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
 
     def _parse_verification_questions(self, text):
         """Extract numbered verification questions from LLM output. Max 4."""
-        import re as _re
         if "NONE" in text.upper():
             return []
         lines = [ln.strip() for ln in text.split('\n') if ln.strip()]
         questions = []
         for line in lines:
-            cleaned = _re.sub(r'^[\d\-\.\)]+\s*', '', line).strip()
+            cleaned = re.sub(r'^[\d\-\.\)]+\s*', '', line).strip()
             if cleaned.endswith('?') and len(cleaned) > 10:
                 questions.append(cleaned)
             if len(questions) >= 4:
@@ -2780,6 +2786,8 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         "identity": 2.0, "preference": 2.0, "opinion": 1.5,
         "skill": 1.0, "project": 1.0, "context": 1.0,
     }
+    _LAPLACE_ALPHA = 1.0  # Bayesian Laplace smoothing for insight feedback scoring
+    _LAPLACE_BETA  = 2.0
 
     def _score_insights(self, db, user_id):
         """Update freshness scores for all active insights. Pure SQL, no LLM."""
@@ -2804,13 +2812,11 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             LIMIT ?
         """, (user_id, limit * 2)).fetchall()
 
-        _LAPLACE_ALPHA = 1.0
-        _LAPLACE_BETA  = 2.0
         weighted = []
         for r in rows:
             cat_w = self.CATEGORY_WEIGHTS.get(r[2], 1.0)
             ups, downs = r[3] or 0.0, r[4] or 0.0
-            bayesian = (ups + _LAPLACE_ALPHA) / (ups + downs + _LAPLACE_BETA)
+            bayesian = (ups + self._LAPLACE_ALPHA) / (ups + downs + self._LAPLACE_BETA)
             weighted.append({"id": r[0], "content": r[1], "category": r[2],
                              "score": r[5] * cat_w * bayesian})
         weighted.sort(key=lambda x: x["score"], reverse=True)
@@ -3092,7 +3098,7 @@ Distill insights (or respond "none" if nothing new):"""
         self._json_response(200, settings)
 
     def _save_insight_settings(self, body):
-        """POST /api/insights/settings — update memory preferences."""
+        """PATCH /api/insights/settings — update memory preferences."""
         user = self._require_auth()
         if not user:
             return
@@ -3231,7 +3237,7 @@ Curated list:"""
 
     def _persist_chat_messages(self, db, chat_id, user_input, content, tool_calls, response_id, usage, now=None, injected_insight_ids=None):
         """Persist user message, tool calls, and assistant response."""
-        if not now:
+        if now is None:
             now = time.time()
         prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
         completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
@@ -3385,7 +3391,7 @@ Curated list:"""
                 with open(path, "rb") as f:
                     raw = f.read()
                 gz = gzip.compress(raw, compresslevel=6)
-                etag = hashlib.md5(raw).hexdigest()
+                etag = hashlib.md5(raw, usedforsecurity=False).hexdigest()
                 self._file_cache[filename] = (raw, gz, st.st_mtime, etag)
         # ETag: return 304 if client has current version
         if self.headers.get("If-None-Match") == etag:
@@ -3455,16 +3461,25 @@ def _kill_stale_server():
         s.settimeout(1)
         s.connect(("127.0.0.1", PORT))
         s.close()
-        # Something is listening — try to identify and kill it
+        # Something is listening — only kill it if it's actually server.py
         try:
             import subprocess
             out = subprocess.check_output(["lsof", "-ti", f":{PORT}"], text=True).strip()
             for pid_str in out.splitlines():
                 pid = int(pid_str)
-                if pid != os.getpid():
+                if pid == os.getpid():
+                    continue
+                try:
+                    cmdline = open(f"/proc/{pid}/cmdline").read().replace("\x00", " ")
+                except FileNotFoundError:
+                    # macOS: use ps
+                    cmdline = subprocess.check_output(["ps", "-p", str(pid), "-o", "command="], text=True)
+                if "server.py" in cmdline:
                     os.kill(pid, signal.SIGTERM)
                     log.info(f"Stopped process {pid} on port {PORT}")
                     time.sleep(0.5)
+                else:
+                    log.warning(f"Port {PORT} is in use by non-lm-chat process {pid} — not killing it")
         except (subprocess.CalledProcessError, FileNotFoundError, OSError):
             log.warning(f"Port {PORT} is in use but couldn't identify the process — start may fail")
     except (ConnectionRefusedError, OSError):

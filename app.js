@@ -551,7 +551,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
       </div>
     </div>`;
                 area.querySelector('[data-action="copy-totp-secret"]')?.addEventListener('click', function() {
-                    navigator.clipboard.writeText(this.dataset.secret);
+                    copyToClipboard(this.dataset.secret);
                     this.style.opacity = '.6';
                     setTimeout(() => this.style.opacity = '1', 300);
                 });
@@ -1017,7 +1017,9 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                             )
                             .join("");
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.error("loadDebugState:", e);
+                }
             }
             async function toggleDebugMode(on) {
                 try {
@@ -1048,7 +1050,9 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                         remoteMcps = d.remote_mcps;
                         renderRemoteMcps();
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.error("loadSettings:", e);
+                }
             }
 
             // --- Connection status ---
@@ -2243,7 +2247,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                                 }
                             }
                         } catch (e) {
-                            console.warn("Failed to restore response_id for chat", prevId, e);
+                            console.error("Failed to restore response_id for chat", prevId, e);
                         }
                     }, 1000);
                 }
@@ -3834,6 +3838,27 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     .replace(/"/g, "&quot;")
                     .replace(/'/g, "&#39;");
             }
+            function _execCopy(text) {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+            }
+            async function copyToClipboard(text) {
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(text);
+                    } else {
+                        _execCopy(text);
+                    }
+                } catch {
+                    _execCopy(text);
+                }
+            }
             function showDialog(opts) {
                 return new Promise((resolve) => {
                     const el = document.createElement("div");
@@ -3986,19 +4011,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     const btn = document.createElement("button");
                     btn.className = "copy-btn";
                     btn.textContent = "Copy";
-                    btn.onclick = () => {
+                    btn.onclick = async () => {
                         const code = pre.querySelector("code");
-                        navigator.clipboard
-                            .writeText(
-                                code ? code.textContent : pre.textContent,
-                            )
-                            .then(() => {
-                                btn.textContent = "Copied!";
-                                setTimeout(
-                                    () => (btn.textContent = "Copy"),
-                                    1500,
-                                );
-                            });
+                        await copyToClipboard(code ? code.textContent : pre.textContent);
+                        btn.textContent = "Copied!";
+                        setTimeout(() => (btn.textContent = "Copy"), 1500);
                     };
                     pre.appendChild(btn);
                 });
@@ -4038,7 +4055,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         if (dbAssts[i] && dbAssts[i].id)
                             el.dataset.msgId = dbAssts[i].id;
                     });
-                } catch (e) {}
+                } catch (e) {
+                    console.error("patchMsgIds:", e);
+                }
             }
 
             async function regenerate() {
@@ -4224,7 +4243,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     copyBtn.innerHTML = iconCopy();
                     copyBtn.onclick = () => {
                         const bub = copyBtn.closest(".m-asst, .msg-group")?.querySelector(".bub");
-                        if (bub) navigator.clipboard.writeText(bub.innerText || bub.textContent);
+                        if (bub) copyToClipboard(bub.innerText || bub.textContent);
                     };
                     actions.appendChild(copyBtn);
 
@@ -4308,7 +4327,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     copyBtn.innerHTML = iconCopy();
                     copyBtn.onclick = () => {
                         const bub = copyBtn.closest(".m-user")?.querySelector(".bub");
-                        if (bub) navigator.clipboard.writeText(bub.innerText || bub.textContent);
+                        if (bub) copyToClipboard(bub.innerText || bub.textContent);
                     };
                     actions.appendChild(copyBtn);
 
@@ -4976,7 +4995,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     activeId +
                     '" style="background:none;border:1px solid var(--err-border);color:var(--err-text);padding:var(--sp-2) var(--sp-6);border-radius:var(--r-sm);font-size:var(--text-xs);cursor:pointer;font-family:inherit">Delete Link</button><button data-action="close-share-dialog" class="sys-btn">Done</button></div></div>';
                 dialog.querySelector('[data-action="copy-share-url"]').addEventListener('click', function() {
-                    navigator.clipboard.writeText(document.getElementById('share-url').value);
+                    copyToClipboard(document.getElementById('share-url').value);
                     this.textContent = 'Copied!';
                     setTimeout(() => this.textContent = 'Copy', 1500);
                 });
@@ -5583,7 +5602,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     const h = await apiFetch("/api/health");
                     const j = await h.json();
                     appVersion = j.version || "";
-                } catch (e) {}
+                } catch (e) {
+                    console.error("Failed to fetch app version:", e);
+                }
                 const draft = localStorage.getItem("lsc-draft");
                 if (draft) {
                     input.value = draft;
@@ -5732,3 +5753,18 @@ function initEventHandlers() {
 }
 
 document.addEventListener('DOMContentLoaded', initEventHandlers);
+
+// iOS PWA: safe-area-inset-bottom stays fixed when keyboard opens — toggle via JS.
+if (navigator.standalone && window.visualViewport) {
+    const inputArea = document.getElementById('input-area');
+    const naturalHeight = () => window.innerWidth > window.innerHeight
+        ? Math.min(screen.width, screen.height)
+        : Math.max(screen.width, screen.height);
+    const applySab = () => {
+        const keyboardActive = window.visualViewport.height < naturalHeight() - 40;
+        inputArea.style.paddingBottom = keyboardActive ? '0px' : 'env(safe-area-inset-bottom, 0px)';
+    };
+    window.visualViewport.addEventListener('resize', applySab);
+    applySab();
+}
+
