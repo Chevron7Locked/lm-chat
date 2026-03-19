@@ -347,13 +347,13 @@
             flex-shrink: 0;
             opacity: 0;
             transition: opacity 0.15s;
-            &.pinned {
-                opacity: 1;
-                color: var(--accent);
-            }
             &:hover {
                 color: var(--accent);
             }
+        }
+        & .pin.pinned {
+            opacity: 1;
+            color: var(--accent);
         }
         &:hover .pin {
             opacity: 1;
@@ -1397,11 +1397,13 @@
             background var(--dur) var(--ease);
         z-index: 20;
         box-shadow: var(--shadow-md);
-        &.visible {
-            opacity: 1;
-            pointer-events: auto;
-            transform: translateX(-50%) translateY(0);
-        }
+    }
+    #scroll-bottom.visible {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateX(-50%) translateY(0);
+    }
+    #scroll-bottom {
         &:hover {
             background: var(--hover);
             color: var(--text);
@@ -1423,10 +1425,10 @@
         gap: var(--sp-4);
         color: var(--dim);
         font-size: var(--text-md);
-        &.on {
-            display: flex;
-            animation: asstFadeIn 0.25s var(--ease);
-        }
+    }
+    #thinking.on {
+        display: flex;
+        animation: asstFadeIn 0.25s var(--ease);
     }
     .dots {
         display: flex;
@@ -3178,14 +3180,14 @@
         transform: translateY(-4px);
         letter-spacing: 0.3px;
         text-transform: uppercase;
-        &.visible {
-            opacity: 1;
-            transform: translateY(0);
-        }
-        &:hover {
-            background: rgba(192, 132, 252, 0.11);
-            border-color: rgba(192, 132, 252, 0.21);
-        }
+    }
+    #memory-badge.visible {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    #memory-badge:hover {
+        background: rgba(192, 132, 252, 0.11);
+        border-color: rgba(192, 132, 252, 0.21);
     }
 }
 
