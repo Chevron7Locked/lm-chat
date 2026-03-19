@@ -2175,6 +2175,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 activeId = id;
                 renderList();
                 renderWelcome();
+                resetCtxGauge();
                 if (window.innerWidth <= 768) closeSB();
                 updateExportBtn();
                 input.focus();
@@ -2198,6 +2199,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 )
                     modelSel.value = meta.model;
                 renderList();
+                resetCtxGauge();
                 try {
                     const resp = await apiFetch(`/api/chats/${id}/messages`);
                     if (!resp.ok) throw new Error("Failed to load chat");
@@ -2926,8 +2928,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             systemPrompt + FOLLOWUP_SUFFIX
                         :   systemPrompt;
                 }
-                const reasoning = $("s-reasoning").value;
-                if (reasoning !== "off") body.reasoning = reasoning;
                 if (!incognitoMode && meta.response_id)
                     body.previous_response_id = meta.response_id;
                 // Sampling params
@@ -2940,33 +2940,37 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     architect: 0.2,
                 };
                 const activePreset = (chatMeta[activeId] || {})._activePreset;
+                const cs = chatSettingsCache || {};
+                // Per-chat overrides take precedence over global settings panel values.
                 const temp =
                     activePreset && PRESET_TEMPS[activePreset] !== undefined ?
                         PRESET_TEMPS[activePreset]
+                    : cs.temperature != null ? cs.temperature
                     :   parseFloat($("s-temp").value);
                 if (!isNaN(temp)) body.temperature = temp;
-                const topP = parseFloat($("s-top-p").value);
+                const topP = cs.top_p != null ? cs.top_p : parseFloat($("s-top-p").value);
                 if (!isNaN(topP)) body.top_p = topP;
-                const topK = parseInt($("s-top-k").value);
+                const topK = cs.top_k != null ? cs.top_k : parseInt($("s-top-k").value);
                 if (!isNaN(topK)) body.top_k = topK;
-                const minP = parseFloat($("s-min-p").value);
+                const minP = cs.min_p != null ? cs.min_p : parseFloat($("s-min-p").value);
                 if (!isNaN(minP)) body.min_p = minP;
-                const repPen = parseFloat($("s-repeat-pen").value);
+                const repPen = cs.repeat_penalty != null ? cs.repeat_penalty : parseFloat($("s-repeat-pen").value);
                 if (!isNaN(repPen) && repPen !== 1.0)
                     body.repeat_penalty = repPen;
-                const presPen = parseFloat($("s-presence-pen").value);
+                const presPen = cs.presence_penalty != null ? cs.presence_penalty : parseFloat($("s-presence-pen").value);
                 if (!isNaN(presPen) && presPen > 0)
                     body.presence_penalty = presPen;
-                const maxTok = parseInt($("s-max-tokens").value);
+                const maxTok = cs.max_output_tokens != null ? cs.max_output_tokens : parseInt($("s-max-tokens").value);
                 if (!isNaN(maxTok) && maxTok > 0)
                     body.max_output_tokens = maxTok;
+                // Reasoning: per-chat override > global select
+                const reasoning = cs.reasoning || $("s-reasoning").value;
+                if (reasoning !== "off") body.reasoning = reasoning;
                 // context_length is a load-time parameter — sending it per-request
                 // triggers JIT model reloads in LM Studio. Read-only from instance config.
                 // Apply per-chat SC/CoVe overrides when set via the chat settings panel.
-                if (chatSettingsCache) {
-                    if (chatSettingsCache.sc_enabled != null) body.sc_enabled = chatSettingsCache.sc_enabled;
-                    if (chatSettingsCache.cove_enabled != null) body.cove_enabled = chatSettingsCache.cove_enabled;
-                }
+                if (cs.sc_enabled != null) body.sc_enabled = cs.sc_enabled;
+                if (cs.cove_enabled != null) body.cove_enabled = cs.cove_enabled;
                 return body;
             }
 
@@ -3122,6 +3126,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const sys =
                     presetKey && PRESETS[presetKey] ?
                         expandVars(PRESETS[presetKey])
+                    : chatSettingsCache?.system_prompt ?
+                        expandVars(chatSettingsCache.system_prompt)
                     :   expandVars($("s-sys").value.trim());
                 const body = buildChatBody(
                     actualText,
@@ -4193,6 +4199,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const sys =
                     presetKey && PRESETS[presetKey] ?
                         expandVars(PRESETS[presetKey])
+                    : chatSettingsCache?.system_prompt ?
+                        expandVars(chatSettingsCache.system_prompt)
                     :   expandVars($("s-sys").value.trim());
                 const body = buildChatBody(text, sys || undefined);
 
@@ -4496,35 +4504,59 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             function renderChatSettingsPanel() {
                 const body = $("right-panel-body");
                 const s = chatSettingsCache;
+                // Read current global defaults as placeholders so the user sees what's active
+                const gTemp  = $("s-temp")?.value  || "0.7";
+                const gTopP  = $("s-top-p")?.value || "0.95";
+                const gTopK  = $("s-top-k")?.value || "40";
+                const gMinP  = $("s-min-p")?.value || "0.05";
+                const gRepPen  = $("s-repeat-pen")?.value  || "1.0";
+                const gPresPen = $("s-presence-pen")?.value || "0";
+                const gMaxTok  = $("s-max-tokens")?.value  || "-1";
+                // Detect which preset the current system_prompt matches (for dropdown state)
+                const currentSys = s.system_prompt || "";
+                const detectedPreset = currentSys
+                    ? (Object.entries(PRESETS).find(([,v]) => v === currentSys)?.[0] || "custom")
+                    : "";
                 body.innerHTML = `
                     <div class="sg">
                         <label>System Prompt</label>
-                        <textarea id="cs-sys" rows="4" placeholder="(using global)"></textarea>
+                        <select id="cs-preset">
+                            <option value="">(default — use global setting)</option>
+                            <option value="general" ${detectedPreset==="general"?"selected":""}>General Assistant</option>
+                            <option value="coder" ${detectedPreset==="coder"?"selected":""}>Coding Agent</option>
+                            <option value="creative" ${detectedPreset==="creative"?"selected":""}>Creative Writing</option>
+                            <option value="research" ${detectedPreset==="research"?"selected":""}>Deep Research</option>
+                            <option value="analyst" ${detectedPreset==="analyst"?"selected":""}>Strategic Analyst</option>
+                            <option value="architect" ${detectedPreset==="architect"?"selected":""}>Systems Architect</option>
+                            <option value="custom" ${detectedPreset==="custom"?"selected":""}>Custom</option>
+                        </select>
+                        <textarea id="cs-sys" rows="4" placeholder="Custom system prompt… supports {{current_date}}, {{day_of_week}}, {{current_time}}, {{model}}"></textarea>
+                        <div class="var-help" style="margin-top:var(--sp-2)">Variables: <code>{{current_date}}</code> <code>{{day_of_week}}</code> <code>{{current_time}}</code> <code>{{model}}</code> — auto-replaced on send</div>
                     </div>
                     <div class="sg sg-row">
                         <div class="sg-half"><label>Temperature</label>
-                            <input type="number" id="cs-temp" min="0" max="2" step="0.1" placeholder="(global)" value="${s.temperature ?? ""}"></div>
+                            <input type="number" id="cs-temp" min="0" max="2" step="0.1" placeholder="${gTemp}" value="${s.temperature ?? ""}"></div>
                         <div class="sg-half"><label>Top P</label>
-                            <input type="number" id="cs-top-p" min="0" max="1" step="0.05" placeholder="(global)" value="${s.top_p ?? ""}"></div>
+                            <input type="number" id="cs-top-p" min="0" max="1" step="0.05" placeholder="${gTopP}" value="${s.top_p ?? ""}"></div>
                     </div>
                     <div class="sg sg-row">
                         <div class="sg-half"><label>Top K</label>
-                            <input type="number" id="cs-top-k" min="0" max="500" step="1" placeholder="(global)" value="${s.top_k ?? ""}"></div>
+                            <input type="number" id="cs-top-k" min="0" max="500" step="1" placeholder="${gTopK}" value="${s.top_k ?? ""}"></div>
                         <div class="sg-half"><label>Min P</label>
-                            <input type="number" id="cs-min-p" min="0" max="1" step="0.01" placeholder="(global)" value="${s.min_p ?? ""}"></div>
+                            <input type="number" id="cs-min-p" min="0" max="1" step="0.01" placeholder="${gMinP}" value="${s.min_p ?? ""}"></div>
                     </div>
                     <div class="sg sg-row">
                         <div class="sg-half"><label>Repeat Penalty</label>
-                            <input type="number" id="cs-repeat-pen" min="0" max="3" step="0.05" placeholder="(global)" value="${s.repeat_penalty ?? ""}"></div>
+                            <input type="number" id="cs-repeat-pen" min="0" max="3" step="0.05" placeholder="${gRepPen}" value="${s.repeat_penalty ?? ""}"></div>
                         <div class="sg-half"><label>Presence Penalty</label>
-                            <input type="number" id="cs-presence-pen" min="0" max="2" step="0.1" placeholder="(global)" value="${s.presence_penalty ?? ""}"></div>
+                            <input type="number" id="cs-presence-pen" min="0" max="2" step="0.1" placeholder="${gPresPen}" value="${s.presence_penalty ?? ""}"></div>
                     </div>
                     <div class="sg"><label>Max Output Tokens</label>
-                        <input type="number" id="cs-max-tokens" min="-1" max="32768" step="256" placeholder="(global)" value="${s.max_output_tokens ?? ""}">
+                        <input type="number" id="cs-max-tokens" min="-1" max="32768" step="256" placeholder="${gMaxTok}" value="${s.max_output_tokens ?? ""}">
                     </div>
                     <div class="sg"><label>Reasoning</label>
                         <select id="cs-reasoning">
-                            <option value="">(global)</option>
+                            <option value="">(default)</option>
                             <option value="off" ${s.reasoning==="off"?"selected":""}>Off</option>
                             <option value="medium" ${s.reasoning==="medium"?"selected":""}>Medium</option>
                             <option value="high" ${s.reasoning==="high"?"selected":""}>High</option>
@@ -4541,6 +4573,23 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 `;
                 const ta = $("cs-sys");
                 if (ta) ta.value = s.system_prompt || "";
+
+                // Preset dropdown: populate textarea when a preset is chosen
+                const presetSel = $("cs-preset");
+                if (presetSel) {
+                    presetSel.addEventListener("change", () => {
+                        const v = presetSel.value;
+                        if (v === "" ) {
+                            ta.value = "";
+                            saveChatSetting("system_prompt", null);
+                        } else if (v === "custom") {
+                            // leave textarea as-is, just mark custom
+                        } else if (PRESETS[v]) {
+                            ta.value = PRESETS[v];
+                            saveChatSetting("system_prompt", PRESETS[v]);
+                        }
+                    });
+                }
 
                 const fields = [
                     ["cs-sys",          "system_prompt",    (v) => v || null,               "textarea"],
@@ -4564,6 +4613,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     });
                     if (type !== "textarea") return;
                     el.addEventListener("input", () => {
+                        if (presetSel) presetSel.value = el.value ? "custom" : "";
                         saveChatSetting(key, transform(el.value));
                     });
                 });
@@ -5351,6 +5401,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
 
             // --- Context Window Gauge ---
+            function resetCtxGauge() {
+                const bar = $("ctx-bar");
+                if (bar) { bar.style.width = "0%"; bar.style.background = "var(--accent)"; }
+                const lbl = $("ctx-label");
+                if (lbl) lbl.textContent = "Context ready";
+            }
+
             function updateCtxGauge(inputTokens, ctxLength) {
                 if (!inputTokens || !ctxLength) return;
                 const pct = Math.min((inputTokens / ctxLength) * 100, 100);
