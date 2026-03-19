@@ -1261,16 +1261,16 @@
         border-radius: var(--r-full);
         flex-shrink: 0;
         transition: background 0.3s;
-        &.green {
-            background: var(--green);
-        }
-        &.yellow {
-            background: var(--yellow);
-            animation: pulse-dot 1s infinite;
-        }
-        &.red {
-            background: var(--red);
-        }
+    }
+    .status-dot.green {
+        background: var(--green);
+    }
+    .status-dot.yellow {
+        background: var(--yellow);
+        animation: pulse-dot 1s infinite;
+    }
+    .status-dot.red {
+        background: var(--red);
     }
     @keyframes pulse-dot {
         0%,
@@ -2547,9 +2547,9 @@
         letter-spacing: 0.3px;
         white-space: nowrap;
         flex-shrink: 0;
-        &.visible {
-            display: flex;
-        }
+    }
+    .cmd-badge.visible {
+        display: flex;
     }
     /* Sub-chat breakout room — full-width warm-tinted container */
     .subchat-frame {
@@ -3212,7 +3212,7 @@
         height: 100%;
         background: var(--sidebar);
         border-left: 1px solid var(--border);
-        z-index: 202;
+        z-index: 300;
         display: flex;
         flex-direction: column;
         transform: translateX(100%);
@@ -3265,7 +3265,7 @@
         position: fixed;
         inset: 0;
         background: rgba(0, 0, 0, 0.3);
-        z-index: 201;
+        z-index: 250;
     }
     #right-panel-overlay.open {
         display: block;
