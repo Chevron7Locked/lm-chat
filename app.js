@@ -1130,7 +1130,6 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     );
                 if (cfg.eval_batch_size)
                     parts.push(`Eval Batch: ${cfg.eval_batch_size}`);
-                if (cfg.parallel) parts.push(`Parallel: ${cfg.parallel}`);
                 el.innerHTML =
                     parts.length || tags.length ?
                         `<span class="mci-stats">${parts.join(" · ")}</span>` +
@@ -2855,7 +2854,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     attachments
                         .filter((a) => a.type === "image")
                         .forEach((a) => {
-                            inputArr.push({ type: "image", url: a.data_url });
+                            inputArr.push({ type: "image", data_url: a.data_url });
                         });
                     inputVal = inputArr;
                 }
@@ -2922,8 +2921,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 if (cs.min_p != null && !isNaN(cs.min_p)) body.min_p = cs.min_p;
                 if (cs.repeat_penalty != null && !isNaN(cs.repeat_penalty))
                     body.repeat_penalty = cs.repeat_penalty;
-                if (cs.presence_penalty != null && !isNaN(cs.presence_penalty))
-                    body.presence_penalty = cs.presence_penalty;
                 if (cs.max_output_tokens != null && !isNaN(cs.max_output_tokens) && cs.max_output_tokens > 0)
                     body.max_output_tokens = cs.max_output_tokens;
                 // Reasoning: per-chat override, falling back to hardcoded "off".
@@ -3456,7 +3453,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         );
                         break;
                     case "tool_call.arguments":
-                        updateToolArgs(parsed.argumentsDelta || "");
+                        updateToolArgs(parsed.arguments || "");
                         break;
                     case "tool_call.success":
                         updateToolResult(parsed.id, parsed.output, true);
@@ -4480,7 +4477,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const gTopK    = mc.top_k           != null ? String(mc.top_k)           : "";
                 const gMinP    = mc.min_p           != null ? String(mc.min_p)           : "";
                 const gRepPen  = mc.repeat_penalty  != null ? String(mc.repeat_penalty)  : "";
-                const gPresPen = mc.presence_penalty!= null ? String(mc.presence_penalty): "";
                 const gMaxTok  = mc.max_tokens      != null ? String(mc.max_tokens)      : "";
                 // Detect which preset the current system_prompt matches (for dropdown state)
                 const currentSys = s.system_prompt || "";
@@ -4518,8 +4514,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     <div class="sg sg-row">
                         <div class="sg-half"><label>Repeat Penalty</label>
                             <input type="number" id="cs-repeat-pen" min="0" max="3" step="0.05" placeholder="${gRepPen||"e.g. 1.1"}" value="${s.repeat_penalty ?? ""}"></div>
-                        <div class="sg-half"><label>Presence Penalty</label>
-                            <input type="number" id="cs-presence-pen" min="0" max="2" step="0.1" placeholder="${gPresPen||"e.g. 0"}" value="${s.presence_penalty ?? ""}"></div>
                     </div>
                     <div class="sg"><label>Max Output Tokens</label>
                         <input type="number" id="cs-max-tokens" min="-1" max="32768" step="256" placeholder="${gMaxTok||"e.g. 2048"}" value="${s.max_output_tokens ?? ""}">
@@ -4565,7 +4559,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     ["cs-top-k",        "top_k",            (v) => v===""?null:parseInt(v), "input"],
                     ["cs-min-p",        "min_p",            (v) => v===""?null:+v,          "input"],
                     ["cs-repeat-pen",   "repeat_penalty",   (v) => v===""?null:+v,          "input"],
-                    ["cs-presence-pen", "presence_penalty", (v) => v===""?null:+v,          "input"],
                     ["cs-max-tokens",   "max_output_tokens",(v) => v===""?null:parseInt(v), "input"],
                     ["cs-reasoning",    "reasoning",        (v) => v||null,                 "select"],
                     ["cs-sc",           "sc_enabled",       (v) => v,                       "checkbox"],
@@ -4881,7 +4874,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 cachedModels.forEach((m) => {
                     const isLoaded = (m.loaded_instances || []).length > 0;
                     const inst = (m.loaded_instances || [])[0];
-                    const ctx = inst?.context_length || m.context_length || "";
+                    const ctx = inst?.config?.context_length || m.context_length || "";
                     const d = document.createElement("div");
                     d.className = "model-item" + (isLoaded ? "" : " unloaded");
                     d.innerHTML = `<span class="mi-name" title="${esc(m.key)}">${modelLabelHtml(m)}</span><span class="mi-status ${isLoaded ? "loaded" : "unloaded"}">${isLoaded ? "Loaded" : "Idle"}</span>${ctx ? `<span class="mi-ctx">${ctx}</span>` : ""}`;

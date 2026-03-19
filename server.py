@@ -666,9 +666,8 @@ class Handler(BaseHTTPRequestHandler):
         "top_k":            (int,   lambda v: isinstance(v, int) and 0 <= v <= 500),
         "min_p":            (float, lambda v: isinstance(v, (int, float)) and 0.0 <= v <= 1.0),
         "repeat_penalty":   (float, lambda v: isinstance(v, (int, float)) and 0.0 <= v <= 3.0),
-        "presence_penalty": (float, lambda v: isinstance(v, (int, float)) and 0.0 <= v <= 2.0),
         "max_output_tokens":(int,   lambda v: isinstance(v, int) and (v == -1 or 1 <= v <= 32768)),
-        "reasoning":        (str,   lambda v: v in ("off", "medium", "high")),
+        "reasoning":        (str,   lambda v: v in ("off", "low", "medium", "high", "on")),
         "sc_enabled":       (bool,  lambda v: isinstance(v, bool)),
         "cove_enabled":     (bool,  lambda v: isinstance(v, bool)),
     }
@@ -1678,7 +1677,7 @@ class Handler(BaseHTTPRequestHandler):
                             "output": None,
                         }
                     elif event_type == "tool_call.arguments" and current_tool:
-                        current_tool["arguments"] += data.get("argumentsDelta", "")
+                        current_tool["arguments"] += data.get("arguments", "")
                     elif event_type == "tool_call.success" and current_tool:
                         current_tool["output"] = data.get("output")
                         tool_calls.append(current_tool)
@@ -1690,7 +1689,7 @@ class Handler(BaseHTTPRequestHandler):
                             current_tool = None
                     elif event_type == "chat.end":
                         result = data.get("result", {})
-                        response_id = data.get("response_id") or result.get("response_id")
+                        response_id = result.get("response_id")
                         stats = result.get("stats", {})
                         stream_usage = data.get("usage") or {
                             "input_tokens": stats.get("input_tokens", 0),
@@ -1821,7 +1820,7 @@ class Handler(BaseHTTPRequestHandler):
             log.debug(f"REQ system_prompt: [{len(payload.get('system_prompt') or '')} chars]")
             inp = payload.get('input', '')
             log.debug(f"REQ input: [{len(str(inp)) if isinstance(inp, list) else len(inp or '')} chars]")
-            params = {k: payload[k] for k in ('temperature','top_p','top_k','min_p','repeat_penalty','presence_penalty','max_output_tokens','reasoning') if k in payload}
+            params = {k: payload[k] for k in ('temperature','top_p','top_k','min_p','repeat_penalty','max_output_tokens','reasoning') if k in payload}
             if params:
                 log.debug(f"REQ params: {params}")
 
@@ -2543,8 +2542,6 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             payload["min_p"] = body["min_p"]
         if body.get("repeat_penalty") is not None:
             payload["repeat_penalty"] = body["repeat_penalty"]
-        if body.get("presence_penalty") is not None:
-            payload["presence_penalty"] = body["presence_penalty"]
         if body.get("max_output_tokens") is not None and body["max_output_tokens"] > 0:
             payload["max_output_tokens"] = body["max_output_tokens"]
         if body.get("reasoning"):
@@ -2707,7 +2704,7 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             **payload,
             "store": False,
             "integrations": [],
-            "reasoning": {"type": "disabled"},
+            "reasoning": "off",
             "stream": False,
         }
 
@@ -2757,7 +2754,7 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
                     "max_output_tokens": 300,
                     "store": False,
                     "integrations": [],
-                    "reasoning": {"type": "disabled"},
+                    "reasoning": "off",
                     "stream": False,
                 }
                 try:
