@@ -51,7 +51,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 else pass2Wrap.classList.add("hidden");
                 document.getElementById("auth-btn").textContent =
                     isSetup ? "Create Account" : "Sign In";
-                document.getElementById("auth-err").style.display = "none";
+                document.getElementById("auth-err").textContent = "";
                 // Reset auth form to initial state (clear any TOTP step)
                 document.getElementById("a-totp-wrap").classList.add("hidden");
                 document.getElementById("a-user").parentElement.style.display =
@@ -71,21 +71,21 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
             async function doAuth() {
                 const btn = document.getElementById("auth-btn");
                 const errEl = document.getElementById("auth-err");
-                errEl.style.display = "none";
+                const showErr = (msg) => { errEl.textContent = msg; };
+                const clearErr = () => { errEl.textContent = ""; };
+                clearErr();
                 const username = document.getElementById("a-user").value.trim();
                 const password = document.getElementById("a-pass").value;
 
                 if (!username || !password) {
-                    errEl.textContent = "Please fill in all fields";
-                    errEl.style.display = "block";
+                    showErr("Please fill in all fields");
                     return;
                 }
 
                 if (AUTH_STATE.needs_setup) {
                     const pass2 = document.getElementById("a-pass2").value;
                     if (password !== pass2) {
-                        errEl.textContent = "Passwords do not match";
-                        errEl.style.display = "block";
+                        showErr("Passwords do not match");
                         return;
                     }
                     const display_name =
@@ -108,8 +108,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                         });
                         const d = await r.json();
                         if (!r.ok) {
-                            errEl.textContent = d.error || "Setup failed";
-                            errEl.style.display = "block";
+                            showErr(d.error || "Setup failed");
                             btn.disabled = false;
                             btn.textContent = "Create Account";
                             return;
@@ -122,8 +121,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                         showUserAvatar();
                         initApp();
                     } catch (e) {
-                        errEl.textContent = "Connection failed";
-                        errEl.style.display = "block";
+                        showErr("Connection failed");
                     } finally {
                         btn.disabled = false;
                         btn.textContent = "Create Account";
@@ -142,8 +140,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                         });
                         const d = await r.json();
                         if (!r.ok) {
-                            errEl.textContent = d.error || "Login failed";
-                            errEl.style.display = "block";
+                            showErr(d.error || "Login failed");
                             btn.disabled = false;
                             btn.textContent = "Sign In";
                             return;
@@ -169,10 +166,9 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                                 const code = document
                                     .getElementById("a-totp")
                                     .value.trim();
-                                errEl.style.display = "none";
+                                clearErr();
                                 if (code.length !== 6) {
-                                    errEl.textContent = "Enter a 6-digit code";
-                                    errEl.style.display = "block";
+                                    showErr("Enter a 6-digit code");
                                     return;
                                 }
                                 btn.disabled = true;
@@ -195,9 +191,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                                     );
                                     const d2 = await r2.json();
                                     if (!r2.ok) {
-                                        errEl.textContent =
-                                            d2.error || "Invalid code";
-                                        errEl.style.display = "block";
+                                        showErr(d2.error || "Invalid code");
                                         btn.disabled = false;
                                         btn.textContent = "Verify";
                                         return;
@@ -209,8 +203,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                                     showUserAvatar();
                                     await initApp();
                                 } catch (e2) {
-                                    errEl.textContent = "Connection failed";
-                                    errEl.style.display = "block";
+                                    showErr("Connection failed");
                                 } finally {
                                     btn.disabled = false;
                                     btn.textContent = "Verify";
@@ -227,8 +220,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                         initApp();
                     } catch (e) {
                         if (e.message !== "unauthorized") {
-                            errEl.textContent = "Connection failed";
-                            errEl.style.display = "block";
+                            showErr("Connection failed");
                         }
                         btn.disabled = false;
                         btn.textContent = "Sign In";
@@ -265,13 +257,18 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
             }
 
             function toggleUserDD() {
-                document.getElementById("user-dd").classList.toggle("open");
+                const dd = document.getElementById("user-dd");
+                const av = document.getElementById("user-avatar");
+                const isOpen = dd.classList.toggle("open");
+                av.setAttribute("aria-expanded", isOpen ? "true" : "false");
             }
             // Close user dropdown on outside click
             document.addEventListener("click", (e) => {
                 const av = document.getElementById("user-avatar");
-                if (av && !av.contains(e.target))
+                if (av && !av.contains(e.target)) {
                     document.getElementById("user-dd").classList.remove("open");
+                    av.setAttribute("aria-expanded", "false");
+                }
             });
 
             // --- System Settings Panel ---
@@ -1125,18 +1122,6 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     const el = $("s-reasoning");
                     if (el && el.value === "off") el.value = "medium";
                 }
-                // Sync context length from LM Studio model config
-                if (m.context_length) {
-                    $("s-ctx").value = m.context_length;
-                    localStorage.setItem("lsc-ctx", String(m.context_length));
-                }
-                if (m.max_context_length) $("s-ctx").max = m.max_context_length;
-                // Sync presence_penalty from instance config if LM Studio exposes it
-                const cfg2 = m.instance_config || {};
-                if (cfg2.presence_penalty != null) {
-                    $("s-presence-pen").value = cfg2.presence_penalty;
-                    localStorage.setItem("lsc-presence-pen", String(cfg2.presence_penalty));
-                }
                 // Show instance config (read-only info from LM Studio)
                 const cfg = m.instance_config || {};
                 const el = $("model-config-info");
@@ -1165,20 +1150,8 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
             }
 
             // --- Settings (localStorage only — these are per-device prefs) ---
-            function lss(id, key, def) {
-                const v = localStorage.getItem(key);
-                $(id).value = v || def;
-                $(id).onchange = () => localStorage.setItem(key, $(id).value);
-            }
-            lss("s-sys", "lsc-sys", "");
-            lss("s-temp", "lsc-temp", "0.7");
-            lss("s-ctx", "lsc-ctx", "");
-            lss("s-top-p", "lsc-top-p", "0.95");
-            lss("s-top-k", "lsc-top-k", "40");
-            lss("s-min-p", "lsc-min-p", "0.05");
-            lss("s-repeat-pen", "lsc-repeat-pen", "1.0");
-            lss("s-presence-pen", "lsc-presence-pen", "1");
-            lss("s-max-tokens", "lsc-max-tokens", "-1");
+            $("s-sys").value = localStorage.getItem("lsc-sys") || "";
+            $("s-sys").onchange = () => localStorage.setItem("lsc-sys", $("s-sys").value);
 
             // Load memory toggle state
             apiFetch("/api/insights/settings")
@@ -1456,10 +1429,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 localStorage.getItem("lsc-reasoning") || "off";
             $("s-followups").checked =
                 localStorage.getItem("lsc-followups") !== "off";
-            // API key — loaded from server via loadSettings(), saved via saveServerSettings()
-            // Remove any legacy localStorage key on load
-            localStorage.removeItem("lsc-apikey");
-
             // --- MCP toggles ---
             MCPS.forEach((s, i) => {
                 const v = localStorage.getItem("lsc-mcp-" + s.id);
@@ -1487,8 +1456,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
             // --- Remote MCP servers (H4: auth stored server-side) ---
             let remoteMcps = [];
-            // Migrate: clear legacy localStorage data
-            localStorage.removeItem("lsc-remote-mcps");
             function saveRemoteMcps() {
                 // Save to server — send label/url/on but NOT auth (auth only sent when explicitly set)
                 const payload = remoteMcps.map((s) => ({
@@ -1718,7 +1685,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 })
                     .then((r) => r.json())
                     .then((data) => {
-                        chatMeta[id].folder = data.folder;
+                        if (chatMeta[id]) chatMeta[id].folder = data.folder;
                         renderList();
                     });
             });
@@ -2001,10 +1968,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         `/api/insights/${encodeURIComponent(id)}`,
                         { method: "DELETE" },
                     );
-                    if (!resp.ok)
-                        console.error("delete insight failed:", resp.status);
+                    if (!resp.ok) {
+                        addErr("Failed to delete memory.");
+                        return;
+                    }
                 } catch (e) {
-                    console.error("delete insight:", e);
+                    addErr("Failed to delete memory.");
+                    return;
                 }
                 loadMemoryPanel();
             }
@@ -2023,10 +1993,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     const resp = await apiFetch("/api/insights", {
                         method: "DELETE",
                     });
-                    if (!resp.ok)
-                        console.error("clear insights failed:", resp.status);
+                    if (!resp.ok) {
+                        addErr("Failed to clear memories.");
+                        return;
+                    }
                 } catch (e) {
-                    console.error("clear insights:", e);
+                    addErr("Failed to clear memories.");
+                    return;
                 }
                 loadMemoryPanel();
             }
@@ -2045,10 +2018,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ content: text }),
                     });
-                    if (!resp.ok)
-                        console.error("add insight failed:", resp.status);
+                    if (!resp.ok) {
+                        addErr("Failed to add memory.");
+                        return;
+                    }
                 } catch (e) {
-                    console.error("add insight:", e);
+                    addErr("Failed to add memory.");
+                    return;
                 }
                 loadMemoryPanel();
             }
@@ -2225,7 +2201,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         if (totalTokens > 0)
                             updateCtxGauge(
                                 totalTokens,
-                                parseInt($("s-ctx").value) || 16000,
+                                (cachedModels.find((x) => x.id === modelSel.value)?.context_length) || 16000,
                             );
                     }
                 } catch (e) {
@@ -2465,7 +2441,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
             function getMsgTarget() {
                 const m = chatMeta[activeId];
-                return (m && m._subchatTarget) || msgs;
+                return (m && m._subchatTarget && m._subchatTarget.isConnected) ? m._subchatTarget : msgs;
             }
             function addUser(t, msgId, attachments) {
                 const d = document.createElement("div");
@@ -2941,34 +2917,29 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 };
                 const activePreset = (chatMeta[activeId] || {})._activePreset;
                 const cs = chatSettingsCache || {};
-                // Per-chat overrides take precedence over global settings panel values.
+                // Per-chat overrides only — no global fallbacks.
+                // When no per-chat override, omit the param entirely and let LM Studio
+                // use the model's instance_config defaults (temp, top_k, context, etc.).
                 const temp =
                     activePreset && PRESET_TEMPS[activePreset] !== undefined ?
                         PRESET_TEMPS[activePreset]
                     : cs.temperature != null ? cs.temperature
-                    :   parseFloat($("s-temp").value);
-                if (!isNaN(temp)) body.temperature = temp;
-                const topP = cs.top_p != null ? cs.top_p : parseFloat($("s-top-p").value);
-                if (!isNaN(topP)) body.top_p = topP;
-                const topK = cs.top_k != null ? cs.top_k : parseInt($("s-top-k").value);
-                if (!isNaN(topK)) body.top_k = topK;
-                const minP = cs.min_p != null ? cs.min_p : parseFloat($("s-min-p").value);
-                if (!isNaN(minP)) body.min_p = minP;
-                const repPen = cs.repeat_penalty != null ? cs.repeat_penalty : parseFloat($("s-repeat-pen").value);
-                if (!isNaN(repPen) && repPen !== 1.0)
-                    body.repeat_penalty = repPen;
-                const presPen = cs.presence_penalty != null ? cs.presence_penalty : parseFloat($("s-presence-pen").value);
-                if (!isNaN(presPen) && presPen > 0)
-                    body.presence_penalty = presPen;
-                const maxTok = cs.max_output_tokens != null ? cs.max_output_tokens : parseInt($("s-max-tokens").value);
-                if (!isNaN(maxTok) && maxTok > 0)
-                    body.max_output_tokens = maxTok;
-                // Reasoning: per-chat override > global select.
+                    : null;
+                if (temp != null && !isNaN(temp)) body.temperature = temp;
+                if (cs.top_p != null && !isNaN(cs.top_p)) body.top_p = cs.top_p;
+                if (cs.top_k != null && !isNaN(cs.top_k)) body.top_k = cs.top_k;
+                if (cs.min_p != null && !isNaN(cs.min_p)) body.min_p = cs.min_p;
+                if (cs.repeat_penalty != null && !isNaN(cs.repeat_penalty) && cs.repeat_penalty !== 1.0)
+                    body.repeat_penalty = cs.repeat_penalty;
+                if (cs.presence_penalty != null && !isNaN(cs.presence_penalty) && cs.presence_penalty > 0)
+                    body.presence_penalty = cs.presence_penalty;
+                if (cs.max_output_tokens != null && !isNaN(cs.max_output_tokens) && cs.max_output_tokens > 0)
+                    body.max_output_tokens = cs.max_output_tokens;
+                // Reasoning: per-chat override, falling back to hardcoded "off".
                 // Always send explicitly — omitting lets LM Studio use the model's
                 // default, which may be "on" for models with built-in reasoning,
                 // burning output tokens that would otherwise be needed for tool call JSON.
-                const reasoning = cs.reasoning || $("s-reasoning").value || "off";
-                body.reasoning = reasoning;
+                body.reasoning = cs.reasoning || "off";
                 // context_length is a load-time parameter — sending it per-request
                 // triggers JIT model reloads in LM Studio. Read-only from instance config.
                 // Apply per-chat SC/CoVe overrides when set via the chat settings panel.
@@ -3527,7 +3498,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         };
                         // Update context gauge
                         const inpTok = st.input_tokens || 0;
-                        const ctxLen = parseInt($("s-ctx").value) || 16000;
+                        const ctxLen = (cachedModels.find((x) => x.id === modelSel.value)?.context_length) || 16000;
                         if (inpTok) updateCtxGauge(inpTok, ctxLen);
                         $("thinking").classList.remove("on");
                         break;
@@ -3539,7 +3510,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                                 parsed.input_tokens ||
                                 parsed.prompt_tokens ||
                                 0;
-                            const uCtx = parseInt($("s-ctx").value) || 16000;
+                            const uCtx = (cachedModels.find((x) => x.id === modelSel.value)?.context_length) || 16000;
                             if (uInp) updateCtxGauge(uInp, uCtx);
                         }
                         break;
@@ -4036,8 +4007,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
             // --- Regenerate button ---
             function addRegenButton() {
-                // Clean up legacy standalone regen buttons (pre-refactor)
-                msgs.querySelectorAll(".regen-wrap").forEach((el) => el.remove());
                 if (sending || !activeId) return;
                 const assts = msgs.querySelectorAll(".m-asst");
                 if (!assts.length) return;
@@ -4172,13 +4141,18 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const msgId = el.dataset.msgId;
                 // Truncate from this message onward in DB
                 if (msgId && activeId) {
-                    await apiFetch(`/api/chats/${activeId}/messages/truncate`, {
+                    const r = await apiFetch(`/api/chats/${activeId}/messages/truncate`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             from_message_id: parseInt(msgId),
                         }),
                     });
+                    if (!r.ok) {
+                        cancelEdit(btn);
+                        addErr("Failed to edit message — please try again.");
+                        return;
+                    }
                     chatMeta[activeId].response_id = null;
                 }
                 // Remove this message and everything after it from DOM
@@ -4317,7 +4291,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         const hoverPinBtn = document.createElement("button");
                         hoverPinBtn.className = "msg-action-btn hover-pin-btn";
                         hoverPinBtn.title = "Pin this response";
-                        hoverPinBtn.style.display = "none";
                         hoverPinBtn.innerHTML = iconPin();
                         hoverPinBtn.onclick = () => {
                             const msgId = hoverPinBtn.closest("[data-msg-id]")?.dataset.msgId;
@@ -4405,7 +4378,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             const hoverBtn = document.createElement("button");
                             hoverBtn.className = "msg-action-btn hover-pin-btn";
                             hoverBtn.title = "Pin this response";
-                            hoverBtn.style.display = "none";
                             hoverBtn.innerHTML = iconPin();
                             hoverBtn.onclick = () => pinMessage(msgId, hoverBtn.closest(".msg-row"));
                             actions.appendChild(hoverBtn);
@@ -4417,7 +4389,6 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 }
             }
 
-            // Stubs — submitFeedback replaced here (CF-T8); openPinNavigator replaced in CF-T9
             async function submitFeedback(msgId, rating, rowEl) {
                 const upBtn = rowEl?.querySelector(".thumb-up");
                 const downBtn = rowEl?.querySelector(".thumb-down");
@@ -4489,6 +4460,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 }
                 try {
                     const r = await apiFetch(`/api/chats/${chatId}/settings`);
+                    if (chatId !== activeId) return;  // navigated away while loading — discard
                     if (!r.ok) {
                         chatSettingsCache = {};
                         if (btn) btn.classList.remove("has-overrides");
@@ -4497,6 +4469,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     chatSettingsCache = await r.json();
                     if (btn) btn.classList.toggle("has-overrides", Object.keys(chatSettingsCache).length > 0);
                 } catch(e) {
+                    if (chatId !== activeId) return;  // stale error — don't wipe current chat's cache
                     chatSettingsCache = {};
                     if (btn) btn.classList.remove("has-overrides");
                 }
@@ -4507,14 +4480,17 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             function renderChatSettingsPanel() {
                 const body = $("right-panel-body");
                 const s = chatSettingsCache;
-                // Read current global defaults as placeholders so the user sees what's active
-                const gTemp  = $("s-temp")?.value  || "0.7";
-                const gTopP  = $("s-top-p")?.value || "0.95";
-                const gTopK  = $("s-top-k")?.value || "40";
-                const gMinP  = $("s-min-p")?.value || "0.05";
-                const gRepPen  = $("s-repeat-pen")?.value  || "1.0";
-                const gPresPen = $("s-presence-pen")?.value || "0";
-                const gMaxTok  = $("s-max-tokens")?.value  || "-1";
+                // Placeholders show LM Studio's model-level defaults (instance_config).
+                // Leave empty when not known — LM Studio governs these at the model level.
+                const activeModel = cachedModels.find((x) => x.id === modelSel.value);
+                const mc = activeModel?.instance_config || {};
+                const gTemp    = mc.temperature     != null ? String(mc.temperature)     : "";
+                const gTopP    = mc.top_p           != null ? String(mc.top_p)           : "";
+                const gTopK    = mc.top_k           != null ? String(mc.top_k)           : "";
+                const gMinP    = mc.min_p           != null ? String(mc.min_p)           : "";
+                const gRepPen  = mc.repeat_penalty  != null ? String(mc.repeat_penalty)  : "";
+                const gPresPen = mc.presence_penalty!= null ? String(mc.presence_penalty): "";
+                const gMaxTok  = mc.max_tokens      != null ? String(mc.max_tokens)      : "";
                 // Detect which preset the current system_prompt matches (for dropdown state)
                 const currentSys = s.system_prompt || "";
                 // Default to general when no per-chat override — that's the app default
@@ -4538,24 +4514,24 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     </div>
                     <div class="sg sg-row">
                         <div class="sg-half"><label>Temperature</label>
-                            <input type="number" id="cs-temp" min="0" max="2" step="0.1" placeholder="${gTemp}" value="${s.temperature ?? ""}"></div>
+                            <input type="number" id="cs-temp" min="0" max="2" step="0.1" placeholder="${gTemp||"model default"}" value="${s.temperature ?? ""}"></div>
                         <div class="sg-half"><label>Top P</label>
-                            <input type="number" id="cs-top-p" min="0" max="1" step="0.05" placeholder="${gTopP}" value="${s.top_p ?? ""}"></div>
+                            <input type="number" id="cs-top-p" min="0" max="1" step="0.05" placeholder="${gTopP||"model default"}" value="${s.top_p ?? ""}"></div>
                     </div>
                     <div class="sg sg-row">
                         <div class="sg-half"><label>Top K</label>
-                            <input type="number" id="cs-top-k" min="0" max="500" step="1" placeholder="${gTopK}" value="${s.top_k ?? ""}"></div>
+                            <input type="number" id="cs-top-k" min="0" max="500" step="1" placeholder="${gTopK||"model default"}" value="${s.top_k ?? ""}"></div>
                         <div class="sg-half"><label>Min P</label>
-                            <input type="number" id="cs-min-p" min="0" max="1" step="0.01" placeholder="${gMinP}" value="${s.min_p ?? ""}"></div>
+                            <input type="number" id="cs-min-p" min="0" max="1" step="0.01" placeholder="${gMinP||"model default"}" value="${s.min_p ?? ""}"></div>
                     </div>
                     <div class="sg sg-row">
                         <div class="sg-half"><label>Repeat Penalty</label>
-                            <input type="number" id="cs-repeat-pen" min="0" max="3" step="0.05" placeholder="${gRepPen}" value="${s.repeat_penalty ?? ""}"></div>
+                            <input type="number" id="cs-repeat-pen" min="0" max="3" step="0.05" placeholder="${gRepPen||"model default"}" value="${s.repeat_penalty ?? ""}"></div>
                         <div class="sg-half"><label>Presence Penalty</label>
-                            <input type="number" id="cs-presence-pen" min="0" max="2" step="0.1" placeholder="${gPresPen}" value="${s.presence_penalty ?? ""}"></div>
+                            <input type="number" id="cs-presence-pen" min="0" max="2" step="0.1" placeholder="${gPresPen||"model default"}" value="${s.presence_penalty ?? ""}"></div>
                     </div>
                     <div class="sg"><label>Max Output Tokens</label>
-                        <input type="number" id="cs-max-tokens" min="-1" max="32768" step="256" placeholder="${gMaxTok}" value="${s.max_output_tokens ?? ""}">
+                        <input type="number" id="cs-max-tokens" min="-1" max="32768" step="256" placeholder="${gMaxTok||"model default"}" value="${s.max_output_tokens ?? ""}">
                     </div>
                     <div class="sg"><label>Reasoning</label>
                         <select id="cs-reasoning">
@@ -4575,7 +4551,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     </div>
                 `;
                 const ta = $("cs-sys");
-                if (ta) ta.value = s.system_prompt || "";
+                if (ta) ta.value = s.system_prompt || (detectedPreset !== "custom" && PRESETS[detectedPreset] ? PRESETS[detectedPreset] : "");
 
                 // Preset dropdown: populate textarea when a preset is chosen
                 const presetSel = $("cs-preset");
@@ -4975,7 +4951,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
                 if (mod && e.key === "n") {
                     e.preventDefault();
-                    newChat();
+                    newChat().catch((e) => addErr("Failed to create chat: " + e.message));
                     return;
                 }
                 if (mod && e.shiftKey && (e.key === "S" || e.key === "s")) {
@@ -5003,12 +4979,15 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
             // --- Export chat ---
             function toggleExportDD() {
-                $("export-dd").classList.toggle("open");
+                const isOpen = $("export-dd").classList.toggle("open");
+                $("export-btn").setAttribute("aria-expanded", isOpen ? "true" : "false");
             }
             // Close export dropdown on outside click
             document.addEventListener("click", (e) => {
-                if (!$("export-wrap").contains(e.target))
+                if (!$("export-wrap").contains(e.target)) {
                     $("export-dd").classList.remove("open");
+                    $("export-btn").setAttribute("aria-expanded", "false");
+                }
             });
 
             function updateExportBtn() {
@@ -5517,7 +5496,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         id: data.id,
                         title: data.title,
                         model: modelSel.value,
-                        response_id: null,
+                        response_id: data.response_id ?? null,
                         updated_at: Date.now() / 1000,
                         pinned: 0,
                         folder: "",
@@ -5565,8 +5544,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             function renderModelDD(ddId) {
                 const dd = $(ddId);
                 if (!dd) return;
+                const triggerId = ddId === "model-dd" ? "model-pill" : "model-sel-wrap";
+                const trigger = $(triggerId);
                 if (dd.classList.contains("open")) {
                     dd.classList.remove("open");
+                    if (trigger) trigger.setAttribute("aria-expanded", "false");
                     return;
                 }
                 dd.innerHTML = "";
@@ -5574,6 +5556,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     dd.innerHTML =
                         '<div class="mdd-empty">No models loaded</div>';
                     dd.classList.add("open");
+                    if (trigger) trigger.setAttribute("aria-expanded", "true");
                     return;
                 }
                 cachedModels.forEach((m) => {
@@ -5612,10 +5595,12 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         updateTopModelLabel();
                         syncModelSettings();
                         dd.classList.remove("open");
+                        if (trigger) trigger.setAttribute("aria-expanded", "false");
                     };
                     dd.appendChild(item);
                 });
                 dd.classList.add("open");
+                if (trigger) trigger.setAttribute("aria-expanded", "true");
             }
             function toggleModelDD() {
                 renderModelDD("model-dd");
@@ -5636,10 +5621,14 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     md = $("model-dd"),
                     mw = $("model-sel-wrap"),
                     td = $("top-model-dd");
-                if (mp && md && !mp.contains(e.target))
+                if (mp && md && !mp.contains(e.target)) {
                     md.classList.remove("open");
-                if (mw && td && !mw.contains(e.target))
+                    mp.setAttribute("aria-expanded", "false");
+                }
+                if (mw && td && !mw.contains(e.target)) {
                     td.classList.remove("open");
+                    mw.setAttribute("aria-expanded", "false");
+                }
             });
 
             // --- Init ---
@@ -5711,7 +5700,7 @@ function initEventHandlers() {
 
     // Sidebar
     document.getElementById('sb-overlay')?.addEventListener('click', () => closeSB());
-    document.getElementById('new-chat')?.addEventListener('click', () => newChat());
+    document.getElementById('new-chat')?.addEventListener('click', () => newChat().catch((e) => addErr("Failed to create chat: " + e.message)));
     document.getElementById('close-sb')?.addEventListener('click', () => closeSB());
     document.getElementById('chat-search')?.addEventListener('input', () => filterChats());
     document.getElementById('chat-search-clear')?.addEventListener('click', () => clearChatSearch());

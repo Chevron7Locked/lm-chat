@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 from qr import generate_qr_svg
 
-VERSION = "0.4.6"
+VERSION = "0.4.7"
 LMSTUDIO = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_TOKEN = os.environ.get("LMSTUDIO_TOKEN", "")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -68,22 +68,26 @@ LOG_MAX_BYTES = 5 * 1024 * 1024   # 5 MB per file
 LOG_BACKUP_COUNT = 5               # keep 5 rotated files (25 MB total max)
 
 def _setup_logger():
-    """Configure rotating file logger + optional console output."""
-    os.makedirs(LOG_DIR, exist_ok=True)
+    """Configure rotating file logger + optional console output.
+    Falls back to console-only if the log directory is not writable (e.g. read-only container)."""
     logger = logging.getLogger("lm-chat")
     logger.setLevel(logging.DEBUG)
     logger.handlers.clear()
-    # Rotating file handler — always active, captures everything
-    fh = RotatingFileHandler(
-        os.path.join(LOG_DIR, "lm-chat.log"),
-        maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT,
-        encoding="utf-8",
-    )
-    fh.setFormatter(logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-    ))
-    fh.setLevel(logging.DEBUG)
-    logger.addHandler(fh)
+    # Rotating file handler — active when log dir is writable
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        fh = RotatingFileHandler(
+            os.path.join(LOG_DIR, "lm-chat.log"),
+            maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+        fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        ))
+        fh.setLevel(logging.DEBUG)
+        logger.addHandler(fh)
+    except OSError:
+        pass  # read-only filesystem — console-only logging
     # Console handler — only INFO+ unless debug mode is on
     ch = logging.StreamHandler()
     ch.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
@@ -452,13 +456,13 @@ def maybe_cleanup_sessions():
         if now - _last_cleanup < CLEANUP_INTERVAL:
             return
         _last_cleanup = now
-    try:
-        db = get_db()
-        cleanup_expired_sessions(db)
-        _api_limiter.cleanup()
-        _stream_limiter.cleanup()
-    except Exception as e:
-        log.debug(f"Session cleanup failed (non-fatal): {e}")
+        try:
+            db = get_db()
+            cleanup_expired_sessions(db)
+            _api_limiter.cleanup()
+            _stream_limiter.cleanup()
+        except Exception as e:
+            log.debug(f"Session cleanup failed (non-fatal): {e}")
 
 # --- Server-side TOTP setup storage (C3: secret never in client token) ---
 
@@ -535,7 +539,7 @@ def sign_partial_token(user_id: str) -> str:
     """Create HMAC-signed partial token for 2FA login (5 min expiry). Base64-encoded to avoid exposing user_id."""
     ts = str(int(time.time()))
     msg = f"{user_id}:{ts}"
-    sig = hmac.new(TOTP_SIGNING_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()[:16]
+    sig = hmac.new(TOTP_SIGNING_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
     return base64.urlsafe_b64encode(f"{user_id}:{ts}:{sig}".encode()).decode()
 
 def verify_partial_token(token_str: str) -> str | None:
@@ -553,7 +557,7 @@ def verify_partial_token(token_str: str) -> str | None:
             return None
     except ValueError:
         return None
-    expected = hmac.new(TOTP_SIGNING_KEY.encode(), f"{user_id}:{ts}".encode(), hashlib.sha256).hexdigest()[:16]
+    expected = hmac.new(TOTP_SIGNING_KEY.encode(), f"{user_id}:{ts}".encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected):
         return None
     try:
@@ -645,11 +649,12 @@ class Handler(BaseHTTPRequestHandler):
         return user
 
     def _verify_chat_owner(self, db, chat_id, user_id):
-        """Returns True if chat belongs to user (or auth disabled). Sends 404 if not. Caller must close db."""
-        if not AUTH_ENABLED:
-            return True
+        """Returns True if chat exists and belongs to user. Sends 404 if not. Caller must close db."""
         row = db.execute("SELECT user_id FROM chats WHERE id=?", (chat_id,)).fetchone()
-        if not row or row[0] != user_id:
+        if not row:
+            self._error(404, "chat not found")
+            return False
+        if AUTH_ENABLED and row[0] != user_id:
             self._error(404, "chat not found")
             return False
         return True
@@ -1118,6 +1123,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             length = int(self.headers.get("Content-Length", 0))
+            if length < 0:
+                return self._error(400, "invalid content-length")
             if length > MAX_BODY_SIZE:
                 return self._error(413, "request too large")
             body = json.loads(self.rfile.read(length)) if length else {}
@@ -1131,6 +1138,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_PATCH(self):
         try:
             length = int(self.headers.get("Content-Length", 0))
+            if length < 0:
+                return self._error(400, "invalid content-length")
             if length > MAX_BODY_SIZE:
                 return self._error(413, "request too large")
             body = json.loads(self.rfile.read(length)) if length else {}
@@ -1159,6 +1168,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not AUTH_ENABLED:
             return self._error(400, "auth not enabled")
+        ip = self.client_address[0]
+        if not check_rate_limit(ip):
+            return self._error(429, "too many attempts, try again later")
         username = (body.get("username") or "").strip().lower()
         password = body.get("password") or ""
         display_name = (body.get("display_name") or "").strip() or username
@@ -1402,16 +1414,21 @@ class Handler(BaseHTTPRequestHandler):
         if not code or len(code) != 6:
             return self._error(400, "6-digit code required")
         db = get_db()
-        row = db.execute("SELECT totp_secret,username,display_name,is_admin,last_totp_counter FROM users WHERE id=?", (user_id,)).fetchone()
-        if not row:
-
-            return self._error(401, "invalid or reused code")
-        counter = verify_totp(row["totp_secret"], code)
-        if counter is None or counter <= (row["last_totp_counter"] or 0):
-
-            return self._error(401, "invalid or reused code")
-        db.execute("UPDATE users SET last_totp_counter=? WHERE id=?", (counter, user_id))
-        db.commit()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT totp_secret,username,display_name,is_admin,last_totp_counter FROM users WHERE id=?", (user_id,)).fetchone()
+            if not row:
+                db.execute("ROLLBACK")
+                return self._error(401, "invalid or reused code")
+            counter = verify_totp(row["totp_secret"], code)
+            if counter is None or counter <= (row["last_totp_counter"] or 0):
+                db.execute("ROLLBACK")
+                return self._error(401, "invalid or reused code")
+            db.execute("UPDATE users SET last_totp_counter=? WHERE id=?", (counter, user_id))
+            db.execute("COMMIT")
+        except Exception:
+            db.execute("ROLLBACK")
+            return self._error(500, "login error")
         token = create_session(db, user_id)
         clear_rate_limit(ip)  # Clear rate limit after full 2FA success
         user = {"id": user_id, "username": row["username"], "display_name": row["display_name"], "is_admin": row["is_admin"]}
@@ -1803,7 +1820,7 @@ class Handler(BaseHTTPRequestHandler):
             log.debug(f"REQ model={payload.get('model')} stream={payload.get('stream')} ctx={payload.get('context_length')} prev_resp_id={payload.get('previous_response_id')}")
             log.debug(f"REQ system_prompt: [{len(payload.get('system_prompt') or '')} chars]")
             inp = payload.get('input', '')
-            log.debug(f"REQ input: {(str(inp)[:150]) if isinstance(inp, list) else (inp or '')[:150]}")
+            log.debug(f"REQ input: [{len(str(inp)) if isinstance(inp, list) else len(inp or '')} chars]")
             params = {k: payload[k] for k in ('temperature','top_p','top_k','min_p','repeat_penalty','presence_penalty','max_output_tokens','reasoning') if k in payload}
             if params:
                 log.debug(f"REQ params: {params}")
@@ -2070,7 +2087,7 @@ class Handler(BaseHTTPRequestHandler):
                 (new_id, r[0], r[1], r[2], r[3], r[4], r[5]),
             )
         db.commit()
-        self._json_response(200, {"id": new_id, "title": new_title})
+        self._json_response(200, {"id": new_id, "title": new_title, "response_id": src_response_id})
 
     def _compact_chat(self, chat_id, body):
         user = self._require_auth()
@@ -2407,6 +2424,7 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             results.append({"message_id": mid, "score": round(sim, 4), "content": (content or "")[:200], "role": role, "chat_id": chat_id, "chat_title": title})
 
         results.sort(key=lambda x: x["score"], reverse=True)
+        results = results[:20]  # cap semantic results before appending pins
 
         # Also search pins FTS
         try:
@@ -2429,7 +2447,7 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         except Exception as e:
             log.warning(f"Pin search failed: {e}")  # non-fatal
 
-        self._json_response(200, {"results": results[:20], "mode": "semantic"})
+        self._json_response(200, {"results": results, "mode": "semantic"})
 
     def _search_messages_like(self, user, query):
         """Fallback text search using SQL LIKE when embedding model is unavailable."""
@@ -2529,7 +2547,7 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             payload["presence_penalty"] = body["presence_penalty"]
         if body.get("max_output_tokens") is not None and body["max_output_tokens"] > 0:
             payload["max_output_tokens"] = body["max_output_tokens"]
-        if body.get("reasoning"):
+        if "reasoning" in body:
             payload["reasoning"] = body["reasoning"]
         # context_length omitted — it's a load-time parameter in LM Studio.
         # Sending it per-request triggers JIT model reloads.
@@ -3218,8 +3236,9 @@ Curated list:"""
         if len(new_insights) < len(old_ids) * 0.3:
             return self._error(502, f"Refinement produced too few insights ({len(new_insights)} vs {len(old_ids)}) — aborted")
 
-        # Replace: mark old as removed, insert new (atomic transaction)
+        # Replace: mark old as removed, insert new in a single transaction
         try:
+            db.execute("BEGIN IMMEDIATE")
             placeholders = ",".join("?" * len(old_ids))
             db.execute(f"UPDATE user_insights SET state='removed' WHERE id IN ({placeholders})", old_ids)
             for ins in new_insights:
@@ -3229,9 +3248,9 @@ Curated list:"""
                        VALUES (?, ?, ?, ?, ?, ?)""",
                     (insight_id, user["id"], ins["content"], ins["category"], now, now),
                 )
-            db.commit()
+            db.execute("COMMIT")
         except Exception as e:
-            db.rollback()
+            db.execute("ROLLBACK")
             log.error(f"Refinement DB write failed: {e}")
             return self._error(500, "refinement failed")
         result = {"dropped": dropped, "merged": merged, "kept": kept, "total": len(new_insights)}
@@ -3390,15 +3409,20 @@ Curated list:"""
             cached = self._file_cache.get(filename)
             if cached and cached[2] == st.st_mtime:
                 raw, gz, etag = cached[0], cached[1], cached[3]
+                cached = True
             else:
-                with open(path, "rb") as f:
-                    raw = f.read()
-                gz = gzip.compress(raw, compresslevel=6)
-                etag = hashlib.md5(raw, usedforsecurity=False).hexdigest()
+                cached = False
+        if not cached:
+            with open(path, "rb") as f:
+                raw = f.read()
+            gz = gzip.compress(raw, compresslevel=6)
+            etag = hashlib.md5(raw, usedforsecurity=False).hexdigest()
+            with self._file_cache_lock:
                 self._file_cache[filename] = (raw, gz, st.st_mtime, etag)
         # ETag: return 304 if client has current version
         if self.headers.get("If-None-Match") == etag:
             self.send_response(304)
+            self._send_security_headers()
             self.end_headers()
             return
         accept_enc = self.headers.get("Accept-Encoding", "")
@@ -3495,8 +3519,8 @@ def _write_pid():
     try:
         with open(_pid_file(), "w") as f:
             f.write(str(os.getpid()))
-    except OSError:
-        pass
+    except OSError as e:
+        log.warning(f"Could not write PID file: {e}")
 
 def _remove_pid():
     """Remove PID file on shutdown."""

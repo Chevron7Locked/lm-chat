@@ -32,7 +32,7 @@
             <div class="auth-card">
                 <h2 id="auth-title">Sign In</h2>
                 <div id="auth-sub" class="auth-sub">Sign in to continue</div>
-                <div id="auth-err"></div>
+                <div id="auth-err" role="alert" aria-atomic="true"></div>
                 <div class="sg">
                     <label for="a-user">Username</label
                     ><input type="text" id="a-user" autocomplete="username" />
@@ -170,6 +170,8 @@
                     role="button"
                     tabindex="0"
                     aria-haspopup="listbox"
+                    aria-expanded="false"
+                    aria-controls="top-model-dd"
                     aria-label="Select model"
                 >
                     <span id="model-sel-label"></span>
@@ -192,6 +194,9 @@
                             id="export-btn"
                             title="Export chat"
                             aria-label="Export chat"
+                            aria-haspopup="menu"
+                            aria-expanded="false"
+                            aria-controls="export-dd"
                         >
                             <svg
                                 viewBox="0 0 24 24"
@@ -322,6 +327,8 @@
                         tabindex="0"
                         aria-label="User menu"
                         aria-haspopup="menu"
+                        aria-expanded="false"
+                        aria-controls="user-dd"
                     >
                         <div id="user-dd" role="menu">
                             <div class="user-dd-name" id="user-dd-name" role="none"></div>
@@ -392,6 +399,8 @@
                         title="Switch model"
                         aria-label="Switch model"
                         aria-haspopup="listbox"
+                        aria-expanded="false"
+                        aria-controls="model-dd"
                     >
                         <div id="model-dd"></div>
                     </div>
@@ -507,106 +516,6 @@
                     </div>
                 </div>
                 <div id="model-config-info" class="sg mci"></div>
-                <div class="settings-divider"></div>
-                <div class="sg sg-row">
-                    <div class="sg-half">
-                        <label for="s-temp">Temperature</label
-                        ><input
-                            type="number"
-                            id="s-temp"
-                            min="0"
-                            max="2"
-                            step="0.1"
-                            value="0.7"
-                        />
-                    </div>
-                    <div class="sg-half">
-                        <label for="s-ctx">Context Length</label
-                        ><input
-                            type="number"
-                            id="s-ctx"
-                            min="1024"
-                            max="262144"
-                            step="1024"
-                            value="16000"
-                            disabled
-                            title="Set in LM Studio when loading the model"
-                        />
-                    </div>
-                </div>
-                <div class="sg sg-row">
-                    <div class="sg-half">
-                        <label for="s-top-p">Top P</label
-                        ><input
-                            type="number"
-                            id="s-top-p"
-                            min="0"
-                            max="1"
-                            step="0.05"
-                            value="0.95"
-                        />
-                    </div>
-                    <div class="sg-half">
-                        <label for="s-top-k">Top K</label
-                        ><input
-                            type="number"
-                            id="s-top-k"
-                            min="0"
-                            max="500"
-                            step="1"
-                            value="40"
-                        />
-                    </div>
-                </div>
-                <div class="sg sg-row">
-                    <div class="sg-half">
-                        <label for="s-min-p">Min P</label
-                        ><input
-                            type="number"
-                            id="s-min-p"
-                            min="0"
-                            max="1"
-                            step="0.01"
-                            value="0.05"
-                        />
-                    </div>
-                    <div class="sg-half">
-                        <label for="s-repeat-pen">Repeat Penalty</label
-                        ><input
-                            type="number"
-                            id="s-repeat-pen"
-                            min="0"
-                            max="3"
-                            step="0.05"
-                            value="1.0"
-                        />
-                    </div>
-                </div>
-                <div class="sg">
-                    <div class="sg-half">
-                        <label for="s-presence-pen">Presence Penalty</label
-                        ><input
-                            type="number"
-                            id="s-presence-pen"
-                            min="0"
-                            max="2"
-                            step="0.1"
-                            value="1"
-                        />
-                    </div>
-                </div>
-                <div class="sg">
-                    <label for="s-max-tokens">Max Output Tokens</label
-                    ><input
-                        type="number"
-                        id="s-max-tokens"
-                        min="-1"
-                        max="131072"
-                        step="256"
-                        value="-1"
-                    />
-                    <div class="sg-hint">-1 = unlimited</div>
-                </div>
                 <div class="sg settings-divider-pad">
                     <div class="settings-toggle-row">
                         <div>
