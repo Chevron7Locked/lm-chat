@@ -4514,14 +4514,14 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const gMaxTok  = $("s-max-tokens")?.value  || "-1";
                 // Detect which preset the current system_prompt matches (for dropdown state)
                 const currentSys = s.system_prompt || "";
+                // Default to general when no per-chat override — that's the app default
                 const detectedPreset = currentSys
                     ? (Object.entries(PRESETS).find(([,v]) => v === currentSys)?.[0] || "custom")
-                    : "";
+                    : "general";
                 body.innerHTML = `
                     <div class="sg">
                         <label>System Prompt</label>
                         <select id="cs-preset">
-                            <option value="">(default — use global setting)</option>
                             <option value="general" ${detectedPreset==="general"?"selected":""}>General Assistant</option>
                             <option value="coder" ${detectedPreset==="coder"?"selected":""}>Coding Agent</option>
                             <option value="creative" ${detectedPreset==="creative"?"selected":""}>Creative Writing</option>
@@ -4530,8 +4530,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             <option value="architect" ${detectedPreset==="architect"?"selected":""}>Systems Architect</option>
                             <option value="custom" ${detectedPreset==="custom"?"selected":""}>Custom</option>
                         </select>
-                        <textarea id="cs-sys" rows="4" placeholder="Custom system prompt… supports {{current_date}}, {{day_of_week}}, {{current_time}}, {{model}}"></textarea>
-                        <div class="var-help" style="margin-top:var(--sp-2)">Variables: <code>{{current_date}}</code> <code>{{day_of_week}}</code> <code>{{current_time}}</code> <code>{{model}}</code> — auto-replaced on send</div>
+                        <textarea id="cs-sys" rows="4" placeholder="Custom system prompt…"></textarea>
+                        <div class="var-help">{{current_date}} {{day_of_week}} {{current_time}} {{model}} — replaced on send</div>
                     </div>
                     <div class="sg sg-row">
                         <div class="sg-half"><label>Temperature</label>
@@ -4556,7 +4556,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     </div>
                     <div class="sg"><label>Reasoning</label>
                         <select id="cs-reasoning">
-                            <option value="">(default)</option>
+                            <option value="" ${!s.reasoning?"selected":""}>Same as global (${$("s-reasoning")?.value || "off"})</option>
                             <option value="off" ${s.reasoning==="off"?"selected":""}>Off</option>
                             <option value="medium" ${s.reasoning==="medium"?"selected":""}>Medium</option>
                             <option value="high" ${s.reasoning==="high"?"selected":""}>High</option>
@@ -4579,11 +4579,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 if (presetSel) {
                     presetSel.addEventListener("change", () => {
                         const v = presetSel.value;
-                        if (v === "" ) {
-                            ta.value = "";
-                            saveChatSetting("system_prompt", null);
-                        } else if (v === "custom") {
-                            // leave textarea as-is, just mark custom
+                        if (v === "custom") {
+                            // leave textarea as-is
                         } else if (PRESETS[v]) {
                             ta.value = PRESETS[v];
                             saveChatSetting("system_prompt", PRESETS[v]);

@@ -3269,6 +3269,19 @@
         flex: 1;
         overflow-y: auto;
         padding: var(--sp-6);
+        /* Scale inputs down — panel is narrow */
+        & .sg input,
+        & .sg textarea,
+        & .sg select {
+            font-size: var(--text-sm);
+            padding: var(--sp-3) var(--sp-4);
+        }
+        & .sg textarea {
+            height: 6rem;
+        }
+        & #cs-preset {
+            margin-bottom: var(--sp-2);
+        }
     }
     #right-panel-overlay {
         display: none;
