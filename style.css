@@ -437,7 +437,7 @@
         padding-top: max(var(--sp-5), var(--sat));
         border-bottom: 1px solid var(--border);
         position: relative;
-        z-index: 201;
+        z-index: 203;
     }
     #topbar > img {
         width: 1.5rem;
@@ -3212,7 +3212,7 @@
         height: 100%;
         background: var(--sidebar);
         border-left: 1px solid var(--border);
-        z-index: 200;
+        z-index: 202;
         display: flex;
         flex-direction: column;
         transform: translateX(100%);
@@ -3265,7 +3265,7 @@
         position: fixed;
         inset: 0;
         background: rgba(0, 0, 0, 0.3);
-        z-index: 199;
+        z-index: 201;
     }
     #right-panel-overlay.open {
         display: block;
