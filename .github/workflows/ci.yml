@@ -122,7 +122,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Hadolint — Dockerfile lint
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: Dockerfile
           format: sarif
