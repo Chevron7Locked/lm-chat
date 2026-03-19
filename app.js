@@ -4514,24 +4514,24 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     </div>
                     <div class="sg sg-row">
                         <div class="sg-half"><label>Temperature</label>
-                            <input type="number" id="cs-temp" min="0" max="2" step="0.1" placeholder="${gTemp||"model default"}" value="${s.temperature ?? ""}"></div>
+                            <input type="number" id="cs-temp" min="0" max="2" step="0.1" placeholder="${gTemp||"0–2"}" value="${s.temperature ?? ""}"></div>
                         <div class="sg-half"><label>Top P</label>
-                            <input type="number" id="cs-top-p" min="0" max="1" step="0.05" placeholder="${gTopP||"model default"}" value="${s.top_p ?? ""}"></div>
+                            <input type="number" id="cs-top-p" min="0" max="1" step="0.05" placeholder="${gTopP||"0–1"}" value="${s.top_p ?? ""}"></div>
                     </div>
                     <div class="sg sg-row">
                         <div class="sg-half"><label>Top K</label>
-                            <input type="number" id="cs-top-k" min="0" max="500" step="1" placeholder="${gTopK||"model default"}" value="${s.top_k ?? ""}"></div>
+                            <input type="number" id="cs-top-k" min="0" max="500" step="1" placeholder="${gTopK||"e.g. 40"}" value="${s.top_k ?? ""}"></div>
                         <div class="sg-half"><label>Min P</label>
-                            <input type="number" id="cs-min-p" min="0" max="1" step="0.01" placeholder="${gMinP||"model default"}" value="${s.min_p ?? ""}"></div>
+                            <input type="number" id="cs-min-p" min="0" max="1" step="0.01" placeholder="${gMinP||"0–1"}" value="${s.min_p ?? ""}"></div>
                     </div>
                     <div class="sg sg-row">
                         <div class="sg-half"><label>Repeat Penalty</label>
-                            <input type="number" id="cs-repeat-pen" min="0" max="3" step="0.05" placeholder="${gRepPen||"model default"}" value="${s.repeat_penalty ?? ""}"></div>
+                            <input type="number" id="cs-repeat-pen" min="0" max="3" step="0.05" placeholder="${gRepPen||"e.g. 1.1"}" value="${s.repeat_penalty ?? ""}"></div>
                         <div class="sg-half"><label>Presence Penalty</label>
-                            <input type="number" id="cs-presence-pen" min="0" max="2" step="0.1" placeholder="${gPresPen||"model default"}" value="${s.presence_penalty ?? ""}"></div>
+                            <input type="number" id="cs-presence-pen" min="0" max="2" step="0.1" placeholder="${gPresPen||"e.g. 0"}" value="${s.presence_penalty ?? ""}"></div>
                     </div>
                     <div class="sg"><label>Max Output Tokens</label>
-                        <input type="number" id="cs-max-tokens" min="-1" max="32768" step="256" placeholder="${gMaxTok||"model default"}" value="${s.max_output_tokens ?? ""}">
+                        <input type="number" id="cs-max-tokens" min="-1" max="32768" step="256" placeholder="${gMaxTok||"e.g. 2048"}" value="${s.max_output_tokens ?? ""}">
                     </div>
                     <div class="sg"><label>Reasoning</label>
                         <select id="cs-reasoning">

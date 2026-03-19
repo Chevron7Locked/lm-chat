@@ -436,6 +436,8 @@
         gap: var(--sp-3);
         padding-top: max(var(--sp-5), var(--sat));
         border-bottom: 1px solid var(--border);
+        position: relative;
+        z-index: 201;
     }
     #topbar > img {
         width: 1.5rem;
@@ -3233,6 +3235,7 @@
         align-items: center;
         justify-content: space-between;
         padding: var(--sp-6) var(--sp-7);
+        padding-top: max(var(--sp-6), var(--sat));
         border-bottom: 1px solid var(--border);
         font-size: var(--text-sm);
         font-weight: 600;
@@ -3242,6 +3245,7 @@
         flex: 1;
         overflow-y: auto;
         padding: var(--sp-6);
+        padding-bottom: max(var(--sp-6), var(--sab));
         /* Scale inputs down — panel is narrow */
         & .sg input,
         & .sg textarea,
