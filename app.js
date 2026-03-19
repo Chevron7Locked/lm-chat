@@ -2963,9 +2963,12 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const maxTok = cs.max_output_tokens != null ? cs.max_output_tokens : parseInt($("s-max-tokens").value);
                 if (!isNaN(maxTok) && maxTok > 0)
                     body.max_output_tokens = maxTok;
-                // Reasoning: per-chat override > global select
-                const reasoning = cs.reasoning || $("s-reasoning").value;
-                if (reasoning !== "off") body.reasoning = reasoning;
+                // Reasoning: per-chat override > global select.
+                // Always send explicitly — omitting lets LM Studio use the model's
+                // default, which may be "on" for models with built-in reasoning,
+                // burning output tokens that would otherwise be needed for tool call JSON.
+                const reasoning = cs.reasoning || $("s-reasoning").value || "off";
+                body.reasoning = reasoning;
                 // context_length is a load-time parameter — sending it per-request
                 // triggers JIT model reloads in LM Studio. Read-only from instance config.
                 // Apply per-chat SC/CoVe overrides when set via the chat settings panel.
