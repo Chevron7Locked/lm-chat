@@ -1113,15 +1113,6 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
             function syncModelSettings() {
                 const m = cachedModels.find((x) => x.id === modelSel.value);
                 if (!m) return;
-                // Auto-enable reasoning for known reasoning models
-                const family = detectModelFamily(m.id);
-                if (
-                    ["qwen", "deepseek"].includes(family) &&
-                    /\br1\b|\bqwq\b/i.test(m.id)
-                ) {
-                    const el = $("s-reasoning");
-                    if (el && el.value === "off") el.value = "medium";
-                }
                 // Show instance config (read-only info from LM Studio)
                 const cfg = m.instance_config || {};
                 const el = $("model-config-info");
@@ -2929,9 +2920,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 if (cs.top_p != null && !isNaN(cs.top_p)) body.top_p = cs.top_p;
                 if (cs.top_k != null && !isNaN(cs.top_k)) body.top_k = cs.top_k;
                 if (cs.min_p != null && !isNaN(cs.min_p)) body.min_p = cs.min_p;
-                if (cs.repeat_penalty != null && !isNaN(cs.repeat_penalty) && cs.repeat_penalty !== 1.0)
+                if (cs.repeat_penalty != null && !isNaN(cs.repeat_penalty))
                     body.repeat_penalty = cs.repeat_penalty;
-                if (cs.presence_penalty != null && !isNaN(cs.presence_penalty) && cs.presence_penalty > 0)
+                if (cs.presence_penalty != null && !isNaN(cs.presence_penalty))
                     body.presence_penalty = cs.presence_penalty;
                 if (cs.max_output_tokens != null && !isNaN(cs.max_output_tokens) && cs.max_output_tokens > 0)
                     body.max_output_tokens = cs.max_output_tokens;
@@ -4589,7 +4580,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     });
                     if (type !== "textarea") return;
                     el.addEventListener("input", () => {
-                        if (presetSel) presetSel.value = el.value ? "custom" : "";
+                        if (presetSel) presetSel.value = el.value ? "custom" : "general";
                         saveChatSetting(key, transform(el.value));
                     });
                 });

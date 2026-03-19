@@ -2547,7 +2547,7 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             payload["presence_penalty"] = body["presence_penalty"]
         if body.get("max_output_tokens") is not None and body["max_output_tokens"] > 0:
             payload["max_output_tokens"] = body["max_output_tokens"]
-        if "reasoning" in body:
+        if body.get("reasoning"):
             payload["reasoning"] = body["reasoning"]
         # context_length omitted — it's a load-time parameter in LM Studio.
         # Sending it per-request triggers JIT model reloads.
