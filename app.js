@@ -834,7 +834,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
             let incognitoHistory = [];
 
             // --- Session stats (persisted in localStorage) ---
-            // GPT-5.2 pricing: $1.75/1M input, $14/1M output (as of March 2026)
+            // Cloud baseline pricing (GPT-5.2): $1.75/1M input, $14/1M output (as of March 2026)
             const GPT5_INPUT_PER_TOKEN = 1.75 / 1e6,
                 GPT5_OUTPUT_PER_TOKEN = 14 / 1e6;
             function loadSessionStats() {
@@ -1057,12 +1057,16 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
 
             // --- Connection status ---
             const connDot = document.querySelector("#conn-status .status-dot");
+            const connLabel = $("conn-label");
             function setConn(state, text) {
                 connDot.className = "status-dot " + state;
                 $("conn-status").title =
                     state === "green" ? "Connected — " + text
                     : state === "yellow" ? "Connecting..."
                     : "Disconnected";
+                if (connLabel) {
+                    connLabel.textContent = state === "red" ? "LM Studio offline" : "";
+                }
                 const sc = $("ss-conn");
                 if (sc) {
                     if (state === "green")

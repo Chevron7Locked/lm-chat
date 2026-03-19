@@ -1260,6 +1260,11 @@
         padding: var(--sp-1) var(--sp-3);
         border-radius: var(--r-md);
     }
+    #conn-label {
+        font-size: var(--text-xs);
+        color: var(--faint);
+        white-space: nowrap;
+    }
     .status-dot {
         width: 7px;
         height: 7px;
@@ -2316,6 +2321,7 @@
         /* Welcome screen — centered, compact */
         .welcome {
             padding: var(--sp-8) var(--sp-8) var(--sp-5);
+            flex: none;
         }
         .welcome img {
             width: 3rem !important;
@@ -2335,17 +2341,16 @@
             display: none;
         }
         #starters {
-            display: flex;
-            flex-wrap: wrap;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
             gap: var(--sp-2);
             max-width: 100%;
             padding: 0 var(--sp-6) var(--sp-2);
             margin: 0 auto;
-            justify-content: center;
         }
         .starter-card {
             font-size: var(--text-xs);
-            padding: 0.4375rem var(--sp-6);
+            padding: 0.4375rem var(--sp-4);
             border-radius: var(--r-full);
             gap: var(--sp-2);
             justify-content: center;
