@@ -3685,7 +3685,9 @@ if __name__ == "__main__":
 
     def shutdown_handler(signum, frame):
         log.info("Shutting down gracefully...")
-        server.shutdown()
+        # Set the internal flag directly — server.shutdown() deadlocks when
+        # called from a signal handler in the same thread as serve_forever().
+        server._BaseServer__shutdown_request = True
 
     signal.signal(signal.SIGTERM, shutdown_handler)
     signal.signal(signal.SIGINT, shutdown_handler)
