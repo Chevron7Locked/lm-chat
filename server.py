@@ -54,11 +54,6 @@ TITLE_MAX_LENGTH = 500
 MODEL_MAX_LENGTH = 200
 
 DEFAULT_INTEGRATIONS = [
-    "mcp/brave-search",
-    "mcp/memory",
-    "mcp/sequential-thinking",
-    "mcp/context7",
-    "mcp/paper-search",
 ]
 
 # --- Structured Logging with Rotation ---
@@ -793,6 +788,31 @@ class Handler(BaseHTTPRequestHandler):
         db.commit()
         self._json_response(200, {"ok": True})
 
+    def _list_mcp_servers(self):
+        """Return MCP server names from ~/.lmstudio/mcp.json as integration IDs.
+        Only exposes server names — no keys, commands, or env vars.
+        """
+        mcp_path = os.environ.get(
+            "LMSTUDIO_MCP_JSON",
+            os.path.join(os.path.expanduser("~"), ".lmstudio", "mcp.json")
+        )
+        try:
+            with open(mcp_path, "r") as f:
+                data = json.load(f)
+            servers = data.get("mcpServers", {})
+            result = []
+            for name in servers:
+                # Integration ID format: mcp/{name}
+                # Display name: capitalize words, replace hyphens/underscores with spaces
+                display = name.replace("-", " ").replace("_", " ").title()
+                result.append({"id": f"mcp/{name}", "name": display})
+            self._json_response(200, {"servers": result})
+        except FileNotFoundError:
+            self._json_response(200, {"servers": []})
+        except Exception as e:
+            log.warning(f"Could not read mcp.json: {e}")
+            self._json_response(200, {"servers": []})
+
     def _list_pins(self):
         user = self._require_auth()
         if not user:
@@ -976,6 +996,7 @@ class Handler(BaseHTTPRequestHandler):
         (re.compile(r'^/api/chats/(?P<id>[^/]+)/settings$'),                   lambda s,m,b: s._get_chat_settings(m.group("id"))),
         (re.compile(r'^/api/pins$'),                                           lambda s,m,b: s._list_pins()),
         (re.compile(r'^/api/chats/(?P<id>[^/]+)/pins$'),                       lambda s,m,b: s._get_chat_pins(m.group("id"))),
+        (re.compile(r'^/api/mcp/servers$'),                                    lambda s,m,b: s._list_mcp_servers()),
     ]
 
     _POST_ROUTES = [
@@ -1435,7 +1456,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- User Settings API (H4: server-side secrets) ---
 
-    ALLOWED_SETTINGS = {"lm_apikey", "lm_url", "remote_mcps"}
+    ALLOWED_SETTINGS = {"lm_apikey", "remote_mcps"}
 
     def _get_settings(self):
         user = self._require_auth()
@@ -1666,9 +1687,6 @@ class Handler(BaseHTTPRequestHandler):
 
                     if event_type != "message.delta" and not is_incognito:
                         log.debug(f"SSE {event_type}")
-                elif stripped and lines_seen <= 5 and not is_incognito:
-                    # Log first few unrecognised lines to diagnose unexpected LM Studio responses
-                    log.warning(f"SSE unexpected line: {stripped[:200]!r}")
 
                     if event_type == "message.delta":
                         content_parts.append(data.get("content") or "")
@@ -1706,6 +1724,9 @@ class Handler(BaseHTTPRequestHandler):
                             log.debug(f"RESP content: [{len(''.join(content_parts))} chars]")
                             if tool_calls:
                                 log.debug(f"RESP tools: {len(tool_calls)} calls")
+                elif stripped and lines_seen <= 5 and not is_incognito:
+                    # Log first few unrecognised lines to diagnose unexpected LM Studio responses
+                    log.warning(f"SSE unexpected line: {stripped[:200]!r}")
         except (BrokenPipeError, ConnectionResetError):
             log.debug("Stream aborted by client")
         except TimeoutError:
@@ -1850,32 +1871,78 @@ class Handler(BaseHTTPRequestHandler):
             method="POST",
         )
 
-        try:
-            resp = urllib.request.urlopen(req, timeout=300)
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode("utf-8", errors="replace")
+        # Open LM Studio connection in a background thread so the main thread can
+        # send SSE keep-alive comments every 10 s.  Without this, the 30-second
+        # Handler.timeout fires on the idle client socket while LM Studio spends
+        # 18-24 s connecting its MCP integrations before sending the first byte.
+        _result = [None, None]  # [resp, exc]
+        _ready  = threading.Event()
+
+        def _do_open():
             try:
-                err_detail = json.loads(err_body).get("error", {}).get("message", err_body)
-            except Exception:
-                err_detail = err_body
-            err_msg = json.dumps({"type": "error", "error": {"message": f"LM Studio error {e.code}: {err_detail}"}})
+                _result[0] = urllib.request.urlopen(req, timeout=300)
+            except Exception as exc:
+                _result[1] = exc
+            _ready.set()
+
+        threading.Thread(target=_do_open, daemon=True).start()
+
+        while not _ready.wait(timeout=10):
             try:
-                self.wfile.write(f"data: {err_msg}\n\n".encode())
-                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.write(b": keep-alive\n\n")
                 self.wfile.flush()
             except Exception:
-                pass
-            return
-        except Exception as e:
-            log.error(f"chat stream: {e}")
-            err_msg = json.dumps({"type": "error", "error": {"message": "upstream service unavailable"}})
-            try:
-                self.wfile.write(f"data: {err_msg}\n\n".encode())
-                self.wfile.write(b"data: [DONE]\n\n")
-                self.wfile.flush()
-            except Exception:
-                pass
-            return
+                return  # client disconnected while waiting
+
+        exc = _result[1]
+        if exc is not None:
+            if isinstance(exc, urllib.error.HTTPError):
+                err_body = exc.read().decode("utf-8", errors="replace")
+                try:
+                    err_detail = json.loads(err_body).get("error", {}).get("message", err_body)
+                except Exception:
+                    err_detail = err_body
+                # Auto-retry without reasoning if the model doesn't support it (MLX models)
+                if exc.code == 400 and "does not support reasoning" in err_detail and "reasoning" in payload:
+                    payload.pop("reasoning", None)
+                    req2 = urllib.request.Request(
+                        f"{LMSTUDIO}/api/v1/chat",
+                        data=json.dumps(payload).encode(),
+                        headers=headers,
+                        method="POST",
+                    )
+                    _result2 = [None, None]
+                    _ready2  = threading.Event()
+                    def _do_open2():
+                        try:
+                            _result2[0] = urllib.request.urlopen(req2, timeout=300)
+                        except Exception as exc2:
+                            _result2[1] = exc2
+                        _ready2.set()
+                    threading.Thread(target=_do_open2, daemon=True).start()
+                    _ready2.wait(timeout=300)
+                    if _result2[1] is None and _result2[0] is not None:
+                        exc = None
+                        _result[0] = _result2[0]
+                    else:
+                        exc = _result2[1] or Exception("retry failed")
+                if exc is not None:
+                    err_msg = json.dumps({"type": "error", "error": {"message": f"LM Studio error {str(exc.code)+': ' if hasattr(exc, 'code') else ''}{err_detail}"}})
+                else:
+                    exc = None  # retry succeeded — fall through to normal streaming below
+            else:
+                log.error(f"chat stream: {exc}")
+                err_msg = json.dumps({"type": "error", "error": {"message": "upstream service unavailable"}})
+            if exc is not None:
+                try:
+                    self.wfile.write(f"event: error\ndata: {err_msg}\n\n".encode())
+                    self.wfile.write(b"data: [DONE]\n\n")
+                    self.wfile.flush()
+                except Exception:
+                    pass
+                return
+
+        resp = _result[0]
 
         try:
             content_parts, reasoning_parts, tool_calls, response_id, stream_usage, stream_complete = \
@@ -3489,8 +3556,8 @@ Curated list:"""
 
 
 def _pid_file():
-    """Return PID file path next to the database."""
-    return os.path.join(os.path.dirname(DB_PATH) or ".", ".lm_chat.pid")
+    """Return PID file path next to the database, scoped by port."""
+    return os.path.join(os.path.dirname(DB_PATH) or ".", f".lm_chat_{PORT}.pid")
 
 def _kill_stale_server():
     """If a previous lm-chat is still on our port, kill it."""

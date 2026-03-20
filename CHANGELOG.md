@@ -3,6 +3,34 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.11] — 2026-03-20
+
+### Added
+- `CHECKLIST.md` — authoritative living list of every feature, API integration point, and known gap
+- SC/CoVe toggles added to global Settings → Chat tab (previously per-chat only); global defaults fall back from localStorage when no per-chat override is set
+- Per-chat settings panel restructured: system prompt + temperature always visible; advanced settings collapsed under expander
+- MCP servers now default to **on** — opt-out instead of opt-in; configured servers are active without manual toggling
+- `LMSTUDIO_MCP_JSON` env var documented in README and Configuration table
+- Accessibility: `aria-label` on all toggle checkboxes, focus trap + focus management for keyboard shortcuts modal, right panel `role="dialog"` with `aria-hidden` toggling and focus restore
+
+### Fixed
+- SSE upstream error delivery: `TypeError` (int + str) in error message formatting silently swallowed all non-400 upstream errors — 500s from LM Studio now correctly surface to the client
+- PID file scoped by port (`_pid_file()` returns `.lm_chat_{PORT}.pid`) — prevents multi-instance cross-kills when dev and production servers share the same DB directory
+- Slash command menu renders as overlay (absolute positioning) instead of pushing chat content up
+- Auth logo glow reduced from 0.14 to 0.08 opacity (within CLAUDE.md's 0.04–0.12 cap)
+- Auth/send button shadows normalized to `--shadow-md` / `--shadow-lg` tokens (no colored shadows)
+- `msg-row` spacing uses `--sp-3` token instead of hardcoded `6px`
+- Label `for="s-preset"` corrected from "System Prompt" to "Preset"
+- Service worker: removed no-op `fetch` event handler (Chrome navigation overhead warning)
+
+### Changed
+- Border radius tokens bumped site-wide for rounder feel: `--r-sm` 0.375→0.5rem, `--r-md` 0.625→0.75rem, `--r-lg` 1→1.25rem, `--r-xl` 1.25→1.5rem
+- Input box, chat search: full pill radius (`--r-full`)
+- Sidebar chat items: `--r-lg` radius; active state uses darker `--surface` background
+- Send button: 2.25rem → 1.75rem for breathing room inside pill input
+- Spacing/subtext consistency improvements across settings panels
+- README updated: architecture line counts, MCP behavior, Quality Modes section
+
 ## [0.4.2] — 2026-03-18
 
 ### Fixed

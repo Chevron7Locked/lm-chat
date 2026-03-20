@@ -92,8 +92,9 @@ Most third-party UIs talk to LM Studio through `/v1/chat/completions` — the Op
 | MCP tool execution | LM Studio runs your MCP servers | Not available |
 | Response ID chaining | Server-managed history | Client resends everything |
 | Reasoning events | Real SSE events | Parse `<think>` tags yourself |
-| Capability detection | Vision, tool_use flags | Not available |
-| Model context config | Exposed | Not available |
+| Capability detection | Vision, tool_use flags per model | Not available |
+| Loaded instance routing | Use instance alias, avoid JIT reload | Not available |
+| Model metadata | Context window, quantization, format | Basic only |
 
 **Response ID chaining** is the big one. LM Studio manages the full conversation history server-side. lm-chat sends only the new message + a reference to the previous response. No token waste re-sending the entire history every turn.
 
@@ -106,33 +107,45 @@ LM Studio's desktop app uses all of this natively. lm-chat is the first web clie
 ### Chat
 
 - **SSE streaming** with live token stats (tokens/sec, time-to-first-token)
-- **MCP tool execution** — uses whatever MCP servers you've configured in LM Studio (Brave Search, Memory, Sequential Thinking, etc.), plus any remote MCP endpoint. Supports multi-step agentic loops — the model can call tools, evaluate results, and call more tools autonomously until it has what it needs
-- **Native reasoning display** — thinking blocks from reasoning models (DeepSeek-R1, QwQ, etc.) in collapsible sections, with configurable reasoning depth (Off / Low / Medium / High)
+- **MCP tool execution** — all MCP servers configured in `~/.lmstudio/mcp.json` show up automatically and are on by default. Toggle per-conversation. Supports multi-step agentic loops
+- **Native reasoning display** — thinking blocks from reasoning models (DeepSeek-R1, QwQ, Qwen3, etc.) in collapsible sections, with configurable depth (Off / Low / Medium / High)
 - **Stop, edit, resend, regenerate** — full conversation control
 - **Conversation forking** — branch from any message to explore alternatives
 - **Auto-generated titles** via LLM
 - **Suggested follow-ups** — optional follow-up questions after each response
+- **Response feedback** — upvote / downvote individual responses; signals feed back into memory scoring
 
 ![MCP tool call](docs/images/02-mcp-tool-call-desktop.png)
 *Live MCP tool call with streaming arguments — desktop*
+
+### Quality Modes
+
+Two opt-in inference modes that improve response quality at the cost of extra LLM calls. Toggle globally in Settings or per-conversation in the chat settings panel.
+
+**Self-Consistency** — Generates 3 independent responses, then synthesizes the most consistent answer. Reduces noise on reasoning, factual, and technical questions. Skips synthesis when the first two responses are nearly identical (>80% token overlap). ~4× token cost.
+
+**Chain of Verification** — Four-step pipeline: draft → extract verification questions → answer each question independently → synthesize a corrected response. Reduces hallucinations on factual claims by 50–70%. Based on [Dhuliawala et al., 2023](https://arxiv.org/abs/2309.11495). ~4× token cost.
+
+Both can be enabled simultaneously: CoVe runs first, then SC synthesizes across CoVe's output.
 
 ### Conversation Organization
 
 Pin your most-used chats, group related conversations into folders, and find anything instantly.
 
 - **Pinned chats** — star any conversation to keep it at the top of the sidebar
-- **Folders** — create named folders to organize chats by project, topic, or whatever makes sense to you (Code, Recipes, Work, etc.)
-- **Collapsible sections** — folders collapse/expand with a click, keeping the sidebar clean
+- **Pinned messages** — pin individual assistant responses; they survive `/compact` and are searchable globally
+- **Folders** — create named folders to organize chats by project, topic, or whatever makes sense
+- **Collapsible sections** — folders collapse/expand with a click
 - **Recent section** — everything else, sorted by last activity
-- **Text search** — type in the search bar to filter chats by title instantly
-- **Semantic search** — press Enter to search by meaning across all messages (requires an embedding model in LM Studio)
+- **Text search** — filter chats by title instantly
+- **Semantic search** — press Enter to search by meaning across all messages (powered by the embedding model in LM Studio — `nomic-embed-text-v1.5` is included with every LM Studio install)
 
 ![Sidebar organization](docs/images/03-sidebar-organization-desktop.png)
 *Sidebar with pinned chats, folders, and recent conversations — desktop*
 
 ### Agent Modes
 
-Six system prompt presets, each tuned for a specific task. Switch from the settings panel dropdown or activate via slash commands:
+Six system prompt presets, each tuned for a specific task. Switch from the settings panel or activate via slash commands:
 
 | Command | Mode | Temperature |
 |---------|------|------------|
@@ -142,7 +155,7 @@ Six system prompt presets, each tuned for a specific task. Switch from the setti
 | `/analyze` | Strategic Analyst — framework-driven analysis | 0.3 |
 | `/architect` | Systems Architect — technical design | 0.2 |
 
-Or choose **Custom** to write your own system prompt with template variables (`{{current_date}}`, `{{model}}`, `{{memories}}`, etc.).
+Or choose **Custom** to write your own system prompt. Template variables are replaced on send: `{{current_date}}`, `{{day_of_week}}`, `{{current_time}}`, `{{model}}`, `{{memories}}`.
 
 ![Slash commands](docs/images/04-slash-command-menu-desktop.png)
 *Slash command autocomplete — desktop*
@@ -152,22 +165,23 @@ Or choose **Custom** to write your own system prompt with template variables (`{
 Share any conversation as a read-only page. One click generates a unique URL — no login required to view.
 
 - **Full markdown rendering** — code blocks, formatting, and structure preserved
-- **Standalone pages** — no JavaScript required, works anywhere
-- **Strict CSP headers** — shared pages are sandboxed (no scripts, no framing, no external resources)
+- **Standalone pages** — minimal JavaScript, works anywhere
+- **Strict CSP headers** — shared pages are sandboxed
 - **Revocable** — delete the share anytime from the chat menu
 
 ![Share page](docs/images/05-share-page-desktop.png)
-*Shared conversation — read-only page with dark theme*
+*Shared conversation — read-only page*
 
 ### Adaptive Memory
 
 Your context follows you — across conversations, across model swaps. lm-chat builds a profile of your preferences, projects, skills, and opinions without you lifting a finger.
 
-- **Auto-distillation** — insights extracted from conversations without asking
-- **Cognitive decay** — stale memories fade naturally (freshness × usage scoring)
-- **Category-weighted injection** — identity stays, trivia drifts
-- **Full user control** — view, edit, delete, toggle on/off
-- **Zero external dependencies** — SQLite-backed, no vector store required
+- **Auto-distillation** — insights extracted from conversations in the background
+- **Bayesian scoring** — feedback on responses propagates back to the memory insights that shaped them
+- **Cognitive decay** — stale memories fade naturally (freshness × usage × feedback scoring)
+- **Category weighting** — identity and skill stay; session-specific details drift
+- **Full user control** — view, edit, delete, toggle on/off, refine (LLM-based dedup/merge)
+- **Zero external dependencies** — SQLite-backed, no vector store
 
 ![Memory panel](docs/images/06-memory-panel-desktop.png)
 *Memory panel — categorized insights with decay indicators*
@@ -175,44 +189,54 @@ Your context follows you — across conversations, across model swaps. lm-chat b
 ### Context Management
 
 - **Context gauge** — live visualization of context window usage, click to compact
-- **`/compact`** — LLM-summarized context when you need to free up space
-- **Instruction sandwich** — core instructions reinforced at end of system prompt for better adherence with local LLMs (they have recency bias — exploit it)
+- **`/compact`** — LLM-summarized context when you need to free up space (pinned messages are preserved)
+- **Instruction sandwich** — core instructions reinforced at end of system prompt for better adherence with local models
 
 ### MCP Tools
 
-Your LM Studio MCP servers just work — configure them in `~/.lmstudio/mcp.json` and they show up automatically through the native API. Toggle per-conversation in the UI.
+Your LM Studio MCP servers show up automatically — configured in `~/.lmstudio/mcp.json`, enabled by default in the UI. Toggle any server per-conversation.
 
-**Remote MCP** — Connect additional MCP endpoints with URL + optional auth. Per-server credentials stored securely server-side.
+**Remote MCP** — Connect additional MCP endpoints by URL with optional auth headers. Per-server credentials are stored server-side and never sent to the browser.
 
 ### Model Management
 
 - **Hot model switching** — topbar dropdown or input pill
-- **Capability badges** — Vision, Tool Use auto-detected per model
-- **Full sampling control** — temperature, top_p, top_k, min_p, repeat_penalty, presence_penalty, max output tokens
+- **Capability badges** — Vision and Tool Use auto-detected per model from LM Studio metadata
+- **Loaded / Idle status** — loaded models shown first, context window from the live instance config
+- **Full sampling control** — temperature, top_p, top_k, min_p, repeat_penalty, max output tokens
 - **Reasoning depth** — Off / Low / Medium / High for supported thinking models
-- **Instance-aware routing** — uses your model's instance identifier (nickname) to avoid JIT reloads
-- **Context config display** — context length (read-only, from loaded instance), eval batch size, parallel slots
-- **Connection monitoring** — live status indicator with 30s health polling
+- **Instance-aware routing** — uses the model's instance identifier (nickname) to avoid JIT reloads on every request
+- **Connection monitoring** — live status indicator with health polling
 
 ![Model switching](docs/images/07-model-switching-desktop.png)
 *Model switching with capability badges — desktop*
 
 ### Settings
 
-Unified full-page settings with tabbed navigation — one place for everything:
+Two settings surfaces:
 
-| Tab | What's there |
-|-----|-------------|
-| **Chat** | System prompt presets, sampling parameters (temperature, top_p, top_k, min_p, repeat_penalty, presence_penalty, max tokens), context length (read-only), reasoning depth, suggested follow-ups, delete all chats |
-| **Memory** | Toggle, view, edit, add, refine, clear |
-| **Starters** | Customize welcome screen shortcuts (icon, title, prompt text) |
-| **Server** | LM Studio URL, API key, loaded models, MCP tool toggles, remote MCP endpoints, debug logging |
+**Full-page settings** (gear icon) — global defaults and account settings:
+
+| Tab | Contents |
+|-----|---------|
+| **Chat** | System prompt presets, reasoning depth, suggested follow-ups, Self-Consistency, Chain of Verification, delete all chats |
+| **Memory** | Toggle, view, edit, add, refine, clear insights |
+| **Starters** | Customize welcome screen shortcuts |
+| **Server** | LM Studio URL, API key, loaded models, MCP toggles, remote MCP endpoints, debug logging |
 | **Profile** | Display name, change password |
-| **Security** | TOTP 2FA setup |
+| **Security** | TOTP 2FA setup and management |
 | **Users** | Admin-only user management and invites |
 
+**Per-chat settings panel** (right panel, per-conversation overrides):
+- System prompt and preset (primary)
+- Temperature (always visible)
+- Advanced settings expander: top_p, top_k, min_p, repeat_penalty, max output tokens, reasoning depth
+- Quality checks: Self-Consistency, Chain of Verification toggles
+
+Per-chat settings override global defaults. Advanced sampling params default to LM Studio's instance config when not set.
+
 ![Settings panel](docs/images/08-settings-panel-desktop.png)
-*Unified settings — tabbed navigation with Chat, Memory, Starters, Server, Profile, Security, Users*
+*Unified settings — tabbed navigation*
 
 ### Multi-User Auth
 
@@ -220,36 +244,34 @@ Optional (`LM_CHAT_AUTH=true`, enabled by default). Not bolted on — designed i
 
 - **Invite-only accounts** with admin management
 - **TOTP 2FA** — QR enrollment, works with any authenticator app (RFC 6238, stdlib-only QR generator)
-- **Per-user API keys** — each user stores their own LM Studio auth token
-- **Per-user chat isolation** — users only see their own conversations
+- **Per-user API keys** — each user stores their own LM Studio auth token server-side
+- **Per-user data isolation** — users only see their own conversations and memories
 - **Scrypt password hashing** with timing-safe comparison
-- **HttpOnly session cookies** with SameSite=Strict
+- **HttpOnly session cookies** with SameSite=Strict and sliding 30-day expiry
 - **CSRF protection** via custom header validation
-- **CSP headers** — strict Content Security Policy on all pages
-- **Rate limiting** on login attempts
+- **Rate limiting** on login (5 attempts per 15 minutes per IP)
+- **Strict Content Security Policy** on all pages
 
 ### Debug Logging
 
-Toggleable in Server Settings. When enabled:
+Toggleable in Server Settings without restart. When enabled:
 
 - Logs all requests, SSE events, memory operations, and tool calls
 - Rotating log files (5 MB × 5 files = 25 MB max)
-- Structured format with timestamps and severity levels
 - View log file sizes directly in the settings panel
 
 ### Everything Else
 
 - **Export** as Markdown or JSON
 - **Keyboard shortcuts** — `Cmd+N` new chat, `Cmd+Shift+S` sidebar, `Cmd+,` settings, `Cmd+Shift+E` export, `Esc` close
-- **PWA** — add to home screen on mobile
-- **Dark theme** — tuned for extended use, not an afterthought
-- **Incognito mode** — one-click toggle disables history and memory for the current session
+- **PWA** — install on any device's home screen
+- **Dark theme** — tuned for extended use, matched to LM Studio's aesthetic
+- **Incognito mode** — toggle disables history and memory for the session (ephemeral, not persisted)
 - **Accessibility** — full keyboard navigation, focus indicators, ARIA labels, screen reader support, `prefers-reduced-motion` respected
-- **Design tokens** — consistent spacing, typography, and radius scales throughout
-- **Styled dialogs** — no browser `prompt()`/`confirm()` calls, all inline with the UI
-- **Mobile-responsive** — collapsible sidebar, 44px touch targets, always-visible actions
-- **Slash command autocomplete** with arrow key navigation
-- **`/help`** — quick reference for all available commands
+- **Mobile-responsive** — collapsible sidebar, 44px touch targets, always-visible actions on touch
+- **Image and file attachments** — drag-and-drop images (JPEG, PNG, WebP, GIF) and text files (code, markdown, CSV, JSON, etc.)
+- **Syntax highlighting** — vendored highlight.js, no CDN dependency
+- **Slash command autocomplete** — `/research`, `/code`, `/write`, `/analyze`, `/architect`, `/compact`, `/help`
 
 ### Mobile
 
@@ -277,6 +299,7 @@ LM Studio is already great on the desktop. lm-chat extends it into a web-accessi
 | Pinned chats & folders | No | Yes |
 | Share conversations | No | Yes |
 | System prompt presets | No | Yes |
+| Self-Consistency / CoVe | No | Yes |
 | Remote access (Tailscale, etc.) | Requires desktop | Browser-based |
 
 ---
@@ -290,12 +313,13 @@ browser  ──HTTP──>  server.py  ──HTTP──>  LM Studio
                     Memory · Logging      Inference
 ```
 
-- **`server.py`** — stdlib Python, zero dependencies. Proxies native API, persists chats, manages auth, indexes embeddings, handles memory distillation, structured logging. ~3.6k lines.
+- **`server.py`** — stdlib Python, zero dependencies. Proxies native API, persists chats, manages auth, indexes embeddings, handles memory distillation, structured logging. ~3.7k lines.
 - **`qr.py`** — pure-Python QR code generator for TOTP enrollment. ~345 lines.
-- **`index.html`** — HTML shell. ~685 lines.
-- **`style.css`** — all CSS, organized with `@layer` and native nesting. ~3.4k lines.
-- **`app.js`** — all client-side JS. ~5.7k lines.
+- **`index.html`** — HTML shell. ~655 lines.
+- **`style.css`** — all CSS, organized with `@layer` and native nesting. ~3.5k lines.
+- **`app.js`** — all client-side JS. ~5.9k lines.
 - **`manifest.json` + `sw.js`** — PWA support.
+- **`highlight.min.js` + `highlight.min.css`** — vendored syntax highlighting, no CDN.
 - **`logs/`** — rotating debug logs (auto-created, gitignored).
 
 No frameworks. No transpilation. No node_modules. No build step.
@@ -317,6 +341,7 @@ No frameworks. No transpilation. No node_modules. No build step.
 | `LM_CHAT_DB` | `./chats.db` | SQLite database path (Docker: `/app/data/chats.db`) |
 | `LM_CHAT_LOGS` | `./logs` | Log directory path (Docker: `/app/data/logs`) |
 | `LM_CHAT_HTTPS` | *(off)* | Secure cookie flag (also auto-detected via `X-Forwarded-Proto`) |
+| `LMSTUDIO_MCP_JSON` | `~/.lmstudio/mcp.json` | Path to LM Studio MCP config |
 
 ### Docker
 
@@ -334,7 +359,7 @@ docker pull ghcr.io/chevron7locked/lm-chat:nightly
 
 **Platforms:** `linux/amd64`, `linux/arm64` (Apple Silicon, Raspberry Pi, AWS Graviton)
 
-**Data persistence:** Mount a directory to `/app/data` — stores the SQLite database, logs, and signing key. Without a mount, data is lost on container restart. The default `docker-compose.yml` uses a `./data` bind mount so your database lives alongside the compose file.
+**Data persistence:** Mount a directory to `/app/data` — stores the SQLite database, logs, and signing key. Without a mount, data is lost on container restart.
 
 **Security hardening:** The default `docker-compose.yml` runs with `read_only: true`, `no-new-privileges`, and all capabilities dropped. Only `/tmp` and `/app/data` are writable.
 
@@ -346,14 +371,14 @@ docker pull ghcr.io/chevron7locked/lm-chat:nightly
 ### LM Studio Setup
 
 1. Load a model in LM Studio
-2. Configure MCP servers in `~/.lmstudio/mcp.json` ([docs](https://lmstudio.ai/docs/advanced/mcp))
-3. Enable **"Allow calling servers from mcp.json"** in LM Studio settings
+2. Configure MCP servers in `~/.lmstudio/mcp.json` ([docs](https://lmstudio.ai/docs/app/mcp))
+3. Enable **"Allow calling servers from mcp.json"** in LM Studio Developer Settings
 4. For remote MCP: enable **"Allow per-request MCPs"** in Developer Settings
-5. For semantic search: load an embedding model (e.g., `nomic-embed-text-v1.5`)
+5. For semantic search: load an embedding model — `nomic-embed-text-v1.5` is bundled with LM Studio
 
 ### Run on Boot (macOS)
 
-With Docker Compose and `restart: unless-stopped` (in the default `docker-compose.yml`), the container starts automatically when Docker Desktop launches. Just enable **"Start Docker Desktop when you sign in"** in Docker Desktop settings.
+With Docker Compose and `restart: unless-stopped`, the container starts automatically when Docker Desktop launches. Enable **"Start Docker Desktop when you sign in"** in Docker Desktop settings.
 
 For bare Python (without Docker):
 
@@ -383,7 +408,7 @@ EOF
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.lm-chat.plist
 ```
 
-**Note:** If switching from launchd to Docker, unload the agent first to avoid port conflicts:
+**Note:** If switching from launchd to Docker, unload the agent first:
 ```bash
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.lm-chat.plist
 ```

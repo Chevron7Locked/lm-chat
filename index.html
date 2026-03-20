@@ -476,7 +476,7 @@
         </main>
 
         <div id="kb-overlay" aria-hidden="true"></div>
-        <div id="kb-modal" role="dialog" aria-modal="true" aria-labelledby="kb-modal-title">
+        <div id="kb-modal" role="dialog" aria-modal="true" aria-labelledby="kb-modal-title" tabindex="-1">
             <h3 id="kb-modal-title">Keyboard Shortcuts</h3>
             <div class="kb-row"><span>New chat</span><span>&#8984;N</span></div>
             <div class="kb-row">
@@ -494,7 +494,7 @@
         <div id="chat-settings-store" class="hidden">
             <div id="chat-settings-content">
                 <div class="sg">
-                    <label for="s-preset">System Prompt</label
+                    <label for="s-preset">Preset</label
                     ><select id="s-preset">
                         <option value="general">General Assistant</option>
                         <option value="coder">Coding Agent</option>
@@ -537,11 +537,42 @@
                             ><input
                                 type="checkbox"
                                 id="s-followups"
+                                aria-label="Suggested Follow-ups"
                                 checked
                             /><span class="slider"></span
                         ></label>
                     </div>
                     <div class="sg-hint">Show follow-up questions after responses</div>
+                </div>
+                <div class="sg">
+                    <div class="toggle-row">
+                        <div>
+                            <span>Self-Consistency</span>
+                            <div class="sg-hint">Generate multiple responses and synthesize the best answer</div>
+                        </div>
+                        <label class="sw"
+                            ><input
+                                type="checkbox"
+                                id="s-sc"
+                                aria-label="Self-Consistency"
+                            /><span class="slider"></span
+                        ></label>
+                    </div>
+                </div>
+                <div class="sg">
+                    <div class="toggle-row">
+                        <div>
+                            <span>Chain of Verification</span>
+                            <div class="sg-hint">Fact-check responses against verification questions</div>
+                        </div>
+                        <label class="sw"
+                            ><input
+                                type="checkbox"
+                                id="s-cove"
+                                aria-label="Chain of Verification"
+                            /><span class="slider"></span
+                        ></label>
+                    </div>
                 </div>
                 <button
                     class="danger mt-7"
@@ -558,6 +589,7 @@
                             ><input
                                 type="checkbox"
                                 id="s-memory"
+                                aria-label="Memory"
                                 checked
                             /><span
                                 class="slider"
@@ -610,7 +642,7 @@
         <script type="module" src="/app.js"></script>
 
         <!-- Right panel — shared slot for chat settings and global pins -->
-        <aside id="right-panel" class="right-panel" aria-labelledby="right-panel-title">
+        <aside id="right-panel" class="right-panel" role="dialog" aria-modal="true" aria-labelledby="right-panel-title" aria-hidden="true">
             <div class="right-panel-header">
                 <span id="right-panel-title">Chat Settings</span>
                 <div class="rp-header-actions">

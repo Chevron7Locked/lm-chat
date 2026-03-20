@@ -759,17 +759,9 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 );
             });
 
-            const MCPS = [
-                { id: "mcp/brave-search", name: "Brave Search", on: true, hint: "Current events, recent releases, anything after your training cutoff, or when unsure about a fact" },
-                { id: "mcp/memory", name: "Memory", on: true, hint: "Store and retrieve persistent user context across conversations" },
-                { id: "mcp/sequential-thinking", name: "Sequential Thinking", on: true, hint: "Break down complex problems with structured step-by-step reasoning" },
-                { id: "mcp/context7", name: "Context7", on: true, hint: "Look up accurate, up-to-date API docs for libraries and frameworks before writing code" },
-                { id: "mcp/paper-search", name: "Paper Search", on: true, hint: "Find academic papers and real research for technical or scientific questions" },
-                { id: "mcp/firecrawl", name: "Firecrawl", on: false, hint: "Read full web page content when search snippets aren't enough" },
-                { id: "mcp/filesystem", name: "Filesystem", on: false, hint: "Read and write local files" },
-                { id: "mcp/playwright", name: "Playwright", on: false, hint: "Browser automation, screenshots, and web interaction" },
-                { id: "mcp/github", name: "GitHub", on: false, hint: "Manage GitHub issues, PRs, and repositories" },
-            ];
+            // MCP servers discovered from ~/.lmstudio/mcp.json via /api/mcp/servers.
+            // Populated on init — all off by default, persisted per-server in localStorage.
+            let MCPS = [];
 
             const STARTER_ICONS = {
                 summarize:
@@ -943,7 +935,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
     <div class="sys-section">
       <h3>Debug Logging</h3>
       <div style="display:flex;align-items:center;gap:var(--sp-6)">
-        <label class="sw"><input type="checkbox" id="ss-debug" data-action="toggle-debug"><span class="slider"></span></label>
+        <label class="sw"><input type="checkbox" id="ss-debug" aria-label="Verbose debug mode" data-action="toggle-debug"><span class="slider"></span></label>
         <span style="font-size:var(--text-base)">Verbose debug mode</span>
       </div>
       <div id="ss-debug-info" style="font-size:var(--text-xs);color:var(--faint);margin-top:var(--sp-4)">Logs requests, SSE events, memory operations, and tool calls to <code style="font-size:0.6875rem">logs/</code></div>
@@ -1419,15 +1411,19 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 localStorage.getItem("lsc-reasoning") || "off";
             $("s-followups").checked =
                 localStorage.getItem("lsc-followups") !== "off";
-            // --- MCP toggles ---
-            MCPS.forEach((s, i) => {
-                const v = localStorage.getItem("lsc-mcp-" + s.id);
-                if (v !== null) s.on = v === "1";
-            });
+            $("s-sc").checked =
+                localStorage.getItem("lsc-sc") === "1";
+            $("s-cove").checked =
+                localStorage.getItem("lsc-cove") === "1";
+            // --- MCP toggles (populated from /api/mcp/servers) ---
             function renderMcpList() {
                 const list = $("mcp-list");
                 if (!list) return;
                 list.innerHTML = "";
+                if (!MCPS.length) {
+                    list.innerHTML = '<div style="color:var(--dim);font-size:var(--text-sm)">No MCP servers found in ~/.lmstudio/mcp.json</div>';
+                    return;
+                }
                 MCPS.forEach((s, i) => {
                     const d = document.createElement("div");
                     d.className = "mcp-i";
@@ -1442,6 +1438,16 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     list.appendChild(d);
                 });
             }
+            // Fetch available MCP servers from the server (reads ~/.lmstudio/mcp.json)
+            apiFetch("/api/mcp/servers").then(async (r) => {
+                if (!r.ok) return;
+                const d = await r.json();
+                MCPS = (d.servers || []).map((s) => ({
+                    ...s,
+                    on: localStorage.getItem("lsc-mcp-" + s.id) !== "0",
+                }));
+                renderMcpList();
+            }).catch(() => {});
             renderMcpList();
 
             // --- Remote MCP servers (H4: auth stored server-side) ---
@@ -2930,9 +2936,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 body.reasoning = cs.reasoning || "off";
                 // context_length is a load-time parameter — sending it per-request
                 // triggers JIT model reloads in LM Studio. Read-only from instance config.
-                // Apply per-chat SC/CoVe overrides when set via the chat settings panel.
-                if (cs.sc_enabled != null) body.sc_enabled = cs.sc_enabled;
-                if (cs.cove_enabled != null) body.cove_enabled = cs.cove_enabled;
+                // SC/CoVe: per-chat override, falling back to global setting.
+                const globalSc   = localStorage.getItem("lsc-sc") === "1";
+                const globalCove = localStorage.getItem("lsc-cove") === "1";
+                body.sc_enabled   = cs.sc_enabled   != null ? cs.sc_enabled   : globalSc;
+                body.cove_enabled = cs.cove_enabled != null ? cs.cove_enabled : globalCove;
                 return body;
             }
 
@@ -4405,13 +4413,16 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             // Right panel state: null | "settings" | "pins"
             let rightPanelState = null;
 
+            let _rpOpener = null;
             function openRightPanel(mode) {
                 if (rightPanelState === mode) {
                     closeRightPanel();
                     return;
                 }
+                _rpOpener = document.activeElement;
                 rightPanelState = mode;
                 $("right-panel").classList.add("open");
+                $("right-panel").removeAttribute("aria-hidden");
                 $("right-panel-overlay").classList.add("open");
                 if (mode === "settings") {
                     $("right-panel-title").textContent = "Chat Settings";
@@ -4425,12 +4436,19 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     $("right-panel-action-btn").classList.add("hidden");
                     renderGlobalPinsPanel();
                 }
+                // Move focus into panel after render
+                const panel = $("right-panel");
+                const first = panel.querySelector('button:not([disabled]), select, textarea, input, [tabindex="0"]');
+                (first || panel).focus();
             }
 
             function closeRightPanel() {
                 rightPanelState = null;
                 $("right-panel").classList.remove("open");
+                $("right-panel").setAttribute("aria-hidden", "true");
                 $("right-panel-overlay").classList.remove("open");
+                _rpOpener?.focus();
+                _rpOpener = null;
             }
             $("pins-btn")?.addEventListener("click", () => openRightPanel("pins"));
 
@@ -4484,8 +4502,12 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const detectedPreset = currentSys
                     ? (Object.entries(PRESETS).find(([,v]) => v === currentSys)?.[0] || "custom")
                     : "general";
+                const globalScOn   = localStorage.getItem("lsc-sc") === "1";
+                const globalCoveOn = localStorage.getItem("lsc-cove") === "1";
+                const scOn   = s.sc_enabled   != null ? s.sc_enabled   : globalScOn;
+                const coveOn = s.cove_enabled != null ? s.cove_enabled : globalCoveOn;
                 body.innerHTML = `
-                    <div class="sg">
+                    <div class="sg cs-primary">
                         <label>System Prompt</label>
                         <select id="cs-preset">
                             <option value="general" ${detectedPreset==="general"?"selected":""}>General Assistant</option>
@@ -4499,44 +4521,80 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         <textarea id="cs-sys" rows="4" placeholder="Custom system prompt…"></textarea>
                         <div class="var-help">{{current_date}} {{day_of_week}} {{current_time}} {{model}} — replaced on send</div>
                     </div>
-                    <div class="sg sg-row">
-                        <div class="sg-half"><label>Temperature</label>
-                            <input type="number" id="cs-temp" min="0" max="2" step="0.1" placeholder="${gTemp||"0–2"}" value="${s.temperature ?? ""}"></div>
-                        <div class="sg-half"><label>Top P</label>
-                            <input type="number" id="cs-top-p" min="0" max="1" step="0.05" placeholder="${gTopP||"0–1"}" value="${s.top_p ?? ""}"></div>
+                    <div class="sg">
+                        <label>Temperature</label>
+                        <input type="number" id="cs-temp" min="0" max="2" step="0.1" placeholder="${gTemp||"LM Studio default"}" value="${s.temperature ?? ""}">
                     </div>
-                    <div class="sg sg-row">
-                        <div class="sg-half"><label>Top K</label>
-                            <input type="number" id="cs-top-k" min="0" max="500" step="1" placeholder="${gTopK||"e.g. 40"}" value="${s.top_k ?? ""}"></div>
-                        <div class="sg-half"><label>Min P</label>
-                            <input type="number" id="cs-min-p" min="0" max="1" step="0.01" placeholder="${gMinP||"0–1"}" value="${s.min_p ?? ""}"></div>
+                    <div class="cs-adv-row">
+                        <button class="cs-adv-btn" id="cs-adv-btn" aria-expanded="false" aria-controls="cs-adv-body">
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            Advanced settings
+                        </button>
+                        <span class="cs-adv-hint">Defaults from LM Studio</span>
                     </div>
-                    <div class="sg sg-row">
-                        <div class="sg-half"><label>Repeat Penalty</label>
-                            <input type="number" id="cs-repeat-pen" min="0" max="3" step="0.05" placeholder="${gRepPen||"e.g. 1.1"}" value="${s.repeat_penalty ?? ""}"></div>
-                    </div>
-                    <div class="sg"><label>Max Output Tokens</label>
-                        <input type="number" id="cs-max-tokens" min="-1" max="32768" step="256" placeholder="${gMaxTok||"e.g. 2048"}" value="${s.max_output_tokens ?? ""}">
-                    </div>
-                    <div class="sg"><label>Reasoning</label>
-                        <select id="cs-reasoning">
-                            <option value="" ${!s.reasoning?"selected":""}>Same as global (${$("s-reasoning")?.value || "off"})</option>
-                            <option value="off" ${s.reasoning==="off"?"selected":""}>Off</option>
-                            <option value="medium" ${s.reasoning==="medium"?"selected":""}>Medium</option>
-                            <option value="high" ${s.reasoning==="high"?"selected":""}>High</option>
-                        </select>
-                    </div>
-                    <div class="sg" style="border-top:1px solid var(--border);padding-top:var(--sp-6);margin-top:var(--sp-6)">
-                        <div class="toggle-row"><span>Self-Consistency</span>
-                            <label class="sw"><input type="checkbox" id="cs-sc" ${s.sc_enabled?"checked":""}><span class="slider"></span></label>
+                    <div id="cs-adv-body" class="cs-adv-body" hidden>
+                        <div class="sg sg-row">
+                            <div class="sg-half"><label>Top P</label>
+                                <input type="number" id="cs-top-p" min="0" max="1" step="0.05" placeholder="${gTopP||"default"}" value="${s.top_p ?? ""}"></div>
+                            <div class="sg-half"><label>Top K</label>
+                                <input type="number" id="cs-top-k" min="0" max="500" step="1" placeholder="${gTopK||"default"}" value="${s.top_k ?? ""}"></div>
                         </div>
-                        <div class="toggle-row" style="margin-top:var(--sp-4)"><span>Chain of Verification</span>
-                            <label class="sw"><input type="checkbox" id="cs-cove" ${s.cove_enabled?"checked":""}><span class="slider"></span></label>
+                        <div class="sg sg-row">
+                            <div class="sg-half"><label>Min P</label>
+                                <input type="number" id="cs-min-p" min="0" max="1" step="0.01" placeholder="${gMinP||"default"}" value="${s.min_p ?? ""}"></div>
+                            <div class="sg-half"><label>Repeat Penalty</label>
+                                <input type="number" id="cs-repeat-pen" min="0" max="3" step="0.05" placeholder="${gRepPen||"default"}" value="${s.repeat_penalty ?? ""}"></div>
+                        </div>
+                        <div class="sg"><label>Max Output Tokens</label>
+                            <input type="number" id="cs-max-tokens" min="-1" max="32768" step="256" placeholder="${gMaxTok||"unlimited"}" value="${s.max_output_tokens ?? ""}">
+                        </div>
+                        <div class="sg"><label>Reasoning</label>
+                            <select id="cs-reasoning">
+                                <option value="" ${!s.reasoning?"selected":""}>Global (${$("s-reasoning")?.value || "off"})</option>
+                                <option value="off" ${s.reasoning==="off"?"selected":""}>Off</option>
+                                <option value="medium" ${s.reasoning==="medium"?"selected":""}>Medium</option>
+                                <option value="high" ${s.reasoning==="high"?"selected":""}>High</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="cs-quality">
+                        <div class="toggle-row">
+                            <div>
+                                <span>Self-Consistency</span>
+                                <div class="cs-quality-hint">Sample multiple responses, synthesize the best</div>
+                            </div>
+                            <label class="sw"><input type="checkbox" id="cs-sc" aria-label="Self-Consistency" ${scOn?"checked":""}><span class="slider"></span></label>
+                        </div>
+                        <div class="toggle-row">
+                            <div>
+                                <span>Chain of Verification</span>
+                                <div class="cs-quality-hint">Fact-check via verification questions</div>
+                            </div>
+                            <label class="sw"><input type="checkbox" id="cs-cove" aria-label="Chain of Verification" ${coveOn?"checked":""}><span class="slider"></span></label>
                         </div>
                     </div>
                 `;
                 const ta = $("cs-sys");
                 if (ta) ta.value = s.system_prompt || (detectedPreset !== "custom" && PRESETS[detectedPreset] ? PRESETS[detectedPreset] : "");
+
+                // Advanced settings toggle
+                const advBtn  = $("cs-adv-btn");
+                const advBody = $("cs-adv-body");
+                if (advBtn && advBody) {
+                    // Auto-expand if any advanced field has a per-chat override
+                    const hasAdv = [s.top_p, s.top_k, s.min_p, s.repeat_penalty, s.max_output_tokens, s.reasoning].some(v => v != null);
+                    if (hasAdv) {
+                        advBody.hidden = false;
+                        advBtn.setAttribute("aria-expanded", "true");
+                        advBtn.classList.add("open");
+                    }
+                    advBtn.addEventListener("click", () => {
+                        const open = advBody.hidden;
+                        advBody.hidden = !open;
+                        advBtn.setAttribute("aria-expanded", String(open));
+                        advBtn.classList.toggle("open", open);
+                    });
+                }
 
                 // Preset dropdown: populate textarea when a preset is chosen
                 const presetSel = $("cs-preset");
@@ -4883,13 +4941,18 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
 
             // --- Keyboard shortcuts ---
+            let _kbOpener = null;
             function showKBShortcuts() {
+                _kbOpener = document.activeElement;
                 $("kb-modal").classList.add("open");
                 $("kb-overlay").classList.add("open");
+                $("kb-modal").focus();
             }
             function hideKBShortcuts() {
                 $("kb-modal").classList.remove("open");
                 $("kb-overlay").classList.remove("open");
+                _kbOpener?.focus();
+                _kbOpener = null;
             }
 
             document.addEventListener("keydown", (e) => {
@@ -4897,6 +4960,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const tag = e.target.tagName;
                 const inInput =
                     tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
+                // Trap Tab inside kb-modal (no interactive children, just loop focus back)
+                if (e.key === "Tab" && $("kb-modal").classList.contains("open")) {
+                    e.preventDefault();
+                    $("kb-modal").focus();
+                    return;
+                }
 
                 // Escape always works
                 if (e.key === "Escape") {
@@ -5766,6 +5836,12 @@ function initEventHandlers() {
     });
     document.getElementById('s-followups')?.addEventListener('change', function() {
         localStorage.setItem('lsc-followups', this.checked ? 'on' : 'off');
+    });
+    document.getElementById('s-sc')?.addEventListener('change', function() {
+        localStorage.setItem('lsc-sc', this.checked ? '1' : '0');
+    });
+    document.getElementById('s-cove')?.addEventListener('change', function() {
+        localStorage.setItem('lsc-cove', this.checked ? '1' : '0');
     });
     document.getElementById('s-memory')?.addEventListener('change', function() {
         toggleMemory(this.checked);

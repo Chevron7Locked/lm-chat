@@ -98,10 +98,10 @@
         /* Sidebar width — fluid */
         --sidebar-w: clamp(14rem, 12rem + 2vw, 18rem);
         /* Radius — proportional to text size */
-        --r-sm: 0.375rem;
-        --r-md: 0.625rem;
-        --r-lg: 1rem;
-        --r-xl: 1.25rem;
+        --r-sm: 0.5rem;
+        --r-md: 0.75rem;
+        --r-lg: 1.25rem;
+        --r-xl: 1.5rem;
         --r-full: 9999px;
         /* Motion — premium easing */
         --ease: cubic-bezier(0.16, 1, 0.3, 1);
@@ -215,7 +215,7 @@
         background: var(--input-bg);
         color: var(--text);
         border: 1px solid var(--border);
-        border-radius: var(--r-md);
+        border-radius: var(--r-full);
         padding: 0.4375rem var(--sp-9) 0.4375rem var(--sp-5);
         font-size: var(--text-sm);
         font-family: inherit;
@@ -275,7 +275,7 @@
     }
     .sr {
         padding: var(--sp-3) var(--sp-5);
-        border-radius: var(--r-md);
+        border-radius: var(--r-lg);
         cursor: pointer;
         font-size: var(--text-xs);
         margin-bottom: 1px;
@@ -306,7 +306,7 @@
     }
     .ci {
         padding: 0.4375rem var(--sp-5);
-        border-radius: var(--r-md);
+        border-radius: var(--r-lg);
         cursor: pointer;
         font-size: var(--text-sm);
         color: var(--dim);
@@ -327,7 +327,7 @@
             color: var(--text);
         }
         &.active {
-            background: var(--surface-raised);
+            background: var(--surface);
             color: var(--text);
         }
         & span {
@@ -378,7 +378,7 @@
         text-transform: uppercase;
         letter-spacing: 0.5px;
         color: var(--faint);
-        padding: var(--sp-8) var(--sp-5) var(--sp-3);
+        padding: var(--sp-8) var(--sp-5) var(--sp-4);
         font-weight: 600;
     }
     .folder-hdr {
@@ -1288,8 +1288,8 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-top: 6px;
-        padding-top: 6px;
+        margin-top: var(--sp-3);
+        padding-top: var(--sp-3);
         border-top: 1px solid var(--border);
         gap: var(--sp-4);
     }
@@ -1569,9 +1569,14 @@
     }
     #slash-menu {
         display: none;
+        position: absolute;
+        bottom: 100%;
+        left: 0;
+        right: 0;
+        z-index: 20;
         background: var(--surface-raised);
         border: 1px solid var(--border);
-        border-radius: var(--r-md);
+        border-radius: var(--r-xl);
         padding: var(--sp-2);
         margin-bottom: var(--sp-3);
         max-height: 13.75rem;
@@ -1617,7 +1622,7 @@
         gap: var(--sp-3);
         background: var(--surface);
         border: 1px solid var(--border);
-        border-radius: var(--r-lg);
+        border-radius: var(--r-full);
         padding: var(--sp-2) var(--sp-5);
         box-shadow: none;
         transition: box-shadow 0.25s var(--ease);
@@ -1642,8 +1647,8 @@
         }
     }
     #send {
-        width: 2.25rem;
-        height: 2.25rem;
+        width: 1.75rem;
+        height: 1.75rem;
         border-radius: var(--r-full);
         border: none;
         background: var(--accent);
@@ -1690,13 +1695,13 @@
 @layer components {
     /* Settings */
     .sg {
-        margin-bottom: var(--sp-6);
+        margin-bottom: var(--sp-7);
         & label,
         & .sg-label {
             display: block;
             font-size: var(--text-xs);
             color: var(--dim);
-            margin-bottom: var(--sp-2);
+            margin-bottom: var(--sp-3);
             letter-spacing: 0.5px;
             font-weight: 600;
         }
@@ -1723,13 +1728,14 @@
             box-shadow: 0 0 0 2px var(--accent-glow);
         }
         & textarea {
-            height: 10rem;
+            height: 12rem;
             resize: vertical;
         }
         & .sg-hint {
             font-size: var(--text-xs);
             color: var(--faint);
             margin-top: var(--sp-1);
+            line-height: 1.5;
         }
     }
     .sg-row {
@@ -1776,8 +1782,8 @@
     .var-help {
         font-size: var(--text-xs);
         color: var(--faint);
-        margin-top: var(--sp-2);
-        line-height: 1.5;
+        margin-top: var(--sp-3);
+        line-height: 1.6;
         & code {
             background: var(--surface);
             padding: 1px var(--sp-2);
@@ -2260,7 +2266,7 @@
             background: var(--bg);
         }
         #input-box {
-            border-radius: var(--r-xl);
+            border-radius: var(--r-full);
             padding: var(--sp-3) var(--sp-5) var(--sp-3) var(--sp-3);
             gap: var(--sp-2);
             min-height: 2.75rem;
@@ -2712,7 +2718,7 @@
             width: 3.25rem;
             height: 3.25rem;
             margin-bottom: 0.875rem;
-            filter: drop-shadow(0 0 20px rgba(192, 132, 252, 0.14));
+            filter: drop-shadow(0 0 14px rgba(192, 132, 252, 0.08));
         }
         & h1 {
             font-size: var(--text-2xl);
@@ -2808,11 +2814,11 @@
         transition:
             background 0.15s,
             transform 0.1s;
-        box-shadow: 0 2px 12px rgba(192, 132, 252, 0.14);
+        box-shadow: var(--shadow-md);
         &:hover {
             background: var(--accent-hover);
             transform: translateY(-1px);
-            box-shadow: 0 4px 16px rgba(192, 132, 252, 0.21);
+            box-shadow: var(--shadow-lg);
         }
         &:active {
             transform: translateY(0);
@@ -3005,11 +3011,11 @@
         margin: 0 auto;
     }
     .sys-section {
-        margin-bottom: var(--sp-8);
+        margin-bottom: var(--sp-10);
         & h3 {
             font-size: var(--text-lg);
             font-weight: 600;
-            margin-bottom: 0.875rem;
+            margin-bottom: var(--sp-7);
             color: var(--text);
         }
     }
@@ -3057,10 +3063,10 @@
             background var(--dur) var(--ease),
             transform 0.1s var(--ease),
             box-shadow 0.15s var(--ease);
-        box-shadow: 0 2px 8px rgba(192, 132, 252, 0.1);
+        box-shadow: var(--shadow-md);
         &:hover {
             background: var(--accent-hover);
-            box-shadow: 0 4px 12px rgba(192, 132, 252, 0.18);
+            box-shadow: var(--shadow-lg);
         }
         &:active {
             transform: scale(0.97);
@@ -3256,10 +3262,13 @@
             padding: var(--sp-3) var(--sp-4);
         }
         & .sg textarea {
-            height: 6rem;
+            height: 9rem;
         }
         & #cs-preset {
-            margin-bottom: var(--sp-2);
+            margin-bottom: var(--sp-5);
+        }
+        & .cs-primary label {
+            margin-bottom: var(--sp-3);
         }
     }
     #right-panel-overlay {
@@ -3271,6 +3280,56 @@
     }
     #right-panel-overlay.open {
         display: block;
+    }
+    /* Chat settings — advanced toggle row */
+    .cs-adv-row {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-4);
+        margin-bottom: var(--sp-5);
+    }
+    .cs-adv-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--sp-2);
+        background: none;
+        border: none;
+        padding: 0;
+        font-size: var(--text-xs);
+        font-weight: 500;
+        color: var(--dim);
+        cursor: pointer;
+        transition: color 0.15s;
+        & svg {
+            transition: transform 0.2s var(--ease);
+            flex-shrink: 0;
+        }
+        &:hover { color: var(--text); }
+        &.open svg { transform: rotate(180deg); }
+    }
+    .cs-adv-hint {
+        font-size: var(--text-xs);
+        color: var(--faint);
+    }
+    .cs-adv-body {
+        margin-bottom: var(--sp-2);
+        & .sg { margin-bottom: var(--sp-5); }
+    }
+    /* Chat settings — quality checks section */
+    .cs-quality {
+        border-top: 1px solid var(--border);
+        padding-top: var(--sp-6);
+        margin-top: var(--sp-2);
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-5);
+        & .toggle-row { align-items: flex-start; }
+    }
+    .cs-quality-hint {
+        font-size: var(--text-xs);
+        color: var(--faint);
+        margin-top: var(--sp-1);
+        line-height: 1.4;
     }
     .chat-settings-btn {
         position: relative;
@@ -3416,7 +3475,9 @@
     }
     .label-hint {
         font-size: var(--text-xs);
-        color: var(--dim);
+        color: var(--faint);
+        line-height: 1.5;
+        margin-top: var(--sp-1);
     }
     .label-sm-semibold {
         font-size: var(--text-sm);
