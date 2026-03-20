@@ -20,8 +20,8 @@ __pycache__/
 # Internal
 docs/plans/
 docs/review/
-tests/
 test-screenshots/
+tests/screenshots/
 
 # Dev artifacts
 sim-*.png

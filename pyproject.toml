@@ -55,4 +55,4 @@ show_missing = true
 skip_covered = false
 # Baseline: 2026-03-17 — server.py + qr.py: 0% (tests run server.py as subprocess)
 # Raise fail_under incrementally as coverage improves (requires direct import fixtures)
-fail_under = 0
+fail_under = 40

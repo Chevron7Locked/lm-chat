@@ -1214,8 +1214,9 @@ class Handler(BaseHTTPRequestHandler):
             db.execute("UPDATE chats SET user_id=? WHERE user_id IS NULL", (user_id,))
             token = create_session(db, user_id, commit=False)
             db.commit()
-        except Exception:
+        except Exception as e:
             db.rollback()
+            log.error(f"Auth setup failed: {e}", exc_info=True)
             return self._error(500, "setup failed")
         user = {"id": user_id, "username": username, "display_name": display_name, "is_admin": 1}
         self._json_response_with_cookie(200, {"user": user}, cookie_token=token)
@@ -1307,11 +1308,12 @@ class Handler(BaseHTTPRequestHandler):
             db.execute("DELETE FROM sessions WHERE user_id=?", (target_id,))
             db.execute("DELETE FROM users WHERE id=?", (target_id,))
             db.commit()
-        except Exception:
+        except Exception as e:
             try:
                 db.rollback()
             except Exception:
                 pass
+            log.error(f"Failed to delete user: {e}", exc_info=True)
             return self._error(500, "failed to delete user")
         self._json_response(200, {"ok": True})
 
@@ -1446,8 +1448,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(401, "invalid or reused code")
             db.execute("UPDATE users SET last_totp_counter=? WHERE id=?", (counter, user_id))
             db.execute("COMMIT")
-        except Exception:
+        except Exception as e:
             db.execute("ROLLBACK")
+            log.error(f"TOTP login error: {e}", exc_info=True)
             return self._error(500, "login error")
         token = create_session(db, user_id)
         clear_rate_limit(ip)  # Clear rate limit after full 2FA success
@@ -3372,33 +3375,41 @@ Curated list:"""
                 persist_text += f"{prefix}[{image_count} image{'s' if image_count > 1 else ''} attached]"
         else:
             persist_text = user_input
-        db.execute(
-            "INSERT INTO messages (chat_id,role,content,token_count,created_at) VALUES (?,?,?,?,?)",
-            (chat_id, "user", persist_text, prompt_tokens or None, now),
-        )
-        for tc in tool_calls:
+        try:
+            db.execute("BEGIN IMMEDIATE")
             db.execute(
-                "INSERT INTO messages (chat_id,role,name,args,output,created_at) VALUES (?,?,?,?,?,?)",
-                (chat_id, "tool", tc.get("tool", ""),
-                 json.dumps(tc.get("arguments")) if tc.get("arguments") else None,
-                 json.dumps(tc.get("output")) if tc.get("output") else None,
-                 now),
-            )
-        if content:
-            assistant_message_id = db.execute(
                 "INSERT INTO messages (chat_id,role,content,token_count,created_at) VALUES (?,?,?,?,?)",
-                (chat_id, "assistant", content, completion_tokens or None, now),
-            ).lastrowid
-            if injected_insight_ids:
-                db.executemany(
-                    "INSERT INTO insight_activations (message_id, insight_id, created_at) VALUES (?,?,?)",
-                    [(assistant_message_id, iid, now) for iid in injected_insight_ids]
+                (chat_id, "user", persist_text, prompt_tokens or None, now),
+            )
+            for tc in tool_calls:
+                db.execute(
+                    "INSERT INTO messages (chat_id,role,name,args,output,created_at) VALUES (?,?,?,?,?,?)",
+                    (chat_id, "tool", tc.get("tool", ""),
+                     json.dumps(tc.get("arguments")) if tc.get("arguments") else None,
+                     json.dumps(tc.get("output")) if tc.get("output") else None,
+                     now),
                 )
-        db.execute(
-            "UPDATE chats SET response_id=?, updated_at=? WHERE id=?",
-            (response_id, now, chat_id),
-        )
-        db.commit()
+            if content:
+                assistant_message_id = db.execute(
+                    "INSERT INTO messages (chat_id,role,content,token_count,created_at) VALUES (?,?,?,?,?)",
+                    (chat_id, "assistant", content, completion_tokens or None, now),
+                ).lastrowid
+                if injected_insight_ids:
+                    db.executemany(
+                        "INSERT INTO insight_activations (message_id, insight_id, created_at) VALUES (?,?,?)",
+                        [(assistant_message_id, iid, now) for iid in injected_insight_ids]
+                    )
+            db.execute(
+                "UPDATE chats SET response_id=?, updated_at=? WHERE id=?",
+                (response_id, now, chat_id),
+            )
+            db.commit()
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            log.error(f"Failed to persist chat messages: {e}")
 
     def _apply_feedback(self, db, message_id, user_id, rating):
         """Upsert feedback and adjust insight weights atomically.
@@ -3567,6 +3578,26 @@ def _kill_stale_server():
         try:
             old_pid = int(open(pidfile).read().strip())
             if old_pid != os.getpid():
+                # Verify PID is actually server.py before killing
+                import subprocess
+                try:
+                    cmdline = subprocess.check_output(
+                        ["ps", "-p", str(old_pid), "-o", "command="], text=True
+                    )
+                    if "server.py" not in cmdline:
+                        log.info(f"Stale PID file (PID {old_pid} is not server.py) — removing")
+                        try:
+                            os.unlink(pidfile)
+                        except OSError:
+                            pass
+                        raise OSError("not our process")  # skip to fallback
+                except subprocess.CalledProcessError:
+                    # Process doesn't exist — stale PID file
+                    try:
+                        os.unlink(pidfile)
+                    except OSError:
+                        pass
+                    raise OSError("process gone")  # skip to fallback
                 os.kill(old_pid, signal.SIGTERM)
                 log.info(f"Stopped previous lm-chat (PID {old_pid})")
                 for _ in range(20):  # wait up to 2s
