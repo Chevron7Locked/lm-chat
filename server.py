@@ -1646,11 +1646,13 @@ class Handler(BaseHTTPRequestHandler):
         stream_usage = {}
         stream_complete = False
 
+        lines_seen = 0
         try:
             for raw_line in resp:
                 line = raw_line.decode("utf-8", errors="replace")
                 self.wfile.write(raw_line)
                 self.wfile.flush()
+                lines_seen += 1
 
                 stripped = line.strip()
                 if stripped.startswith("event:"):
@@ -1664,6 +1666,9 @@ class Handler(BaseHTTPRequestHandler):
 
                     if event_type != "message.delta" and not is_incognito:
                         log.debug(f"SSE {event_type}")
+                elif stripped and lines_seen <= 5 and not is_incognito:
+                    # Log first few unrecognised lines to diagnose unexpected LM Studio responses
+                    log.warning(f"SSE unexpected line: {stripped[:200]!r}")
 
                     if event_type == "message.delta":
                         content_parts.append(data.get("content") or "")
@@ -1703,8 +1708,17 @@ class Handler(BaseHTTPRequestHandler):
                                 log.debug(f"RESP tools: {len(tool_calls)} calls")
         except (BrokenPipeError, ConnectionResetError):
             log.debug("Stream aborted by client")
+        except TimeoutError:
+            log.warning("Stream timed out waiting for LM Studio response")
+        except OSError as e:
+            log.warning(f"Stream OS error: {e}")
+        except Exception as e:
+            log.error(f"Stream unexpected error: {e}", exc_info=True)
         finally:
             resp.close()
+
+        if not stream_complete and not is_incognito:
+            log.warning(f"Stream ended without chat.end (lines_seen={lines_seen})")
 
         return content_parts, reasoning_parts, tool_calls, response_id, stream_usage, stream_complete
 
@@ -1863,8 +1877,29 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             return
 
-        content_parts, reasoning_parts, tool_calls, response_id, stream_usage, stream_complete = \
-            self._collect_stream(resp, is_incognito)
+        try:
+            content_parts, reasoning_parts, tool_calls, response_id, stream_usage, stream_complete = \
+                self._collect_stream(resp, is_incognito)
+        except Exception as e:
+            log.error(f"chat stream collect: {e}", exc_info=True)
+            try:
+                err_msg = json.dumps({"type": "error", "error": {"message": "Stream error — please try again"}})
+                self.wfile.write(f"data: {err_msg}\n\n".encode())
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+            except Exception:
+                pass
+            return
+
+        # If stream ended without chat.end (LM Studio didn't respond), tell the client
+        if not stream_complete and not content_parts:
+            try:
+                err_msg = json.dumps({"type": "error", "error": {"message": "No response from model — it may be busy, crashed, or unable to reach a tool server"}})
+                self.wfile.write(f"data: {err_msg}\n\n".encode())
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+            except Exception:
+                pass
 
         # Only persist complete responses (skip if client disconnected mid-stream)
         chat_id = body.get("chat_id")
