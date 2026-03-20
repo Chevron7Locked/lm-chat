@@ -1,8 +1,7 @@
 """Server lifecycle tests: startup, shutdown, PID file management."""
 
-import os, signal, socket, subprocess, sys, time
+import os, signal, subprocess, sys, time
 
-import pytest
 
 from conftest import _free_port
 

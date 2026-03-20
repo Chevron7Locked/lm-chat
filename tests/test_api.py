@@ -437,7 +437,7 @@ class TestMessagePins:
         chat_id = _create_chat(client)
         _send_message(client, chat_id)
         msg_id = self._get_assistant_message_id(client, chat_id)
-        resp1 = client.post(f"/api/messages/{msg_id}/pin")
+        client.post(f"/api/messages/{msg_id}/pin")
         resp2 = client.post(f"/api/messages/{msg_id}/pin")
         data2 = client.json(resp2)
         assert data2.get("already_pinned") is True

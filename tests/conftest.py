@@ -8,7 +8,7 @@ Architecture:
   - authed_client: session-authenticated helpers on top of app_server_auth
 """
 
-import hashlib, hmac, json, os, socket, struct, subprocess, sys, tempfile, threading, time, urllib.error, urllib.request
+import hashlib, hmac, json, os, socket, struct, subprocess, sys, threading, time, urllib.error, urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 

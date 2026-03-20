@@ -23,7 +23,7 @@ import json, time, urllib.error
 
 import pytest
 
-from conftest import _Client, _create_chat, CSRF_HEADER
+from conftest import _Client, _create_chat
 
 
 # ---------------------------------------------------------------------------

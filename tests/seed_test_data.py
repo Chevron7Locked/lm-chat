@@ -1,5 +1,5 @@
 """Seed lm-chat test database with realistic fake conversations."""
-import json, sqlite3, sys, time, uuid, os
+import sqlite3, sys, time, uuid, os
 
 DB_PATH = sys.argv[1] if len(sys.argv) > 1 else "test_chats.db"
 

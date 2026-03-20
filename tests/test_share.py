@@ -11,7 +11,7 @@ import json, urllib.error, urllib.request
 
 import pytest
 
-from conftest import _Client, _create_chat, ADMIN_USER, ADMIN_PASS, CSRF_HEADER
+from conftest import _Client, _create_chat
 
 
 # ---------------------------------------------------------------------------

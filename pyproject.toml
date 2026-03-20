@@ -27,6 +27,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "server.py" = ["S603", "S607"]  # subprocess calls are intentional
+"tests/*" = ["S101", "S105", "S106", "S603", "S607", "E402"]  # assert, hardcoded passwords, subprocess all expected in tests
 
 [tool.codespell]
 skip = ".git*,*.min.js,*.min.css,*.svg"

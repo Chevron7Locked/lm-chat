@@ -8,12 +8,11 @@ Run: pytest tests/test_e2e.py --headed   (for visual debugging)
 CI:  pytest tests/test_e2e.py            (headless Chromium)
 """
 
-import json, re, time
+import re, time
 
 import pytest
 from playwright.sync_api import Page, expect
 
-from conftest import _Client
 
 
 # ---------------------------------------------------------------------------

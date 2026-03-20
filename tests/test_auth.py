@@ -5,7 +5,7 @@ All tests use LM_CHAT_AUTH=true with a known admin password.
 Each test gets a fresh DB and fresh rate-limit counters (function-scoped fixtures).
 """
 
-import base64, hashlib, hmac, json, struct, time, urllib.error, urllib.request
+import base64, json, urllib.error, urllib.request
 
 import pytest
 

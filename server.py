@@ -797,7 +797,7 @@ class Handler(BaseHTTPRequestHandler):
             os.path.join(os.path.expanduser("~"), ".lmstudio", "mcp.json")
         )
         try:
-            with open(mcp_path, "r") as f:
+            with open(mcp_path) as f:
                 data = json.load(f)
             servers = data.get("mcpServers", {})
             result = []
@@ -3597,7 +3597,7 @@ def _kill_stale_server():
                         os.unlink(pidfile)
                     except OSError:
                         pass
-                    raise OSError("process gone")  # skip to fallback
+                    raise OSError("process gone") from None  # skip to fallback
                 os.kill(old_pid, signal.SIGTERM)
                 log.info(f"Stopped previous lm-chat (PID {old_pid})")
                 for _ in range(20):  # wait up to 2s
