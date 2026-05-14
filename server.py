@@ -3,7 +3,7 @@ lm-chat — lightweight web UI for LM Studio with MCP tool integration.
 Serves a PWA-ready single-page app, proxies to LM Studio, persists chats in SQLite.
 """
 
-import base64, gzip, hashlib, hmac, html as html_mod, json, logging, math, os, re, secrets, signal, sqlite3, struct, sys, threading, time, uuid, urllib.request, urllib.error
+import base64, binascii, gzip, hashlib, hmac, html as html_mod, json, logging, math, os, re, secrets, signal, sqlite3, struct, sys, threading, time, uuid, urllib.request, urllib.error
 import http.cookies
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 from qr import generate_qr_svg
 
-VERSION = "0.4.10"
+VERSION = "0.5.0"
 LMSTUDIO = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_TOKEN = os.environ.get("LMSTUDIO_TOKEN", "")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -53,8 +53,30 @@ SEARCH_MAX_RESULTS = 5000
 TITLE_MAX_LENGTH = 500
 MODEL_MAX_LENGTH = 200
 
-DEFAULT_INTEGRATIONS = [
-]
+# --- First-visitor bootstrap protection ---
+# When the server starts with no users in the DB, /api/auth/setup is reachable
+# by anyone — first request through wins admin.  Operators exposing lm-chat
+# on a public URL set this env so the first POST must include a matching
+# ``setup_token`` field; without it the endpoint returns 401.
+_SETUP_TOKEN = os.environ.get("LM_CHAT_SETUP_TOKEN", "").strip()
+
+# --- Session policy ---
+# Multi-device by default — a stolen cookie persists until SESSION_EXPIRY
+# without intervention.  Operators worried about cookie theft can flip this
+# to true to rotate the user's sessions on every fresh login, which kicks any
+# parallel device off the moment the legitimate user logs back in.
+_SINGLE_SESSION = os.environ.get("LM_CHAT_SINGLE_SESSION", "").strip().lower() in ("1", "true", "on", "yes")
+
+# --- HSTS ---
+# Opt-in.  Empty / "false" / "off" → no header.  "true"/"1"/"on" → standard
+# directive.  "preload" → adds the preload token for HSTS preload list inclusion.
+# HSTS is only meaningful over HTTPS; we only emit it when LM_CHAT_HTTPS=1 or
+# the request arrived through a reverse proxy with X-Forwarded-Proto: https.
+_HSTS_MODE = os.environ.get("LM_CHAT_HSTS", "").strip().lower()
+try:
+    _HSTS_MAX_AGE = max(0, int(os.environ.get("LM_CHAT_HSTS_MAX_AGE", "63072000")))
+except (TypeError, ValueError):
+    _HSTS_MAX_AGE = 63072000  # 2 years — RFC 6797 / OWASP recommendation
 
 # --- Structured Logging with Rotation ---
 
@@ -313,15 +335,116 @@ def get_db():
 
 # --- Password helpers ---
 
-def hash_password(password: str) -> tuple[str, str]:
-    salt = os.urandom(16)
-    h = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1, dklen=64)
-    return h.hex(), salt.hex()
+# --- Password policy ---
+#
+# Upper bound: scrypt processes the full byte string, so a 50MB body would
+# burn ~10s of CPU on M3-class silicon (the only request-side limit before
+# this was MAX_BODY_SIZE).  Cap at 256 chars — beyond reasonable human use
+# and password-manager output, well below the DoS threshold.
+PASSWORD_MAX_LENGTH = 256
+PASSWORD_MIN_LENGTH = 8
 
-def verify_password(password: str, hash_hex: str, salt_hex: str) -> bool:
-    salt = bytes.fromhex(salt_hex)
-    h = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1, dklen=64)
-    return hmac.compare_digest(h.hex(), hash_hex)
+# scrypt cost parameters — OWASP password storage cheat sheet, 2024 update.
+# Pre-0.5.0 used (n=16384, r=8, p=1) which is the 2017 floor; modern silicon
+# pushes that into "tractable for offline cracking" territory.  131072 is the
+# current OWASP minimum and costs ~50–80 ms per call on M-class hardware.
+#
+# The stored hash carries its own (n,r,p) so older hashes verify against the
+# parameters they were originally created with — no forced reset needed when
+# operators upgrade.  On the first successful login of any user whose stored
+# cost is below ``SCRYPT_PARAMS_CURRENT``, the hash is silently re-computed.
+SCRYPT_PARAMS_CURRENT = (
+    int(os.environ.get("LM_CHAT_SCRYPT_N", "131072")),
+    int(os.environ.get("LM_CHAT_SCRYPT_R", "8")),
+    int(os.environ.get("LM_CHAT_SCRYPT_P", "1")),
+)
+# Format string for new hashes; legacy bare-hex hashes are detected by the
+# absence of this prefix and decoded with the 2017 defaults.
+_SCRYPT_PREFIX = "scrypt$"
+_SCRYPT_LEGACY_PARAMS = (16384, 8, 1)
+
+
+def _scrypt_hex(password: str, salt: bytes, n: int, r: int, p: int) -> str:
+    # Memory footprint of scrypt is ~128 * N * r bytes; OpenSSL's default
+    # ``maxmem`` is 32 MB, which trips on the OWASP 2024 floor (N=131072,
+    # r=8 → ~128 MB).  Bump the ceiling with a comfortable safety margin so
+    # operators can tune cost upward without surprise ``ValueError``s.
+    needed = 128 * n * r
+    maxmem = max(needed * 2, 64 * 1024 * 1024)
+    return hashlib.scrypt(
+        password.encode(), salt=salt, n=n, r=r, p=p, dklen=64, maxmem=maxmem,
+    ).hex()
+
+
+def _parse_password_hash(stored: str) -> tuple[int, int, int, str]:
+    """Decode a stored hash string into (n, r, p, raw_hex).
+
+    Accepts both the new composite form (``scrypt$n=N$r=R$p=P$HEX``) and
+    bare-hex legacy hashes from pre-0.5.0 installs, which are assumed to use
+    the original parameters in ``_SCRYPT_LEGACY_PARAMS``.
+
+    Raises ``ValueError`` if the prefix is present but malformed.
+    """
+    if not stored.startswith(_SCRYPT_PREFIX):
+        n, r, p = _SCRYPT_LEGACY_PARAMS
+        return n, r, p, stored
+    body = stored[len(_SCRYPT_PREFIX):]
+    parts = body.split("$")
+    if len(parts) != 4:
+        raise ValueError("malformed scrypt hash")
+    params: dict[str, int] = {}
+    for piece in parts[:3]:
+        k, _, v = piece.partition("=")
+        if k not in ("n", "r", "p") or not v.isdigit():
+            raise ValueError("malformed scrypt param")
+        params[k] = int(v)
+    if {"n", "r", "p"} != set(params):
+        raise ValueError("missing scrypt param")
+    return params["n"], params["r"], params["p"], parts[3]
+
+
+def hash_password(password: str, *, params: tuple[int, int, int] | None = None) -> tuple[str, str]:
+    """Compute (stored_hash, salt_hex) for ``password``.
+
+    ``params`` overrides the default cost — used by tests that need cheap
+    hashes, and by rehash-on-login when we want to embed the legacy params
+    in a regression test.
+    """
+    if not isinstance(password, str) or len(password) > PASSWORD_MAX_LENGTH:
+        raise ValueError("password length out of bounds")
+    n, r, p = params or SCRYPT_PARAMS_CURRENT
+    salt = os.urandom(16)
+    raw = _scrypt_hex(password, salt, n, r, p)
+    return f"{_SCRYPT_PREFIX}n={n}$r={r}$p={p}${raw}", salt.hex()
+
+
+def verify_password(password: str, hash_stored: str, salt_hex: str) -> bool:
+    """Constant-time verify against either legacy or composite hashes."""
+    if not isinstance(password, str) or len(password) > PASSWORD_MAX_LENGTH:
+        return False
+    try:
+        n, r, p, expected_hex = _parse_password_hash(hash_stored)
+        salt = bytes.fromhex(salt_hex)
+    except (ValueError, TypeError):
+        return False
+    actual_hex = _scrypt_hex(password, salt, n, r, p)
+    return hmac.compare_digest(actual_hex, expected_hex)
+
+
+def password_needs_rehash(hash_stored: str) -> bool:
+    """True if the stored hash was computed with weaker parameters than current.
+
+    Drives the rehash-on-login flow: when a user successfully authenticates
+    against a legacy hash we silently bump them to current cost so the DB
+    drifts towards the new floor without forcing a password reset campaign.
+    """
+    try:
+        n, r, p, _ = _parse_password_hash(hash_stored)
+    except (ValueError, TypeError):
+        # Malformed hash — treat as "needs rehash" so the operator's reset
+        # flow has a chance to overwrite it.
+        return True
+    return (n, r, p) != SCRYPT_PARAMS_CURRENT
 
 
 # --- Session helpers ---
@@ -330,12 +453,140 @@ def _hash_token(token: str) -> str:
     """Hash session token for storage (SHA-256). Token has 256 bits of entropy so fast hash is safe."""
     return hashlib.sha256(token.encode()).hexdigest()
 
-def create_session(db: sqlite3.Connection, user_id: str, commit: bool = True) -> str:
+
+# --- Symmetric authenticated encryption for at-rest secrets ---
+#
+# We need to protect ``lm_apikey`` and ``remote_mcps.auth`` from a DB-only
+# compromise (filesystem read, leaked backup, sloppy volume mount).  Stdlib
+# doesn't ship a real AEAD primitive — adding ``cryptography`` would break
+# lm-chat's "zero-dependency" install promise.  Instead we compose primitives
+# already in the standard library:
+#
+#   - HKDF-SHA256 to derive distinct stream/MAC keys from ``LM_CHAT_SECRET``
+#   - SHAKE-256 (NIST SP 800-185 XOF) as a stream cipher: keystream =
+#     SHAKE256(stream_key || nonce).digest(len(plaintext))
+#   - HMAC-SHA256 over (nonce || ciphertext) for tamper resistance
+#
+# This is Encrypt-then-MAC.  Security depends on (a) nonce uniqueness — we
+# use 16 random bytes per encryption, so the birthday bound is ~2^64 writes
+# before reuse becomes likely; (b) keys never being reused for unrelated
+# purposes — HKDF's ``info`` parameter binds keys to a per-purpose context.
+#
+# Storage format: ``enc$v1$<base64(nonce(16) || ciphertext || mac(32))>``.
+# Any value missing the ``enc$v1$`` prefix is treated as legacy plaintext
+# and the next write re-encrypts it; this gives a transparent upgrade for
+# DBs created before the encryption rollout.
+
+_ENC_PREFIX = "enc$v1$"
+_ENC_NONCE_LEN = 16
+_ENC_MAC_LEN = 32  # SHA-256 digest
+
+
+def _hkdf_sha256(secret: bytes, info: bytes, length: int) -> bytes:
+    """RFC 5869 HKDF using SHA-256.  ``salt`` fixed at 32 zero bytes since
+    ``LM_CHAT_SECRET`` is already high-entropy (64 hex chars from secrets.token_hex)."""
+    prk = hmac.new(b"\x00" * 32, secret, hashlib.sha256).digest()
+    t = b""
+    okm = b""
+    counter = 1
+    while len(okm) < length:
+        t = hmac.new(prk, t + info + bytes([counter]), hashlib.sha256).digest()
+        okm += t
+        counter += 1
+    return okm[:length]
+
+
+def _enc_keys(context: str) -> tuple[bytes, bytes]:
+    """Derive (stream_key, mac_key) bound to ``context`` from the signing key.
+
+    The same ``context`` always yields the same pair, which is required so
+    that decryption later picks up the same keys.  Different contexts (one
+    per logical table column) keep the keys segregated.
+    """
+    secret = TOTP_SIGNING_KEY.encode()
+    stream_key = _hkdf_sha256(secret, ("lm-chat-enc-stream:" + context).encode(), 32)
+    mac_key    = _hkdf_sha256(secret, ("lm-chat-enc-mac:"    + context).encode(), 32)
+    return stream_key, mac_key
+
+
+def encrypt_at_rest(plaintext: str, context: str) -> str:
+    """Encrypt ``plaintext`` for storage with ``context``-bound keys.
+
+    Empty input returns empty output — there's nothing useful to encrypt
+    and several call sites store "" to mean "unset", which we preserve.
+    """
+    if not plaintext:
+        return ""
+    stream_key, mac_key = _enc_keys(context)
+    nonce = secrets.token_bytes(_ENC_NONCE_LEN)
+    pt_bytes = plaintext.encode("utf-8")
+    keystream = hashlib.shake_256(stream_key + nonce).digest(len(pt_bytes))
+    ct = bytes(p ^ k for p, k in zip(pt_bytes, keystream))
+    mac = hmac.new(mac_key, nonce + ct, hashlib.sha256).digest()
+    blob = nonce + ct + mac
+    return _ENC_PREFIX + base64.b64encode(blob).decode("ascii")
+
+
+def decrypt_at_rest(stored: str, context: str) -> str | None:
+    """Decrypt a value previously produced by ``encrypt_at_rest``.
+
+    Returns the original plaintext, an empty string for empty input, or
+    ``None`` if the value was tampered with or encrypted under a different
+    secret.  Legacy plaintext (no prefix) is returned unchanged so the next
+    write transparently upgrades it to the encrypted form.
+    """
+    if not stored:
+        return ""
+    if not stored.startswith(_ENC_PREFIX):
+        return stored  # legacy plaintext — caller re-encrypts on next write
+    try:
+        blob = base64.b64decode(stored[len(_ENC_PREFIX):], validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    if len(blob) < _ENC_NONCE_LEN + _ENC_MAC_LEN:
+        return None
+    nonce = blob[:_ENC_NONCE_LEN]
+    mac = blob[-_ENC_MAC_LEN:]
+    ct = blob[_ENC_NONCE_LEN:-_ENC_MAC_LEN]
+    _, mac_key = _enc_keys(context)
+    expected_mac = hmac.new(mac_key, nonce + ct, hashlib.sha256).digest()
+    if not hmac.compare_digest(mac, expected_mac):
+        return None
+    stream_key, _ = _enc_keys(context)
+    keystream = hashlib.shake_256(stream_key + nonce).digest(len(ct))
+    try:
+        return bytes(c ^ k for c, k in zip(ct, keystream)).decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+def create_session(
+    db: sqlite3.Connection,
+    user_id: str,
+    *,
+    commit: bool = True,
+    rotate: bool | None = None,
+) -> str:
+    """Insert a new session row and return the plaintext token.
+
+    ``rotate=True`` deletes every other session for the same user as part
+    of the same transaction, which is what fresh-login + change-password
+    flows want.  Defaults to the ``LM_CHAT_SINGLE_SESSION`` env-driven
+    policy when not specified.
+    """
     token = secrets.token_hex(32)
     token_hash = _hash_token(token)
     expires = time.time() + SESSION_EXPIRY
     db.execute("INSERT INTO sessions (token,user_id,created_at,expires_at) VALUES (?,?,?,?)",
                (token_hash, user_id, time.time(), expires))
+    if rotate is None:
+        rotate = _SINGLE_SESSION
+    if rotate:
+        # Done in the same transaction so a crash can't leave the user with
+        # two simultaneously-valid sessions.
+        db.execute(
+            "DELETE FROM sessions WHERE user_id = ? AND token != ?",
+            (user_id, token_hash),
+        )
     if commit:
         db.commit()
     return token  # return plaintext to client; only hash is stored
@@ -501,7 +752,10 @@ def validate_username(username: str | None) -> bool:
     return bool(USERNAME_RE.match(username or ""))
 
 def validate_password(password: str | None) -> bool:
-    return isinstance(password, str) and len(password) >= 8
+    return (
+        isinstance(password, str)
+        and PASSWORD_MIN_LENGTH <= len(password) <= PASSWORD_MAX_LENGTH
+    )
 
 
 # --- TOTP helpers (RFC 6238) ---
@@ -644,12 +898,20 @@ class Handler(BaseHTTPRequestHandler):
         return user
 
     def _verify_chat_owner(self, db, chat_id, user_id):
-        """Returns True if chat exists and belongs to user. Sends 404 if not. Caller must close db."""
+        """Returns True if chat exists and belongs to user. Sends 404 if not.
+
+        Ownership is checked unconditionally — the previous version skipped
+        the user_id comparison when AUTH was disabled, which leaked every
+        chat in the DB when an operator with multi-user history toggled auth
+        off.  The startup gate in ``__main__`` refuses that configuration
+        outright, but this is the defence-in-depth backstop: the moment a
+        request lands here, we enforce ownership regardless of mode.
+        """
         row = db.execute("SELECT user_id FROM chats WHERE id=?", (chat_id,)).fetchone()
         if not row:
             self._error(404, "chat not found")
             return False
-        if AUTH_ENABLED and row[0] != user_id:
+        if row[0] != user_id:
             self._error(404, "chat not found")
             return False
         return True
@@ -953,6 +1215,16 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()")
+        # HSTS — only valid over HTTPS per RFC 6797.  _secure_flag is truthy
+        # when LM_CHAT_HTTPS is set or the upstream proxy forwarded HTTPS.
+        # Browsers ignore Strict-Transport-Security on plain HTTP responses,
+        # but we still gate emission to avoid leaking the directive on
+        # mixed-deploy configs and to keep header counts low on health pings.
+        if _HSTS_MODE in ("true", "1", "on", "preload") and self._secure_flag():
+            directives = [f"max-age={_HSTS_MAX_AGE}", "includeSubDomains"]
+            if _HSTS_MODE == "preload":
+                directives.append("preload")
+            self.send_header("Strict-Transport-Security", "; ".join(directives))
 
     def _json_response_with_cookie(self, code, data, cookie_token=None, clear_cookie=False):
         """Like _json_response but can set/clear cookie before end_headers."""
@@ -1191,13 +1463,20 @@ class Handler(BaseHTTPRequestHandler):
         ip = self.client_address[0]
         if not check_rate_limit(ip):
             return self._error(429, "too many attempts, try again later")
+        # Operator-set setup token gates first-visitor-wins on public URLs.
+        # Constant-time compare prevents timing oracles on the token value;
+        # body["setup_token"] is allowed to be absent only when the env is unset.
+        if _SETUP_TOKEN:
+            supplied = (body.get("setup_token") or "")
+            if not isinstance(supplied, str) or not hmac.compare_digest(supplied, _SETUP_TOKEN):
+                return self._error(401, "setup token required")
         username = (body.get("username") or "").strip().lower()
         password = body.get("password") or ""
         display_name = (body.get("display_name") or "").strip() or username
         if not validate_username(username):
             return self._error(400, "username must be 3-32 chars, alphanumeric + underscore")
         if not validate_password(password):
-            return self._error(400, "password must be at least 8 characters")
+            return self._error(400, f"password must be {PASSWORD_MIN_LENGTH}-{PASSWORD_MAX_LENGTH} characters")
         user_id = uuid.uuid4().hex
         pw_hash, salt = hash_password(password)
         db = get_db()
@@ -1240,6 +1519,20 @@ class Handler(BaseHTTPRequestHandler):
         if not row or not verify_password(password, row["password_hash"], row["salt"]):
 
             return self._error(401, "invalid username or password")
+        # Silently upgrade the stored hash if it was computed with weaker
+        # parameters than the current floor (e.g. pre-0.5.0 legacy hashes).
+        # Done after a successful verify so we know ``password`` is correct.
+        if password_needs_rehash(row["password_hash"]):
+            try:
+                new_hash, new_salt = hash_password(password)
+                db.execute(
+                    "UPDATE users SET password_hash=?, salt=? WHERE id=?",
+                    (new_hash, new_salt, row["id"]),
+                )
+                db.commit()
+            except Exception as e:
+                # Non-fatal — log and continue; the user is authenticated.
+                log.warning(f"password rehash failed for user {row['id']}: {e}")
         # Check if 2FA is enabled
         if row["totp_enabled"]:
             partial = sign_partial_token(row["id"])
@@ -1272,7 +1565,7 @@ class Handler(BaseHTTPRequestHandler):
         if not validate_username(username):
             return self._error(400, "username must be 3-32 chars, alphanumeric + underscore")
         if not validate_password(password):
-            return self._error(400, "password must be at least 8 characters")
+            return self._error(400, f"password must be {PASSWORD_MIN_LENGTH}-{PASSWORD_MAX_LENGTH} characters")
         db = get_db()
         user_id = uuid.uuid4().hex
         pw_hash, salt = hash_password(password)
@@ -1324,7 +1617,7 @@ class Handler(BaseHTTPRequestHandler):
         current_password = body.get("current_password") or ""
         new_password = body.get("new_password") or ""
         if not validate_password(new_password):
-            return self._error(400, "new password must be at least 8 characters")
+            return self._error(400, f"new password must be {PASSWORD_MIN_LENGTH}-{PASSWORD_MAX_LENGTH} characters")
         db = get_db()
         row = db.execute("SELECT password_hash,salt FROM users WHERE id=?", (user["id"],)).fetchone()
         if not row or not verify_password(current_password, row["password_hash"], row["salt"]):
@@ -1470,10 +1763,14 @@ class Handler(BaseHTTPRequestHandler):
         result = {}
         for key, value in rows:
             if key == "lm_apikey":
-                result[key] = bool(value)
+                # Decrypt the stored token only to test whether it's set —
+                # the boolean is the only thing exposed to the client.
+                plain = decrypt_at_rest(value, "user_settings.lm_apikey")
+                result[key] = bool(plain)
             elif key == "remote_mcps":
+                plain = decrypt_at_rest(value, "user_settings.remote_mcps")
                 try:
-                    mcps = json.loads(value) if value else []
+                    mcps = json.loads(plain) if plain else []
                     result[key] = [{"label": m.get("label", ""), "url": m.get("url", ""),
                                     "on": m.get("on", True), "has_auth": bool(m.get("auth"))}
                                    for m in mcps]
@@ -1494,9 +1791,10 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             if key == "lm_apikey":
                 str_val = str(value).strip() if value else ""
+                stored = encrypt_at_rest(str_val, "user_settings.lm_apikey")
                 db.execute(
                     "INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)",
-                    (user["id"], key, str_val),
+                    (user["id"], key, stored),
                 )
                 saved[key] = bool(str_val)
             elif key == "remote_mcps":
@@ -1506,8 +1804,9 @@ class Handler(BaseHTTPRequestHandler):
                     (user["id"], key),
                 ).fetchone()
                 if row and row[0]:
+                    plain = decrypt_at_rest(row[0], "user_settings.remote_mcps")
                     try:
-                        existing = json.loads(row[0])
+                        existing = json.loads(plain) if plain else []
                     except (json.JSONDecodeError, TypeError):
                         existing = []
                 existing_auth = {(m.get("label"), m.get("url")): m.get("auth", "")
@@ -1522,9 +1821,12 @@ class Handler(BaseHTTPRequestHandler):
                         entry["auth"] = existing_auth.get(
                             (entry["label"], entry["url"]), "")
                     new_mcps.append(entry)
+                stored = encrypt_at_rest(
+                    json.dumps(new_mcps), "user_settings.remote_mcps"
+                )
                 db.execute(
                     "INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)",
-                    (user["id"], key, json.dumps(new_mcps)),
+                    (user["id"], key, stored),
                 )
                 saved[key] = [{"label": m["label"], "url": m["url"],
                                "on": m["on"], "has_auth": bool(m.get("auth"))}
@@ -1540,27 +1842,34 @@ class Handler(BaseHTTPRequestHandler):
         self._json_response(200, saved)
 
     def _get_user_lm_apikey(self, user_id):
-        """Get stored LM Studio API key for a user."""
+        """Get stored LM Studio API key for a user (decrypts at-rest value)."""
         db = get_db()
         row = db.execute(
             "SELECT value FROM user_settings WHERE user_id=? AND key='lm_apikey'",
             (user_id,),
         ).fetchone()
-        return row[0] if row and row[0] else ""
+        if not row or not row[0]:
+            return ""
+        plain = decrypt_at_rest(row[0], "user_settings.lm_apikey")
+        # ``None`` means tamper or wrong key — fail closed (no apikey).
+        return plain or ""
 
     def _get_user_remote_mcps(self, user_id):
-        """Get stored remote MCP configs (with auth) for a user."""
+        """Get stored remote MCP configs (with auth) for a user.  Decrypts at-rest."""
         db = get_db()
         row = db.execute(
             "SELECT value FROM user_settings WHERE user_id=? AND key='remote_mcps'",
             (user_id,),
         ).fetchone()
-        if row and row[0]:
-            try:
-                return json.loads(row[0])
-            except (json.JSONDecodeError, TypeError):
-                pass
-        return []
+        if not row or not row[0]:
+            return []
+        plain = decrypt_at_rest(row[0], "user_settings.remote_mcps")
+        if not plain:
+            return []
+        try:
+            return json.loads(plain)
+        except (json.JSONDecodeError, TypeError):
+            return []
 
     def _inject_mcp_auth(self, integrations, user_id):
         """Inject server-side auth headers into ephemeral_mcp integrations."""
@@ -1593,7 +1902,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, f"model too long (max {MODEL_MAX_LENGTH})")
 
         body["integrations"] = self._inject_mcp_auth(
-            body.get("integrations", DEFAULT_INTEGRATIONS), user["id"])
+            body.get("integrations", []), user["id"])
 
         self._resolve_chat_settings(body.get("chat_id"), user["id"], body)
         payload = self._build_lmstudio_payload(body)
@@ -1797,7 +2106,7 @@ class Handler(BaseHTTPRequestHandler):
             system_prompt += "\n\n## REMINDERS\n- Lead with the answer, then elaborate.\n- Use your tools when they add value.\n- When uncertain about a fact, say so clearly rather than guessing. It is better to be honest about uncertainty than to sound confident and be wrong."
 
         body["integrations"] = self._inject_mcp_auth(
-            body.get("integrations", DEFAULT_INTEGRATIONS), user["id"])
+            body.get("integrations", []), user["id"])
 
         self._resolve_chat_settings(body.get("chat_id"), user["id"], body)
         payload = self._build_lmstudio_payload(body, system_prompt=system_prompt or None, stream=True)
@@ -1954,7 +2263,9 @@ class Handler(BaseHTTPRequestHandler):
             log.error(f"chat stream collect: {e}", exc_info=True)
             try:
                 err_msg = json.dumps({"type": "error", "error": {"message": "Stream error — please try again"}})
-                self.wfile.write(f"data: {err_msg}\n\n".encode())
+                # Named event so app.js:processSSEBlock actually delivers it.
+                # Bare data-only frames are silently dropped by the client.
+                self.wfile.write(f"event: error\ndata: {err_msg}\n\n".encode())
                 self.wfile.write(b"data: [DONE]\n\n")
                 self.wfile.flush()
             except Exception:
@@ -1965,7 +2276,7 @@ class Handler(BaseHTTPRequestHandler):
         if not stream_complete and not content_parts:
             try:
                 err_msg = json.dumps({"type": "error", "error": {"message": "No response from model — it may be busy, crashed, or unable to reach a tool server"}})
-                self.wfile.write(f"data: {err_msg}\n\n".encode())
+                self.wfile.write(f"event: error\ndata: {err_msg}\n\n".encode())
                 self.wfile.write(b"data: [DONE]\n\n")
                 self.wfile.flush()
             except Exception:
@@ -2576,10 +2887,14 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         self._json_response(200, {"results": results, "mode": "text"})
 
     def _user_filter(self, user, table="chats"):
-        """Return (where_clause, params) for user-scoped queries."""
-        if AUTH_ENABLED:
-            return f"WHERE {table}.user_id = ?", (user["id"],)
-        return "", ()
+        """Return (where_clause, params) for user-scoped queries.
+
+        Always scoped — the same ownership leak that hit ``_verify_chat_owner``
+        was present here.  In auth-disabled mode every request comes from
+        ``user["id"] == "default"`` so the WHERE clause correctly returns only
+        the rows that belong to the default user.
+        """
+        return f"WHERE {table}.user_id = ?", (user["id"],)
 
     # --- Helpers ---
 
@@ -2624,7 +2939,7 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
 
     def _build_lmstudio_payload(self, body, system_prompt=None, stream=False):
         """Build the common LM Studio API payload."""
-        integrations = body.get("integrations", DEFAULT_INTEGRATIONS)
+        integrations = body.get("integrations", [])
         payload = {
             "model": body.get("model", ""),
             "input": body.get("input", ""),
@@ -3712,6 +4027,26 @@ if __name__ == "__main__":
                 log.info(f"Migrated {migrated} rows from default user to {admin_user}")
             db.commit()
     else:
+        # Safety gate: auth-disabled mode is only safe on a single-user DB.
+        # If anyone has been writing data under a non-default user_id (i.e.
+        # auth was previously enabled and real users existed), turning auth
+        # off would expose all of their chats/insights/pins to whoever hits
+        # the server.  Refuse to start in that configuration.
+        _db_safety = get_db()
+        _multiuser_count = _db_safety.execute(
+            "SELECT COUNT(*) FROM users WHERE username != 'default'"
+        ).fetchone()[0]
+        if _multiuser_count > 0:
+            log.error("=" * 60)
+            log.error("REFUSING TO START: LM_CHAT_AUTH=false on a multi-user DB")
+            log.error(
+                f"  Found {_multiuser_count} non-default users in {DB_PATH}."
+            )
+            log.error("  Auth-disabled mode shows the same data to every visitor.")
+            log.error("  Either set LM_CHAT_AUTH=true, point LM_CHAT_DB at a")
+            log.error("  fresh path, or delete the existing DB and re-create it.")
+            log.error("=" * 60)
+            sys.exit(2)
         log.info("Authentication: disabled (set LM_CHAT_AUTH=true to enable)")
 
     def shutdown_handler(signum, frame):

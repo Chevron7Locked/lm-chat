@@ -1092,16 +1092,6 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 syncModelSettings();
             };
 
-            function detectModelFamily(id) {
-                const m = (id || "").toLowerCase();
-                if (/qwen|qwq/.test(m)) return "qwen";
-                if (/llama|meta-llama/.test(m)) return "llama";
-                if (/mistral|mixtral/.test(m)) return "mistral";
-                if (/deepseek/.test(m)) return "deepseek";
-                if (/gemma/.test(m)) return "gemma";
-                if (/phi-[34]/.test(m)) return "phi";
-                return "default";
-            }
             function syncModelSettings() {
                 const m = cachedModels.find((x) => x.id === modelSel.value);
                 if (!m) return;

@@ -8,7 +8,7 @@ Architecture:
   - authed_client: session-authenticated helpers on top of app_server_auth
 """
 
-import hashlib, hmac, json, os, socket, struct, subprocess, sys, threading, time, urllib.error, urllib.request
+import hashlib, hmac, json, os, re, socket, struct, subprocess, sys, threading, time, urllib.error, urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -84,6 +84,11 @@ class _MockConfig:
             self.call_count: int          = 0
             self.reasoning_chunks: list   = []
             self.tool_calls: list         = []
+            # When True, ``_stream_response`` closes the connection without
+            # emitting ``chat.end`` — simulates LM Studio crashing or
+            # disconnecting mid-stream.  This is the only way to reach the
+            # server's "no response from model" branch from a unit test.
+            self.skip_chat_end: bool   = False
 
     def configure(self, **kwargs):
         with self._lock:
@@ -100,6 +105,7 @@ class _MockConfig:
                 "validate_schema":  self.validate_schema,
                 "reasoning_chunks": self.reasoning_chunks,
                 "tool_calls":       self.tool_calls,
+                "skip_chat_end":    self.skip_chat_end,
             }
 
 
@@ -239,7 +245,13 @@ class _MockLMStudioHandler(BaseHTTPRequestHandler):
             except BrokenPipeError:
                 return
 
-        # chat.end event carries response_id and usage
+        # chat.end event carries response_id and usage — unless the test asks
+        # us to crash out before sending it, which is how the server-side
+        # "no response from model" branch (server.py around line 1967) is
+        # reached.  The connection is simply closed and the server has to
+        # invent an error frame on the client's behalf.
+        if cfg["skip_chat_end"]:
+            return
         end_event = {
             "response_id": "resp-mock-001",
             "usage": {"input_tokens": 10, "output_tokens": len(chunks)},
@@ -557,3 +569,344 @@ def page_at_auth(page, app_server_auth):
     page.locator("#auth-btn").click()
     page.wait_for_selector("#input", timeout=10_000)
     return page
+
+
+# ---------------------------------------------------------------------------
+# In-process server fixture
+#
+# The subprocess fixtures above run server.py via Popen, which is great for
+# integration coverage but blind to two important things:
+#
+#   1. Coverage tracing inside the request handler — subprocess coverage works
+#      now (see tests/sitecustomize.py) but it only counts lines reached by a
+#      real HTTP round trip.  Many handler branches are easier to drive when
+#      Handler runs in the test process and we can poke its internals.
+#
+#   2. The SSE error-frame contract.  The browser-side parser at
+#      app.js:processSSEBlock returns early on any block missing an `event:`
+#      line.  Tests that consume the stream by `line.startswith("data:")`
+#      cannot detect the regression where server.py:1957 / 1967 emit
+#      data-only error frames that the client silently drops.
+#
+# ``inproc_server`` re-imports server.py with test-specific env vars (DB path,
+# mock LM Studio URL, deterministic LM_CHAT_SECRET) and starts an HTTPServer
+# on a free port in a daemon thread.  Re-importing is slower than mutating
+# globals, but it's the only honest way to handle the module-level reads of
+# AUTH_ENABLED / DB_PATH / LMSTUDIO at the top of server.py.
+# ---------------------------------------------------------------------------
+
+REPO_ROOT = Path(__file__).parent.parent
+
+
+def _ensure_server_on_path():
+    p = str(REPO_ROOT)
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+
+def _reimport_server_with_env(env_overrides: dict):
+    """Drop server from sys.modules and re-import with new env.
+
+    Server.py reads os.environ at import time for AUTH_ENABLED / DB_PATH /
+    LMSTUDIO / LM_CHAT_SECRET — these have to be set *before* the import,
+    not after.  We restore the previous os.environ values on fixture
+    teardown so we don't pollute the test process across fixtures.
+    """
+    _ensure_server_on_path()
+    previous = {k: os.environ.get(k) for k in env_overrides}
+    os.environ.update({k: str(v) for k, v in env_overrides.items()})
+
+    for mod_name in list(sys.modules):
+        if mod_name == "server" or mod_name.startswith("server."):
+            del sys.modules[mod_name]
+    import server  # noqa: I001 — must be after env+sys.modules manipulation
+
+    def restore():
+        for k, v in previous.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    return server, restore
+
+
+def _bootstrap_admin_user(srv, username: str, password: str) -> str | None:
+    """Replicate the admin-bootstrap block of server.py's ``__main__``.
+
+    server.py only creates the admin user in its ``if __name__ == '__main__'``
+    block, so an in-process import has tables but no admin row.  We run the
+    same INSERT + default-user migration here so the rest of the test setup
+    can log in normally.
+
+    Returns the new admin's user_id, or the existing one if the table was
+    already seeded.  Returns ``None`` only if a parallel test already created
+    a row under a different username — currently unreachable but kept honest.
+    """
+    db = srv.get_db()
+    count = db.execute("SELECT COUNT(*) FROM users WHERE username != 'default'").fetchone()[0]
+    if count > 0:
+        existing = db.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+        return existing[0] if existing else None
+
+    import uuid as _uuid
+    admin_id = _uuid.uuid4().hex
+    pw_hash, salt = srv.hash_password(password)
+    db.execute(
+        "INSERT INTO users (id,username,password_hash,salt,display_name,is_admin,created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (admin_id, username, pw_hash, salt, username, 1, time.time()),
+    )
+    # Match server.py's default→admin row migration so auth-disabled-mode chats
+    # don't get orphaned in tests that exercise both modes.
+    known_tables = {
+        "chats", "messages", "users", "sessions", "embeddings",
+        "user_settings", "rate_limits", "user_insights", "shared_chats",
+        "message_feedback", "pins",
+    }
+    for (tname,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
+        if tname not in known_tables:
+            continue
+        cols = [r[1] for r in db.execute(f"PRAGMA table_info({tname})").fetchall()]
+        if "user_id" in cols:
+            db.execute(f"UPDATE {tname} SET user_id=? WHERE user_id='default'", (admin_id,))
+    db.commit()
+    return admin_id
+
+
+class InProcServer:
+    """Handle returned by the ``inproc_server`` fixture.
+
+    Holds the base URL, the imported server module (so tests can poke module
+    globals like ``AUTH_ENABLED`` or inspect ``_pending_totp``), and the live
+    HTTPServer instance for graceful shutdown.
+    """
+
+    def __init__(self, *, url: str, module, server, restore_env):
+        self.url = url
+        self.module = module
+        self.server = server
+        self._restore_env = restore_env
+
+    def shutdown(self):
+        try:
+            self.server.shutdown()
+            self.server.server_close()
+        finally:
+            self._restore_env()
+
+
+def _start_inproc_server(
+    *,
+    mock_lmstudio_url: str,
+    db_path: str,
+    log_dir: str,
+    extra_env: dict | None = None,
+    auth: bool = True,
+    bootstrap_admin: bool = True,
+) -> "InProcServer":
+    """Spin up an in-process server with the given env.
+
+    Returns an ``InProcServer`` handle.  The caller is responsible for
+    calling ``handle.shutdown()`` to release the port and restore the
+    process-wide ``os.environ`` to its prior state.
+
+    Tests usually want the ``inproc_server`` or ``make_inproc_server``
+    fixtures rather than this helper — they wire ``mock_lmstudio``,
+    ``tmp_path``, and teardown automatically.
+    """
+    env = {
+        "LM_CHAT_DB":         db_path,
+        "LM_CHAT_AUTH":       "true" if auth else "false",
+        "LM_CHAT_ADMIN_USER": ADMIN_USER,
+        "LM_CHAT_ADMIN_PASS": ADMIN_PASS,
+        "LM_CHAT_LOGS":       log_dir,
+        # Deterministic so signed partial tokens are reproducible across tests.
+        "LM_CHAT_SECRET":     "test-secret-not-for-production-do-not-use" * 2,
+        "LMSTUDIO_URL":       mock_lmstudio_url,
+        # PORT is read by main() but not by Handler — set anyway for completeness.
+        "PORT":               "0",
+    }
+    if extra_env:
+        env.update({k: str(v) for k, v in extra_env.items()})
+
+    srv, restore = _reimport_server_with_env(env)
+    srv.init_db()
+    if auth and bootstrap_admin:
+        _bootstrap_admin_user(srv, ADMIN_USER, ADMIN_PASS)
+
+    port = _free_port()
+    httpd = srv.PooledHTTPServer(("127.0.0.1", port), srv.Handler)
+    httpd.daemon_threads = True
+    serve_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    serve_thread.start()
+
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        _wait_for_health(base_url, timeout=10)
+    except Exception:
+        httpd.shutdown()
+        httpd.server_close()
+        restore()
+        raise
+
+    handle = InProcServer(url=base_url, module=srv, server=httpd, restore_env=restore)
+    # Stash the thread on the handle so callers can join() it on shutdown.
+    handle._serve_thread = serve_thread  # type: ignore[attr-defined]
+    return handle
+
+
+@pytest.fixture
+def inproc_server(mock_lmstudio, tmp_path):
+    """Function-scoped in-process server with auth enabled and a fresh DB.
+
+    Yields an ``InProcServer`` handle.  See ``inproc_admin_client`` for a
+    pre-authenticated convenience wrapper.
+    """
+    handle = _start_inproc_server(
+        mock_lmstudio_url=mock_lmstudio.url,
+        db_path=str(tmp_path / "chats.db"),
+        log_dir=str(tmp_path / "logs"),
+    )
+    try:
+        yield handle
+    finally:
+        handle.shutdown()
+        t = getattr(handle, "_serve_thread", None)
+        if t is not None:
+            t.join(timeout=2)
+
+
+@pytest.fixture
+def make_inproc_server(mock_lmstudio, tmp_path):
+    """Factory that lets a single test spin up servers with custom env.
+
+    Use this when the test exercises behaviour that depends on a module-level
+    constant in server.py (HSTS, AUTH_ENABLED, setup token, etc.) — those are
+    read at import time, so each variation needs its own re-import.
+
+    Each call gets a fresh DB file under ``tmp_path``.  All handles produced
+    by the factory are shut down automatically at fixture teardown.
+    """
+    handles: list = []
+    counter = {"n": 0}
+
+    def _factory(
+        *,
+        auth: bool = True,
+        env: dict | None = None,
+        bootstrap_admin: bool = True,
+    ) -> "InProcServer":
+        n = counter["n"]
+        counter["n"] += 1
+        handle = _start_inproc_server(
+            mock_lmstudio_url=mock_lmstudio.url,
+            db_path=str(tmp_path / f"chats-{n}.db"),
+            log_dir=str(tmp_path / f"logs-{n}"),
+            extra_env=env,
+            auth=auth,
+            bootstrap_admin=bootstrap_admin,
+        )
+        handles.append(handle)
+        return handle
+
+    try:
+        yield _factory
+    finally:
+        for h in handles:
+            try:
+                h.shutdown()
+                t = getattr(h, "_serve_thread", None)
+                if t is not None:
+                    t.join(timeout=2)
+            except Exception:
+                pass
+
+
+@pytest.fixture
+def inproc_client(inproc_server) -> "AuthedClient":
+    """Pre-authenticated client pair (admin + regular user) over inproc_server."""
+    return AuthedClient(inproc_server.url)
+
+
+# ---------------------------------------------------------------------------
+# SSE parser parity helpers
+#
+# These mirror what app.js:processSSEBlock does so server-side tests can
+# assert that frames actually deliver to the browser.  The JS parser drops
+# any block without an ``event:`` line — that's the bug at server.py:1957
+# and 1967.  Importing this from tests prevents the test suite from being
+# blind to the same regression in different parser code paths.
+# ---------------------------------------------------------------------------
+
+class SSEFrame:
+    __slots__ = ("event", "data_raw", "data")
+
+    def __init__(self, event: str, data_raw: str, data):
+        self.event = event
+        self.data_raw = data_raw
+        self.data = data
+
+    def __repr__(self):
+        return f"SSEFrame(event={self.event!r}, data={self.data!r})"
+
+
+def parse_sse_like_client(stream_bytes: bytes) -> list[SSEFrame]:
+    """Apply the same parse rules as app.js:processSSEBlock.
+
+    The JS parser:
+      1. splits the response on blank-line frame boundaries
+      2. inside each frame, reads ``event:`` and ``data:`` lines
+      3. **returns early if no event line is present** — that's the bit that
+         silently swallows server.py's data-only error frames
+      4. JSON-decodes the data payload (best-effort)
+    """
+    text = stream_bytes.decode("utf-8", errors="replace")
+    # SSE frame separator is blank line (CRLF or LF).
+    frames: list[SSEFrame] = []
+    for raw_block in re.split(r"\r?\n\r?\n", text):
+        if not raw_block.strip():
+            continue
+        event = ""
+        data = ""
+        for line in raw_block.split("\n"):
+            line = line.rstrip("\r")
+            if line.startswith("event:"):
+                event = line[len("event:"):].strip()
+            elif line.startswith("data:"):
+                piece = line[len("data:"):].strip()
+                data = (data + "\n" + piece) if data else piece
+        if not event:
+            # Client-side parser drops these frames entirely.
+            continue
+        try:
+            parsed = json.loads(data) if data else {}
+        except json.JSONDecodeError:
+            parsed = {"_raw": data}
+        frames.append(SSEFrame(event=event, data_raw=data, data=parsed))
+    return frames
+
+
+def all_raw_frames(stream_bytes: bytes) -> list[dict]:
+    """Like ``parse_sse_like_client`` but keeps event-less frames too.
+
+    Useful for asserting *what the server actually wrote* (vs. what the
+    client would have rendered).  An entry is ``{"event": str|None,
+    "data": str|None}``.
+    """
+    text = stream_bytes.decode("utf-8", errors="replace")
+    out: list[dict] = []
+    for raw_block in re.split(r"\r?\n\r?\n", text):
+        if not raw_block.strip():
+            continue
+        event: str | None = None
+        data: str | None = None
+        for line in raw_block.split("\n"):
+            line = line.rstrip("\r")
+            if line.startswith("event:"):
+                event = line[len("event:"):].strip()
+            elif line.startswith("data:"):
+                piece = line[len("data:"):].strip()
+                data = (data + "\n" + piece) if data is not None else piece
+        out.append({"event": event, "data": data})
+    return out

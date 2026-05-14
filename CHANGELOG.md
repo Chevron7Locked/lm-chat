@@ -3,10 +3,43 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.5.0] — 2026-05-14
+
+Security-focused release.  Several findings from a code review were fixed in
+a single bundle; the at-rest format for stored secrets changed (existing DBs
+transparently upgrade on next write) and ``LM_CHAT_AUTH=false`` mode is now
+strictly single-user.  Backwards compatible for all data and HTTP routes —
+no client-side action required.
+
+### Added
+- Test architecture: in-process server fixtures (`tests/conftest.py: inproc_server`, `make_inproc_server`) so handler branches are reachable to coverage tracing.  Subprocess coverage capture (`tests/sitecustomize.py`) fixed for Homebrew Python.  `pyproject.toml fail_under` raised 40 → 68.
+- SSE error-frame contract tests (`tests/test_sse_error_frames.py`) including a source-level invariant that prevents future data-only frames from being added.
+- `LM_CHAT_HSTS` (and `LM_CHAT_HSTS_MAX_AGE`) env vars — opt-in HSTS header, only emitted when serving via HTTPS (LM_CHAT_HTTPS or X-Forwarded-Proto).  Accepts `true`/`1`/`on`/`preload`.
+- `LM_CHAT_SINGLE_SESSION` env — when set, login revokes all of the user's other sessions atomically.  Default unchanged (multi-device sessions allowed).
+- `LM_CHAT_SETUP_TOKEN` env — when set, `/api/auth/setup` requires the matching token in `body["setup_token"]`.  Closes the first-visitor-wins admin window on public URLs.
+- `LM_CHAT_SCRYPT_N` / `_R` / `_P` env vars — operator-tunable scrypt cost parameters.
+- Composite password-hash format `scrypt$n=N$r=R$p=P$<hex>`.  Each hash now carries its own cost; legacy bare-hex hashes still verify against their original parameters.
+- At-rest encryption for `user_settings.lm_apikey` and `user_settings.remote_mcps` — stdlib-only authenticated encryption (SHAKE-256 stream cipher + HMAC-SHA256, keys derived via HKDF from `LM_CHAT_SECRET`).  Format `enc$v1$<base64>`.  Legacy plaintext rows still readable and transparently upgraded on next write.
+- Startup safety gate: refuses to start with `LM_CHAT_AUTH=false` when the DB already contains non-default users (would otherwise expose every user's data to every visitor).
+
+### Fixed
+- SSE error frames at `_handle_chat_stream` (server.py around lines 1957 and 1967) emitted `data:` without an `event:` line — `app.js:processSSEBlock` silently dropped them, so users saw a dead spinner on "no response from model" and on stream-collect exceptions.  Now both paths emit `event: error`.
+- Password hashing: scrypt cost bumped from `n=16384` (OWASP 2017 floor) to `n=131072` (OWASP 2024).  Existing hashes verify against their original parameters and are silently upgraded on the next successful login.  scrypt `maxmem` ceiling raised to accommodate the new cost.
+- Password length: capped at 256 chars before scrypt.  Prevents a 50 MB-password DoS via `/api/auth/login` and `/api/auth/setup`.
+- Chat ownership: `_verify_chat_owner` and `_user_filter` no longer skip the user-id check when auth is disabled.  Combined with the startup gate above, this closes the cross-user leak that surfaced when an operator toggled auth off on a populated multi-user DB.
+- VERSION constant (server.py:14) was stuck at `"0.4.10"` while three subsequent tags shipped; now `"0.5.0"`.
+
+### Changed
+- Test suite: 80 new security-focused tests (password cap, HSTS, session rotation, setup token, scrypt cost, chat ownership, at-rest encryption, SSE contracts).  Total: 279 passing, 1 xfail.  Server.py coverage 0% → 72%.
+- README + SECURITY.md (next): document the four new env vars and the new at-rest encryption story.
+
+### Removed
+- `detectModelFamily()` (app.js) — unused since at least 0.3.x.
+- `DEFAULT_INTEGRATIONS` constant (server.py) — empty-list sentinel inlined at its three call sites.
+
 ## [0.4.11] — 2026-03-20
 
 ### Added
-- `CHECKLIST.md` — authoritative living list of every feature, API integration point, and known gap
 - SC/CoVe toggles added to global Settings → Chat tab (previously per-chat only); global defaults fall back from localStorage when no per-chat override is set
 - Per-chat settings panel restructured: system prompt + temperature always visible; advanced settings collapsed under expander
 - MCP servers now default to **on** — opt-out instead of opt-in; configured servers are active without manual toggling
