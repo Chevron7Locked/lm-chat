@@ -54,6 +54,21 @@ concurrency = ["thread"]
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
-# Baseline: 2026-03-17 — server.py + qr.py: 0% (tests run server.py as subprocess)
-# Raise fail_under incrementally as coverage improves (requires direct import fixtures)
-fail_under = 40
+# Baseline: 2026-05-14 — server.py: 69%, qr.py: 98%, total: 72%.
+#
+# Earlier comment claimed 0%: that wasn't true coverage of the codebase — it was
+# the sitecustomize.py subprocess-coverage hook silently failing to import
+# `coverage` under Homebrew Python, so every subprocess test contributed nothing.
+# tests/sitecustomize.py now compensates for the Homebrew site-packages quirk
+# and the in-process fixtures in tests/conftest.py exercise the request handler
+# directly.  Together they expose 72% of the application surface to tracing.
+#
+# Hot zones still uncovered (target for the next pass):
+#   - server.py:1187-1222  — _auth_setup (no fresh-install test in suite)
+#   - server.py:1502-1538  — _save_settings (per-user LM Studio API key path)
+#   - server.py:2849-2904  — _chain_of_verification (CoVe E2E)
+#   - server.py:3284-3360  — _refine_insights (insight refinement)
+#
+# fail_under is set ~3 points below the current measure to absorb test ordering
+# jitter without going lower than honest coverage.
+fail_under = 68

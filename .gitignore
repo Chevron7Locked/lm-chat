@@ -11,6 +11,12 @@ logs/
 __pycache__/
 *.pyc
 
+# Test coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
 # Security
 .lm_chat_secret
 .lm_chat*.pid
