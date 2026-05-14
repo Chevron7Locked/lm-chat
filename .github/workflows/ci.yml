@@ -24,7 +24,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install tools
         run: pip install ruff==0.15.5 codespell==2.4.2
@@ -48,7 +48,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install test dependencies
         run: pip install pytest coverage
@@ -82,7 +82,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install test dependencies
         run: pip install pytest pytest-playwright coverage
@@ -104,7 +104,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Server imports cleanly
         run: python -c "from server import Handler, init_db; print('imports ok')"
@@ -162,7 +162,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install Bandit + pip-audit
         run: pip install bandit[toml]==1.9.3 bandit-sarif-formatter==1.1.1 pip-audit==2.9.0
