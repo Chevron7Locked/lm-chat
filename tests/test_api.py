@@ -89,11 +89,19 @@ class TestStaticAndHealth:
 
 class TestModels:
     def test_models_proxied_from_mock(self, client):
+        """The proxy passes LM Studio's native shape through.
+
+        Real LM Studio returns ``{"models": [{"type": "llm", "key": ...,
+        "capabilities": {...}}, ...]}`` — verified against a live server.
+        Our /api/models forwards the same shape plus an
+        ``unsupported_params`` augmentation per model (see
+        test_unsupported_params_cache for that side).
+        """
         resp = client.get("/api/models")
         assert resp.status == 200
         data = client.json(resp)
-        assert "data" in data
-        assert any(m["id"] == "test-model" for m in data["data"])
+        assert "models" in data
+        assert any(m["key"] == "test-model" for m in data["models"])
 
 
 # ---------------------------------------------------------------------------

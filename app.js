@@ -1113,11 +1113,41 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 // Show instance config (read-only info from LM Studio)
                 const cfg = m.instance_config || {};
                 const el = $("model-config-info");
-                if (!el) return;
                 const caps = m.capabilities || {};
+
+                // Universal capability gate driven by the server's per-model
+                // ``capabilities.unsupported_params`` list — populated when
+                // LM Studio rejects a parameter with "does not (support|
+                // expose) ... configuration".  We disable any UI control
+                // whose value lives in that list so the user can't pick a
+                // setting the server will silently drop.
+                //
+                // Adding a new param to the gate is one entry in this map
+                // below: ``param-name → [element-id, ...]``.  Keep map keys
+                // matching the exact field name LM Studio reports back so
+                // the lookup is direct.
+                const PARAM_CONTROLS = {
+                    reasoning: ["s-reasoning", "cs-reasoning"],
+                };
+                const unsupported = new Set(caps.unsupported_params || []);
+                Object.entries(PARAM_CONTROLS).forEach(([param, ids]) => {
+                    const blocked = unsupported.has(param);
+                    const tooltip = blocked
+                        ? `This model does not expose ${param} configuration.`
+                        : "";
+                    ids.forEach((id) => {
+                        const ctl = document.getElementById(id);
+                        if (!ctl) return;
+                        ctl.disabled = blocked;
+                        ctl.title = tooltip;
+                    });
+                });
+
+                if (!el) return;
                 const tags = [];
                 if (caps.vision) tags.push("Vision");
                 if (caps.trained_for_tool_use) tags.push("Tool Use");
+                unsupported.forEach((p) => tags.push(`Fixed ${p[0].toUpperCase()}${p.slice(1)}`));
                 if (cfg.flash_attention) tags.push("Flash Attn");
                 if (cfg.offload_kv_cache_to_gpu) tags.push("KV→GPU");
                 const parts = [];
@@ -3130,15 +3160,40 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         const err = await resp
                             .json()
                             .catch(() => ({ error: "Stream failed" }));
+                        const errObj =
+                            (err && typeof err.error === "object" && err.error) ||
+                            {};
                         const errMsg =
-                            err.error?.message ||
-                            err.error ||
+                            errObj.message ||
+                            (typeof err.error === "string" ? err.error : null) ||
                             JSON.stringify(err);
-                        if (
-                            body.reasoning &&
-                            /does not support reasoning/i.test(errMsg)
-                        ) {
-                            delete body.reasoning;
+                        // Universal "model rejects this param" detection.
+                        // The server normally retries on its own and caches
+                        // the verdict for next time — this is the fallback
+                        // path for when the server's retry didn't fire
+                        // (older server, non-stream path, or a fresh model
+                        // whose first request races us).  Prefer the
+                        // structured ``error.param`` field; fall back to the
+                        // message-substring check for older LM Studio builds.
+                        const msgLower = (errMsg || "").toLowerCase();
+                        const looksUnsupported =
+                            msgLower.includes("does not support") ||
+                            msgLower.includes("does not expose") ||
+                            msgLower.includes("not configurable");
+                        let badParam = typeof errObj.param === "string" ? errObj.param : null;
+                        if (!badParam && looksUnsupported) {
+                            // Recover the param name from the message when
+                            // the server didn't include the structured field.
+                            // Add new param names here as they surface.
+                            for (const candidate of ["reasoning"]) {
+                                if (msgLower.includes(candidate)) {
+                                    badParam = candidate;
+                                    break;
+                                }
+                            }
+                        }
+                        if (badParam && looksUnsupported && badParam in body) {
+                            delete body[badParam];
                             resp = await apiFetch("/api/chat/stream", {
                                 method: "POST",
                                 headers: { "Content-Type": "application/json" },
@@ -3157,6 +3212,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                                 finishStream(meta);
                                 return;
                             }
+                            // The server-side cache now knows about this
+                            // (model, param) pair — refresh the models list
+                            // so the UI control disables for future picks
+                            // without waiting for the next page load.
+                            refreshModels().catch(() => {});
                         } else {
                             addErr(errMsg);
                             finishStream(meta);

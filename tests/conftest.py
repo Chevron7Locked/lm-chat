@@ -22,9 +22,26 @@ CSRF_HEADER = {"X-Requested-With": "lm-chat"}
 ADMIN_PASS  = "testpassword123"
 ADMIN_USER  = "admin"
 
+# Real LM Studio native /api/v1/models shape (verified live 2026-05-15):
+# top-level ``{"models": [...]}`` not OpenAI's ``{"data": [...]}``; each entry
+# carries ``type``, ``key``, ``capabilities`` (with at minimum vision +
+# trained_for_tool_use), ``loaded_instances``, and ``max_context_length``.
+# Keeping the canonical shape here means tests of our /api/models endpoint
+# stay honest — the proxy parses ``models[*]`` and would silently iterate
+# nothing on the wrong shape.
 CANNED_MODELS = {
-    "data": [
-        {"id": "test-model", "object": "model"},
+    "models": [
+        {
+            "type":              "llm",
+            "publisher":         "test",
+            "key":               "test-model",
+            "display_name":      "Test Model",
+            "architecture":      "test_arch",
+            "loaded_instances":  [{"id": "test-model", "config": {"context_length": 8192}}],
+            "max_context_length": 8192,
+            "format":            "test",
+            "capabilities":      {"vision": False, "trained_for_tool_use": True},
+        }
     ]
 }
 
@@ -89,6 +106,16 @@ class _MockConfig:
             # disconnecting mid-stream.  This is the only way to reach the
             # server's "no response from model" branch from a unit test.
             self.skip_chat_end: bool   = False
+            # When set, ``do_POST`` returns ``status_code`` with this JSON
+            # body instead of stdlib's HTML send_error page.  Lets tests
+            # simulate LM Studio's structured ``{"error": {"param":...,
+            # "code":..., "message":...}}`` shape — needed to exercise the
+            # universal "model rejects param" detection in server.py.
+            self.chat_error_body: dict | None = None
+            # Which model_id triggers ``chat_error_body``.  When None, the
+            # error fires for every model; when set, only that model.  Lets
+            # the same test fixture demo per-model behaviour.
+            self.chat_error_for_model: str | None = None
 
     def configure(self, **kwargs):
         with self._lock:
@@ -106,6 +133,8 @@ class _MockConfig:
                 "reasoning_chunks": self.reasoning_chunks,
                 "tool_calls":       self.tool_calls,
                 "skip_chat_end":    self.skip_chat_end,
+                "chat_error_body":  self.chat_error_body,
+                "chat_error_for_model": self.chat_error_for_model,
             }
 
 
@@ -161,16 +190,46 @@ class _MockLMStudioHandler(BaseHTTPRequestHandler):
                 self.send_error(400, str(e))
                 return
 
-        if cfg["status_code"] != 200:
-            self.send_error(cfg["status_code"])
-            return
-
-        # Detect whether the client wants streaming
+        # Per-request structured error (LM Studio-style) — used to exercise
+        # the universal "model rejects param" cache in server.py.  Fires
+        # once and self-clears so the next retry from the server can pass.
         try:
-            req_data = json.loads(raw)
+            req_data = json.loads(raw) if raw else {}
         except Exception:
             req_data = {}
         is_stream = req_data.get("stream", False)
+        err_body = cfg["chat_error_body"]
+        if err_body is not None:
+            target = cfg["chat_error_for_model"]
+            req_model = req_data.get("model") or ""
+            should_fire = target is None or target == req_model
+            # The cache fires only when the offending param is actually in
+            # the request — otherwise the retry-without-param looks the
+            # same as a normal request and we'd loop forever.
+            err_param = (err_body.get("error") or {}).get("param") if isinstance(err_body, dict) else None
+            if err_param and err_param not in req_data:
+                should_fire = False
+            if should_fire:
+                payload_bytes = json.dumps(err_body).encode()
+                # status_code defaults to 200; when an error body is queued
+                # we obviously want a 4xx.  Honour an explicit non-200 if
+                # the caller set one, else fall back to 400 (the code real
+                # LM Studio uses for the structured rejection).
+                resp_code = cfg["status_code"] if cfg["status_code"] != 200 else 400
+                self.send_response(resp_code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload_bytes)))
+                self.end_headers()
+                self.wfile.write(payload_bytes)
+                # Self-clear so the server's retry can succeed.
+                with self.config._lock:
+                    self.config.chat_error_body = None
+                    self.config.chat_error_for_model = None
+                return
+
+        if cfg["status_code"] != 200:
+            self.send_error(cfg["status_code"])
+            return
 
         if is_stream:
             self._stream_response(cfg)

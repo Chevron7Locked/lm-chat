@@ -1435,7 +1435,7 @@ class Handler(BaseHTTPRequestHandler):
         (re.compile(r'^/api/auth/me$'),                                        lambda s,m,b: s._auth_me()),
         (re.compile(r'^/api/auth/users$'),                                     lambda s,m,b: s._auth_list_users()),
         (re.compile(r'^/api/auth/settings$'),                                  lambda s,m,b: s._get_settings()),
-        (re.compile(r'^/api/models$'),                                         lambda s,m,b: s._proxy_get("/api/v1/models", (s._get_user() or {}).get("id"))),
+        (re.compile(r'^/api/models$'),                                         lambda s,m,b: s._get_models()),
         (re.compile(r'^/api/chats$'),                                          lambda s,m,b: s._list_chats()),
         (re.compile(r'^/api/chats/(?P<id>[^/]+)/messages$'),                   lambda s,m,b: s._get_messages(m.group("id"))),
         (re.compile(r'^/api/insights$'),                                       lambda s,m,b: s._list_insights()),
@@ -2414,12 +2414,60 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(exc, urllib.error.HTTPError):
                 err_body = exc.read().decode("utf-8", errors="replace")
                 try:
-                    err_detail = json.loads(err_body).get("error", {}).get("message", err_body)
+                    err_obj = json.loads(err_body).get("error", {})
+                    if not isinstance(err_obj, dict):
+                        err_obj = {"message": str(err_obj)}
                 except Exception:
-                    err_detail = err_body
-                # Auto-retry without reasoning if the model doesn't support it (MLX models)
-                if exc.code == 400 and "does not support reasoning" in err_detail and "reasoning" in payload:
-                    payload.pop("reasoning", None)
+                    err_obj = {"message": err_body}
+                err_detail = err_obj.get("message") or err_body
+                # Universal "model rejects this param" detection.  LM Studio
+                # returns the offending parameter name in ``error.param`` and
+                # the message phrasing "does not (support|expose) ...
+                # configuration" — that combination signals the model has no
+                # API surface for the param at all (as opposed to "value out
+                # of range" which uses the same ``code: invalid_value`` but
+                # different message wording).
+                #
+                # Verified shapes against LM Studio (2026-05):
+                #   {"error": {"param": "reasoning", "code": "invalid_value",
+                #              "message": "Model '...' does not expose reasoning configuration."}}
+                # Older builds may omit ``param``; we fall back to a known
+                # message-substring list keyed by param name.
+                err_lower = err_detail.lower() if isinstance(err_detail, str) else ""
+                bad_param = err_obj.get("param") if isinstance(err_obj.get("param"), str) else None
+                if not bad_param:
+                    # Legacy phrasings without ``error.param``.  Extend this
+                    # map as new ones surface — keep the mapping centralised
+                    # so the retry stays universal.
+                    legacy_patterns = {
+                        "reasoning": ("does not support reasoning", "does not expose reasoning"),
+                    }
+                    for p, markers in legacy_patterns.items():
+                        if any(marker in err_lower for marker in markers):
+                            bad_param = p
+                            break
+                model_unsupports_param = (
+                    exc.code == 400
+                    and bad_param is not None
+                    and bad_param in payload
+                    and ("does not support" in err_lower or "does not expose" in err_lower
+                         or "not configurable" in err_lower)
+                )
+                if model_unsupports_param and bad_param:
+                    # Cache (model, param) so _build_lmstudio_payload strips
+                    # it up front on every subsequent request.  No more
+                    # wasted round-trip per chat turn.
+                    model_id = payload.get("model") or ""
+                    if model_id:
+                        with Handler._unsupported_params_lock:
+                            Handler._unsupported_params.setdefault(
+                                model_id, set()
+                            ).add(bad_param)
+                        log.info(
+                            f"unsupported_params: cached {{{model_id!r}: {bad_param!r}}} "
+                            f"(LM Studio said: {err_detail!r})"
+                        )
+                    payload.pop(bad_param, None)
                     req2 = urllib.request.Request(
                         f"{LMSTUDIO}/api/v1/chat",
                         data=json.dumps(payload).encode(),
@@ -3200,6 +3248,19 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             payload["max_output_tokens"] = body["max_output_tokens"]
         if body.get("reasoning"):
             payload["reasoning"] = body["reasoning"]
+
+        # Universal capability gate — strip any parameter the model has
+        # previously rejected with "does not (support|expose)".  Populated
+        # by the retry block in ``_handle_chat_stream`` once we've seen the
+        # structured error from LM Studio.  Lookup is O(1) and runs after
+        # every other payload-building step so it catches any param we
+        # might add in future code paths without needing per-param coupling.
+        model_id = payload.get("model") or body.get("model") or ""
+        if model_id:
+            with Handler._unsupported_params_lock:
+                rejected = set(Handler._unsupported_params.get(model_id, ()))
+            for p in rejected:
+                payload.pop(p, None)
         # context_length omitted — it's a load-time parameter in LM Studio.
         # Sending it per-request triggers JIT model reloads.
         if body.get("incognito"):
@@ -4043,6 +4104,19 @@ Curated list:"""
     _distill_lock: threading.Lock = threading.Lock()
     _distilling: set = set()  # chat_ids currently being distilled
 
+    # Per-model record of LM Studio chat parameters the model rejects with
+    # "does not (support|expose) ... configuration".  Populated lazily from
+    # the first 400 response per model+param pair; subsequent requests for
+    # the same model strip those params up front so we never burn another
+    # round-trip on a known-rejection.  Kept as ``{model_key: set[param]}``
+    # rather than a reasoning-specific scalar so the same mechanism handles
+    # any future param LM Studio gates per model (vision-only models that
+    # reject ``images``, tool-call-only models that reject ``integrations``,
+    # etc.).  Also surfaced via /api/models so the SPA can disable matching
+    # UI controls — no more dropdowns whose value the server silently drops.
+    _unsupported_params: dict = {}
+    _unsupported_params_lock: threading.Lock = threading.Lock()
+
     def _serve_file(self, filename, content_type):
         path = os.path.join(os.path.dirname(__file__), filename)
         try:
@@ -4098,6 +4172,54 @@ Curated list:"""
         except Exception as e:
             log.error(f"proxy GET: {e}")
             self._error(502, "upstream service unavailable")
+
+    def _get_models(self):
+        """Fetch LM Studio's /api/v1/models and augment each LLM entry with
+        ``capabilities.unsupported_params`` — the list of chat parameters
+        we've empirically observed the model rejects.
+
+        LM Studio doesn't (yet) expose per-model param capabilities in its
+        own metadata — the feature request is open at
+        https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1659.
+        We populate a server-side cache lazily on the first 400 response
+        per (model, param) pair (see the retry block in
+        ``_handle_chat_stream``) and surface it here so the SPA can disable
+        matching UI controls — no more dropdowns whose value the server
+        silently drops on every subsequent request.
+        """
+        user = self._get_user() or {}
+        user_id = user.get("id")
+        headers = {}
+        token = self._get_lmstudio_token(user_id)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(f"{LMSTUDIO}/api/v1/models", headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                payload = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            try:
+                self._json_response(e.code, json.loads(e.read()))
+            except Exception:
+                self._error(e.code, "upstream rejected models request")
+            return
+        except Exception as e:
+            log.error(f"proxy /api/v1/models: {e}")
+            self._error(502, "upstream service unavailable")
+            return
+
+        # Snapshot the cache once so the augmentation is consistent across
+        # all entries in the response.
+        with Handler._unsupported_params_lock:
+            snapshot = {k: list(v) for k, v in Handler._unsupported_params.items()}
+
+        for m in payload.get("models", []) or []:
+            if m.get("type") != "llm":
+                continue
+            caps = m.setdefault("capabilities", {})
+            caps["unsupported_params"] = sorted(snapshot.get(m.get("key"), []))
+
+        self._json_response(200, payload)
 
     def log_message(self, format, *args):
         # Suppress the default ``"GET / HTTP/1.1" 200 -`` line — our

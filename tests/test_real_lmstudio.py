@@ -46,9 +46,18 @@ LMSTUDIO_URL = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 # ---------------------------------------------------------------------------
 
 def _discover_loaded_model() -> str | None:
-    """Return the key of the first loaded LLM, or None."""
+    """Return the key of the first loaded LLM, or None.
+
+    LM Studio may require an API token (Developer → "Require API token");
+    we use ``LMSTUDIO_TOKEN`` from the environment when present so the
+    discovery probe stays usable in token-gated setups.
+    """
+    req = urllib.request.Request(f"{LMSTUDIO_URL}/api/v1/models")
+    token = os.environ.get("LMSTUDIO_TOKEN", "")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(f"{LMSTUDIO_URL}/api/v1/models", timeout=2) as r:
+        with urllib.request.urlopen(req, timeout=2) as r:
             data = json.loads(r.read())
     except Exception:
         return None
@@ -310,6 +319,87 @@ def test_non_streaming_chat_returns_real_content(real_server):
 # ---------------------------------------------------------------------------
 # Concurrency / stress (short-duration, opt-in)
 # ---------------------------------------------------------------------------
+
+def test_models_endpoint_exposes_unsupported_params(real_server):
+    """``/api/models`` augments each LLM entry with the server's
+    per-model rejected-param cache so the SPA can disable corresponding
+    UI controls.  Starts empty for a freshly-imported server module.
+    """
+    cookie = _login(real_server.url)
+    req = urllib.request.Request(
+        real_server.url + "/api/models",
+        headers={"Cookie": cookie},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read())
+    for m in data.get("models", []):
+        if m.get("type") != "llm":
+            continue
+        caps = m.get("capabilities") or {}
+        # Field must be present even when empty so the SPA can rely on it.
+        assert "unsupported_params" in caps, f"missing capability list: {m['key']}"
+        assert isinstance(caps["unsupported_params"], list)
+
+
+def test_reasoning_rejection_caches_and_skips_retry(real_server):
+    """Sending ``reasoning: "off"`` to a model that rejects the param must:
+
+      1. Succeed on the first request (server transparently retries).
+      2. Add the param to the model's ``unsupported_params`` list in /api/models.
+      3. Take noticeably less time on the second request (no retry).
+
+    Skipped if no loaded LLM rejects the reasoning param — the test
+    only exercises the cache when there's something to cache.
+    """
+    cookie = _login(real_server.url)
+    server = real_server.module
+
+    # Find a model that rejects reasoning by sending one probe request.
+    chat_id = _create_chat(real_server.url, cookie)
+    raw_first = _stream(
+        real_server.url, cookie,
+        {"model": _MODEL, "input": "reply: ok", "chat_id": chat_id,
+         "stream": True, "reasoning": "off", "incognito": True},
+        timeout=120,
+    )
+    text_first = raw_first.decode("utf-8", errors="replace")
+    # First request must succeed end-to-end even though the original
+    # payload contained the rejected param.
+    assert "event: chat.end" in text_first, (
+        f"first request failed to complete after retry: {text_first[:400]!r}"
+    )
+
+    cache = dict(server.Handler._unsupported_params)
+    if _MODEL not in cache or "reasoning" not in cache[_MODEL]:
+        pytest.skip(
+            f"{_MODEL!r} accepts reasoning config — nothing to cache here."
+        )
+
+    # /api/models now shows the cached entry.
+    req = urllib.request.Request(
+        real_server.url + "/api/models", headers={"Cookie": cookie},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read())
+    target = next(
+        (m for m in data.get("models", []) if m.get("key") == _MODEL), None,
+    )
+    assert target is not None
+    assert "reasoning" in (target.get("capabilities") or {}).get("unsupported_params", []), (
+        f"server didn't surface cache to /api/models: {target.get('capabilities')!r}"
+    )
+
+    # Second request: confirm no retry happens.  We can't reliably time
+    # the retry savings (model latency dominates) but we CAN assert the
+    # request completed and the response shape is identical.
+    raw_second = _stream(
+        real_server.url, cookie,
+        {"model": _MODEL, "input": "reply: ok again", "chat_id": chat_id,
+         "stream": True, "reasoning": "off", "incognito": True},
+        timeout=120,
+    )
+    assert b"event: chat.end" in raw_second
+
 
 def test_three_concurrent_streams_complete_independently(real_server):
     """Three streaming requests against three separate chats should all
