@@ -2631,17 +2631,15 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchall()
                 known = "\n".join(f"- {r[0]}" for r in existing) if existing else "(none yet)"
 
-                distill_payload = {
-                    "model": body.get("model", ""),
-                    "input": self.DISTILL_PROMPT.format(
-                        known_context=known, conversation=convo_for_distill
+                raw = self._run_llm_distill(
+                    self.DISTILL_PROMPT.format(
+                        known_context=known, conversation=convo_for_distill,
                     ),
-                    "stream": False, "store": False,
-                    "integrations": [],
-                    "temperature": 0.3,
-                }
-                distill_data = self._lmstudio_chat(distill_payload, user["id"], timeout=30)
-                raw = self._extract_content(distill_data) or ""
+                    user["id"],
+                    model=body.get("model", ""),
+                    temperature=0.3,
+                    timeout=30,
+                )
                 new = self._parse_and_store_insights(db, user["id"], raw, chat_id)
                 if new:
                     log.debug(f"memory: distilled {len(new)} insights during compaction of {chat_id}")
@@ -2952,6 +2950,28 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())
+
+    def _run_llm_distill(self, prompt, user_id, *, model="", temperature=0.3, timeout=60):
+        """One-shot LLM call for distillation / refinement / compaction prompts.
+
+        Same call pattern repeated at three sites (``_compact_chat``,
+        ``_distill_insights``, ``_refine_insights``): build a non-streaming
+        payload with no integrations and a cool-ish temperature, fire it at
+        LM Studio, pull the content out with ``_extract_content``.
+
+        Returns the parsed text (or empty string when the response can't be
+        parsed) — does NOT raise; callers handle empty results their own way.
+        """
+        payload = {
+            "model": model,
+            "input": prompt,
+            "stream": False,
+            "store": False,
+            "integrations": [],
+            "temperature": temperature,
+        }
+        data = self._lmstudio_chat(payload, user_id, timeout=timeout)
+        return self._extract_content(data) or ""
 
     def _get_lmstudio_token(self, user_id=None):
         """Get LM Studio auth token from server-side user settings, fall back to env var.
@@ -3442,17 +3462,10 @@ Distill insights (or respond "none" if nothing new):"""
             prompt = self.DISTILL_PROMPT.format(
                 known_context=known_context, conversation=conversation
             )
-            payload = {
-                "model": model,
-                "input": prompt,
-                "stream": False,
-                "store": False,
-                "integrations": [],
-                "temperature": 0.3,
-            }
             try:
-                data = self._lmstudio_chat(payload, user["id"], timeout=60)
-                raw_text = self._extract_content(data) or ""
+                raw_text = self._run_llm_distill(
+                    prompt, user["id"], model=model, temperature=0.3, timeout=60,
+                )
             except Exception as e:
                 log.error(f"LLM distillation failed: {e}")
                 return self._error(502, "LLM distillation failed")
@@ -3648,17 +3661,10 @@ Curated list:"""
 
         prompt = self.REFINE_PROMPT.format(insights="\n".join(insight_lines))
 
-        payload = {
-            "model": model,
-            "input": prompt,
-            "stream": False,
-            "store": False,
-            "integrations": [],
-            "temperature": 0.2,
-        }
         try:
-            data = self._lmstudio_chat(payload, user["id"], timeout=60)
-            raw_text = self._extract_content(data) or ""
+            raw_text = self._run_llm_distill(
+                prompt, user["id"], model=model, temperature=0.2, timeout=60,
+            )
         except Exception as e:
             return self._error(502, f"LLM refinement failed: {e}")
 

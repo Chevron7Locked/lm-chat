@@ -341,6 +341,13 @@ No frameworks. No transpilation. No node_modules. No build step.
 | `LM_CHAT_DB` | `./chats.db` | SQLite database path (Docker: `/app/data/chats.db`) |
 | `LM_CHAT_LOGS` | `./logs` | Log directory path (Docker: `/app/data/logs`) |
 | `LM_CHAT_HTTPS` | *(off)* | Secure cookie flag (also auto-detected via `X-Forwarded-Proto`) |
+| `LM_CHAT_HSTS` | *(off)* | Opt-in HSTS header.  `true`/`on`/`1` → standard directive; `preload` → also include `preload` token.  Only emitted over HTTPS. |
+| `LM_CHAT_HSTS_MAX_AGE` | `63072000` | HSTS max-age in seconds (2 years). |
+| `LM_CHAT_SINGLE_SESSION` | *(off)* | When set, every fresh login revokes the user's other sessions atomically. |
+| `LM_CHAT_SETUP_TOKEN` | *(off)* | When set, `/api/auth/setup` requires `body["setup_token"]` to match — closes the first-visitor-wins admin window on public URLs. |
+| `LM_CHAT_SCRYPT_N` | `131072` | scrypt cost parameter (OWASP 2024 floor).  Lower for testing on slow hardware. |
+| `LM_CHAT_SCRYPT_R` | `8` | scrypt block size. |
+| `LM_CHAT_SCRYPT_P` | `1` | scrypt parallelization. |
 | `LMSTUDIO_MCP_JSON` | `~/.lmstudio/mcp.json` | Path to LM Studio MCP config |
 
 ### Docker
