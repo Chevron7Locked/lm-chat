@@ -211,22 +211,37 @@ def bootstrap_admin_if_needed(db, admin_user=None, admin_pass=None, announce=Tru
     return admin_id, True
 
 
-def init_db():
-    """Run once at startup: create tables and run migrations."""
-    db = sqlite3.connect(DB_PATH)
+def _apply_pragmas(db: sqlite3.Connection) -> None:
+    """Connection-level tuning.  Idempotent; safe to call on every open."""
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA synchronous=NORMAL")
     db.execute("PRAGMA cache_size=-64000")
     db.execute("PRAGMA temp_store=MEMORY")
     db.execute("PRAGMA journal_size_limit=67108864")
-    db.execute("""CREATE TABLE IF NOT EXISTS chats (
+
+
+# Tables, indexes, FTS5 virtual tables, and triggers.  Every statement is
+# IF NOT EXISTS so first-run and upgrade paths share the same code.  Listed
+# in (roughly) the order they were added to lm-chat — newest tables sink
+# to the bottom so the diff stays small as the schema grows.
+_SCHEMA_STATEMENTS: tuple[str, ...] = (
+    # Core conversation tables.  Columns added across 0.2.x — 0.3.x are
+    # inlined here so fresh installs get the current shape in one go; the
+    # ``_MIGRATIONS`` list below covers upgrades from older DBs.
+    """CREATE TABLE IF NOT EXISTS chats (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL DEFAULT 'New chat',
         model TEXT,
         response_id TEXT,
-        updated_at REAL NOT NULL
-    )""")
-    db.execute("""CREATE TABLE IF NOT EXISTS messages (
+        updated_at REAL NOT NULL,
+        user_id TEXT,
+        summary TEXT,
+        summary_up_to INTEGER,
+        pinned INTEGER DEFAULT 0,
+        folder TEXT DEFAULT '',
+        settings TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
         role TEXT NOT NULL,
@@ -234,60 +249,45 @@ def init_db():
         name TEXT,
         args TEXT,
         output TEXT,
-        created_at REAL NOT NULL
-    )""")
-    db.execute("""CREATE TABLE IF NOT EXISTS users (
+        created_at REAL NOT NULL,
+        token_count INTEGER
+    )""",
+    # Auth — totp_* columns added in 0.1.3 but inlined for fresh installs.
+    """CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         salt TEXT NOT NULL,
         display_name TEXT,
         is_admin INTEGER DEFAULT 0,
-        created_at REAL NOT NULL
-    )""")
-    db.execute("""CREATE TABLE IF NOT EXISTS sessions (
+        created_at REAL NOT NULL,
+        totp_secret TEXT,
+        totp_enabled INTEGER DEFAULT 0,
+        last_totp_counter INTEGER DEFAULT 0
+    )""",
+    """CREATE TABLE IF NOT EXISTS sessions (
         token TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         created_at REAL NOT NULL,
         expires_at REAL NOT NULL
-    )""")
-    # Schema migrations — add columns that may not exist yet
-    _MIGRATIONS = [
-        ("chats", "user_id", "TEXT"),
-        ("chats", "summary", "TEXT"),
-        ("chats", "summary_up_to", "INTEGER"),
-        ("users", "totp_secret", "TEXT"),
-        ("users", "totp_enabled", "INTEGER DEFAULT 0"),
-        ("users", "last_totp_counter", "INTEGER DEFAULT 0"),
-        ("messages", "token_count", "INTEGER"),
-        ("chats", "pinned", "INTEGER DEFAULT 0"),
-        ("chats", "folder", "TEXT DEFAULT ''"),
-        ("chats", "settings", "TEXT"),
-        ("user_insights", "ups", "REAL DEFAULT 0"),
-        ("user_insights", "downs", "REAL DEFAULT 0"),
-        ("user_insights", "last_feedback_at", "REAL"),
-    ]
-    for table, col, typedef in _MIGRATIONS:
-        try:
-            db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typedef}")
-        except sqlite3.OperationalError:
-            pass
-    db.execute("""CREATE TABLE IF NOT EXISTS embeddings (
+    )""",
+    # Memory / embeddings
+    """CREATE TABLE IF NOT EXISTS embeddings (
         message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
         vector BLOB NOT NULL
-    )""")
-    db.execute("""CREATE TABLE IF NOT EXISTS user_settings (
+    )""",
+    """CREATE TABLE IF NOT EXISTS user_settings (
         user_id TEXT NOT NULL,
         key TEXT NOT NULL,
         value TEXT,
         PRIMARY KEY(user_id, key)
-    )""")
-    db.execute("""CREATE TABLE IF NOT EXISTS rate_limits (
+    )""",
+    """CREATE TABLE IF NOT EXISTS rate_limits (
         ip TEXT PRIMARY KEY,
         attempts INTEGER DEFAULT 0,
         first_attempt REAL
-    )""")
-    db.execute("""CREATE TABLE IF NOT EXISTS user_insights (
+    )""",
+    """CREATE TABLE IF NOT EXISTS user_insights (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         content TEXT NOT NULL,
@@ -303,82 +303,146 @@ def init_db():
         downs REAL DEFAULT 0,
         last_feedback_at REAL,
         FOREIGN KEY (origin_chat_id) REFERENCES chats(id) ON DELETE SET NULL
-    )""")
-    db.execute("""CREATE INDEX IF NOT EXISTS idx_insights_user_state
-        ON user_insights(user_id, state)""")
-    db.execute("""CREATE INDEX IF NOT EXISTS idx_insights_user_cat
-        ON user_insights(user_id, category)""")
-    db.execute("""CREATE TABLE IF NOT EXISTS insight_activations (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    message_id  INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    insight_id  TEXT    NOT NULL REFERENCES user_insights(id) ON DELETE CASCADE,
-    created_at  REAL    NOT NULL
-)""")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_activations_message ON insight_activations(message_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_activations_insight ON insight_activations(insight_id)")
-    db.execute("""CREATE TABLE IF NOT EXISTS message_feedback (
-    message_id  INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    user_id     TEXT    NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    rating      INTEGER NOT NULL CHECK(rating IN (-1, 1)),
-    created_at  REAL    NOT NULL,
-    PRIMARY KEY (message_id, user_id)
-)""")
-    db.execute("""CREATE TABLE IF NOT EXISTS pins (
-    id          TEXT    PRIMARY KEY,
-    user_id     TEXT    NOT NULL REFERENCES users(id)     ON DELETE CASCADE,
-    message_id  INTEGER          REFERENCES messages(id)  ON DELETE SET NULL,
-    chat_id     TEXT             REFERENCES chats(id)     ON DELETE SET NULL,
-    chat_title  TEXT    NOT NULL,
-    content     TEXT    NOT NULL,
-    pin_title   TEXT,
-    pinned_at   REAL    NOT NULL
-)""")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_pins_user    ON pins(user_id, pinned_at DESC)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_pins_chat    ON pins(user_id, chat_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_pins_message ON pins(message_id)")
-    db.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS pins_fts USING fts5(
-    content,
-    chat_title,
-    pin_title,
-    content='pins',
-    content_rowid='rowid'
-)""")
-    db.execute("""CREATE TRIGGER IF NOT EXISTS pins_ai AFTER INSERT ON pins BEGIN
-    INSERT INTO pins_fts(rowid, content, chat_title, pin_title)
-    VALUES (new.rowid, new.content, new.chat_title, new.pin_title);
-END""")
-    db.execute("""CREATE TRIGGER IF NOT EXISTS pins_ad AFTER DELETE ON pins BEGIN
-    INSERT INTO pins_fts(pins_fts, rowid, content, chat_title, pin_title)
-    VALUES ('delete', old.rowid, old.content, old.chat_title, old.pin_title);
-END""")
-    db.execute("""CREATE TRIGGER IF NOT EXISTS pins_au AFTER UPDATE ON pins BEGIN
-    INSERT INTO pins_fts(pins_fts, rowid, content, chat_title, pin_title)
-    VALUES ('delete', old.rowid, old.content, old.chat_title, old.pin_title);
-    INSERT INTO pins_fts(rowid, content, chat_title, pin_title)
-    VALUES (new.rowid, new.content, new.chat_title, new.pin_title);
-END""")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_messages_chat_role ON messages(chat_id, role)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_chats_user_id ON chats(user_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_message_id ON embeddings(message_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)")
-    db.execute("""CREATE TABLE IF NOT EXISTS shared_chats (
+    )""",
+    """CREATE TABLE IF NOT EXISTS insight_activations (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id  INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        insight_id  TEXT    NOT NULL REFERENCES user_insights(id) ON DELETE CASCADE,
+        created_at  REAL    NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS message_feedback (
+        message_id  INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        user_id     TEXT    NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+        rating      INTEGER NOT NULL CHECK(rating IN (-1, 1)),
+        created_at  REAL    NOT NULL,
+        PRIMARY KEY (message_id, user_id)
+    )""",
+    # Pins + FTS index — 0.3.0
+    """CREATE TABLE IF NOT EXISTS pins (
+        id          TEXT    PRIMARY KEY,
+        user_id     TEXT    NOT NULL REFERENCES users(id)     ON DELETE CASCADE,
+        message_id  INTEGER          REFERENCES messages(id)  ON DELETE SET NULL,
+        chat_id     TEXT             REFERENCES chats(id)     ON DELETE SET NULL,
+        chat_title  TEXT    NOT NULL,
+        content     TEXT    NOT NULL,
+        pin_title   TEXT,
+        pinned_at   REAL    NOT NULL
+    )""",
+    """CREATE VIRTUAL TABLE IF NOT EXISTS pins_fts USING fts5(
+        content,
+        chat_title,
+        pin_title,
+        content='pins',
+        content_rowid='rowid'
+    )""",
+    # Sharing — 0.1.3
+    """CREATE TABLE IF NOT EXISTS shared_chats (
         share_id TEXT PRIMARY KEY,
         chat_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
         title TEXT NOT NULL,
         messages TEXT NOT NULL,
         created_at REAL NOT NULL
-    )""")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_shared_chats_chat_id ON shared_chats(chat_id)")
-    # Ensure "default" user exists for auth-disabled mode (FK constraints require it)
+    )""",
+    # Indexes — keep adjacent to the table they cover so the diff stays
+    # easy to read when adding new columns.
+    "CREATE INDEX IF NOT EXISTS idx_messages_chat_id    ON messages(chat_id)",
+    "CREATE INDEX IF NOT EXISTS idx_messages_chat_role  ON messages(chat_id, role)",
+    "CREATE INDEX IF NOT EXISTS idx_chats_user_id       ON chats(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_embeddings_message_id ON embeddings(message_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sessions_user_id    ON sessions(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_insights_user_state ON user_insights(user_id, state)",
+    "CREATE INDEX IF NOT EXISTS idx_insights_user_cat   ON user_insights(user_id, category)",
+    "CREATE INDEX IF NOT EXISTS idx_activations_message ON insight_activations(message_id)",
+    "CREATE INDEX IF NOT EXISTS idx_activations_insight ON insight_activations(insight_id)",
+    "CREATE INDEX IF NOT EXISTS idx_pins_user           ON pins(user_id, pinned_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_pins_chat           ON pins(user_id, chat_id)",
+    "CREATE INDEX IF NOT EXISTS idx_pins_message        ON pins(message_id)",
+    "CREATE INDEX IF NOT EXISTS idx_shared_chats_chat_id ON shared_chats(chat_id)",
+    # FTS5 sync triggers — keep last so the pins table + pins_fts virtual
+    # table they reference already exist.
+    """CREATE TRIGGER IF NOT EXISTS pins_ai AFTER INSERT ON pins BEGIN
+        INSERT INTO pins_fts(rowid, content, chat_title, pin_title)
+        VALUES (new.rowid, new.content, new.chat_title, new.pin_title);
+    END""",
+    """CREATE TRIGGER IF NOT EXISTS pins_ad AFTER DELETE ON pins BEGIN
+        INSERT INTO pins_fts(pins_fts, rowid, content, chat_title, pin_title)
+        VALUES ('delete', old.rowid, old.content, old.chat_title, old.pin_title);
+    END""",
+    """CREATE TRIGGER IF NOT EXISTS pins_au AFTER UPDATE ON pins BEGIN
+        INSERT INTO pins_fts(pins_fts, rowid, content, chat_title, pin_title)
+        VALUES ('delete', old.rowid, old.content, old.chat_title, old.pin_title);
+        INSERT INTO pins_fts(rowid, content, chat_title, pin_title)
+        VALUES (new.rowid, new.content, new.chat_title, new.pin_title);
+    END""",
+)
+
+
+# Column-level migrations for upgrades from pre-0.2.x DBs.  Each entry is
+# ``(table, column, definition)``.  ``ALTER TABLE ADD COLUMN`` is a no-op
+# (raises ``OperationalError`` and we swallow) when the column already
+# exists, so on fresh installs every row here is dead weight but cheap.
+# When you add a new column to a long-lived table, append it here AND to
+# the CREATE TABLE so fresh installs get the column too.
+_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("chats",         "user_id",           "TEXT"),
+    ("chats",         "summary",           "TEXT"),
+    ("chats",         "summary_up_to",     "INTEGER"),
+    ("users",         "totp_secret",       "TEXT"),
+    ("users",         "totp_enabled",      "INTEGER DEFAULT 0"),
+    ("users",         "last_totp_counter", "INTEGER DEFAULT 0"),
+    ("messages",      "token_count",       "INTEGER"),
+    ("chats",         "pinned",            "INTEGER DEFAULT 0"),
+    ("chats",         "folder",            "TEXT DEFAULT ''"),
+    ("chats",         "settings",          "TEXT"),
+    ("user_insights", "ups",               "REAL DEFAULT 0"),
+    ("user_insights", "downs",             "REAL DEFAULT 0"),
+    ("user_insights", "last_feedback_at",  "REAL"),
+)
+
+
+def _create_schema(db: sqlite3.Connection) -> None:
+    """Run every CREATE statement in ``_SCHEMA_STATEMENTS``.  Idempotent."""
+    for stmt in _SCHEMA_STATEMENTS:
+        db.execute(stmt)
+
+
+def _run_migrations(db: sqlite3.Connection) -> None:
+    """Apply column-level migrations.  Silently skips columns that already
+    exist (the ``OperationalError`` swallow) so fresh installs are no-ops."""
+    for table, col, typedef in _MIGRATIONS:
+        try:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typedef}")
+        except sqlite3.OperationalError:
+            pass
+
+
+def _seed_default_user(db: sqlite3.Connection) -> None:
+    """Ensure the ``default`` user row exists.
+
+    Required for FK integrity in auth-disabled mode, where every chat/pin
+    row is owned by ``user_id = 'default'``.  Empty hash/salt make the
+    account unusable as a login target — auth-disabled mode bypasses login
+    anyway.
+    """
     db.execute(
         """INSERT OR IGNORE INTO users (id, username, password_hash, salt, display_name, is_admin, created_at)
            VALUES ('default', 'default', '', '', 'User', 1, ?)""",
         (time.time(),),
     )
-    db.commit()
-    db.close()
+
+
+def init_db():
+    """Run once at startup: pragmas → schema → migrations → seed."""
+    db = sqlite3.connect(DB_PATH)
+    try:
+        _apply_pragmas(db)
+        _create_schema(db)
+        _run_migrations(db)
+        _seed_default_user(db)
+        db.commit()
+    finally:
+        db.close()
 
 
 _thread_local = threading.local()
