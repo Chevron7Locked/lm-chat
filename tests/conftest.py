@@ -632,46 +632,24 @@ def _reimport_server_with_env(env_overrides: dict):
 
 
 def _bootstrap_admin_user(srv, username: str, password: str) -> str | None:
-    """Replicate the admin-bootstrap block of server.py's ``__main__``.
+    """Bootstrap an admin row via the production helper.
 
-    server.py only creates the admin user in its ``if __name__ == '__main__'``
-    block, so an in-process import has tables but no admin row.  We run the
-    same INSERT + default-user migration here so the rest of the test setup
-    can log in normally.
-
-    Returns the new admin's user_id, or the existing one if the table was
-    already seeded.  Returns ``None`` only if a parallel test already created
-    a row under a different username — currently unreachable but kept honest.
+    Delegates to ``server.bootstrap_admin_if_needed`` so the test path
+    exercises the same code that runs in ``__main__`` — keeps the two in
+    lockstep instead of forking the logic.  Tests want quiet output so we
+    pass ``announce=False``.
     """
     db = srv.get_db()
-    count = db.execute("SELECT COUNT(*) FROM users WHERE username != 'default'").fetchone()[0]
-    if count > 0:
-        existing = db.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
-        return existing[0] if existing else None
-
-    import uuid as _uuid
-    admin_id = _uuid.uuid4().hex
-    pw_hash, salt = srv.hash_password(password)
-    db.execute(
-        "INSERT INTO users (id,username,password_hash,salt,display_name,is_admin,created_at) "
-        "VALUES (?,?,?,?,?,?,?)",
-        (admin_id, username, pw_hash, salt, username, 1, time.time()),
+    admin_id, _created = srv.bootstrap_admin_if_needed(
+        db, admin_user=username, admin_pass=password, announce=False,
     )
-    # Match server.py's default→admin row migration so auth-disabled-mode chats
-    # don't get orphaned in tests that exercise both modes.
-    known_tables = {
-        "chats", "messages", "users", "sessions", "embeddings",
-        "user_settings", "rate_limits", "user_insights", "shared_chats",
-        "message_feedback", "pins",
-    }
-    for (tname,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
-        if tname not in known_tables:
-            continue
-        cols = [r[1] for r in db.execute(f"PRAGMA table_info({tname})").fetchall()]
-        if "user_id" in cols:
-            db.execute(f"UPDATE {tname} SET user_id=? WHERE user_id='default'", (admin_id,))
-    db.commit()
-    return admin_id
+    if admin_id:
+        return admin_id
+    # Already seeded — look up the row for the requested username.
+    row = db.execute(
+        "SELECT id FROM users WHERE username=?", (username,),
+    ).fetchone()
+    return row[0] if row else None
 
 
 class InProcServer:

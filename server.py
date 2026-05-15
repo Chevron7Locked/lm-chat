@@ -132,6 +132,85 @@ def _token_overlap(a, b):
     return len(ta & tb) / len(ta | tb)
 
 
+_DEFAULT_USER_MIGRATION_TABLES = (
+    "chats", "messages", "users", "sessions", "embeddings",
+    "user_settings", "rate_limits", "user_insights", "shared_chats",
+    "message_feedback", "pins",
+)
+
+
+def bootstrap_admin_if_needed(db, admin_user=None, admin_pass=None, announce=True):
+    """If no non-default users exist, create one from env / passed args.
+
+    Same logic used to live inlined in ``__main__``; lifted here so the test
+    suite can call it directly without re-implementing the credential read
+    + default-user data migration.
+
+    Args:
+        db: active sqlite connection.
+        admin_user: override LM_CHAT_ADMIN_USER (defaults to "admin").
+        admin_pass: override LM_CHAT_ADMIN_PASS.  If empty AND no env value,
+                    a random password is generated and printed to stderr.
+        announce: when True (production), print the generated password to
+                  stderr so the operator can read it once.  Tests pass
+                  ``announce=False`` to keep stderr quiet.
+
+    Returns: ``(admin_id, was_created)``.  When ``was_created`` is False the
+    DB already had at least one non-default user and nothing was changed.
+    """
+    count = db.execute(
+        "SELECT COUNT(*) FROM users WHERE username != 'default'"
+    ).fetchone()[0]
+    if count > 0:
+        return None, False
+
+    admin_user = admin_user or os.environ.get("LM_CHAT_ADMIN_USER", "admin")
+    admin_pass = admin_pass or os.environ.get("LM_CHAT_ADMIN_PASS", "")
+    generated = False
+    if not admin_pass:
+        admin_pass = secrets.token_urlsafe(12)
+        generated = True
+
+    if announce and generated:
+        print(f"\n{'='*50}", file=sys.stderr)
+        print("  Admin account created", file=sys.stderr)
+        print(f"  Username: {admin_user}", file=sys.stderr)
+        print(f"  Password: {admin_pass}", file=sys.stderr)
+        print("  (set LM_CHAT_ADMIN_PASS to use your own)", file=sys.stderr)
+        print(f"{'='*50}\n", file=sys.stderr)
+    elif announce:
+        log.info(f"Admin account created: {admin_user}")
+
+    admin_id = uuid.uuid4().hex
+    pw_hash, salt = hash_password(admin_pass)
+    db.execute(
+        "INSERT INTO users (id,username,password_hash,salt,display_name,is_admin,created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (admin_id, admin_user, pw_hash, salt, admin_user, 1, time.time()),
+    )
+
+    # Promote any rows owned by the auth-disabled "default" user to the new
+    # admin so they don't get orphaned when auth flips on.  Loop tolerates
+    # tables added in future migrations as long as they keep user_id.
+    migrated = 0
+    for (tname,) in db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall():
+        if tname not in _DEFAULT_USER_MIGRATION_TABLES:
+            continue
+        cols = [r[1] for r in db.execute(f"PRAGMA table_info({tname})").fetchall()]
+        if "user_id" in cols:
+            r = db.execute(
+                f"UPDATE {tname} SET user_id=? WHERE user_id='default'",
+                (admin_id,),
+            )
+            migrated += r.rowcount
+    if announce and migrated:
+        log.info(f"Migrated {migrated} rows from default user to {admin_user}")
+    db.commit()
+    return admin_id, True
+
+
 def init_db():
     """Run once at startup: create tables and run migrations."""
     db = sqlite3.connect(DB_PATH)
@@ -4042,46 +4121,7 @@ if __name__ == "__main__":
     if AUTH_ENABLED:
         log.info("Authentication: ENABLED (set LM_CHAT_AUTH=false to disable)")
         db = get_db()
-        count = db.execute("SELECT COUNT(*) FROM users WHERE username != 'default'").fetchone()[0]
-        if count == 0:
-            # Auto-provision default admin account
-            admin_user = os.environ.get("LM_CHAT_ADMIN_USER", "admin")
-            admin_pass = os.environ.get("LM_CHAT_ADMIN_PASS", "")
-            if not admin_pass:
-                admin_pass = secrets.token_urlsafe(12)
-                # Print credentials to stderr only — never to log files
-                print(f"\n{'='*50}", file=sys.stderr)
-                print("  Admin account created", file=sys.stderr)
-                print(f"  Username: {admin_user}", file=sys.stderr)
-                print(f"  Password: {admin_pass}", file=sys.stderr)
-                print("  (set LM_CHAT_ADMIN_PASS to use your own)", file=sys.stderr)
-                print(f"{'='*50}\n", file=sys.stderr)
-            else:
-                log.info(f"Admin account created: {admin_user}")
-            admin_id = uuid.uuid4().hex
-            pw_hash, salt = hash_password(admin_pass)
-            db.execute(
-                "INSERT INTO users (id,username,password_hash,salt,display_name,is_admin,created_at) VALUES (?,?,?,?,?,?,?)",
-                (admin_id, admin_user, pw_hash, salt, admin_user, 1, time.time()),
-            )
-            # Migrate any data from auth-disabled "default" user to new admin
-            migrated = 0
-            KNOWN_TABLES = {
-                "chats", "messages", "users", "sessions", "embeddings",
-                "user_settings", "rate_limits", "user_insights", "shared_chats",
-                "message_feedback", "pins",  # new in v0.3.0
-            }
-            for table in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
-                tname = table[0]
-                if tname not in KNOWN_TABLES:
-                    continue
-                cols = [r[1] for r in db.execute(f"PRAGMA table_info({tname})").fetchall()]
-                if "user_id" in cols:
-                    r = db.execute(f"UPDATE {tname} SET user_id=? WHERE user_id='default'", (admin_id,))
-                    migrated += r.rowcount
-            if migrated:
-                log.info(f"Migrated {migrated} rows from default user to {admin_user}")
-            db.commit()
+        bootstrap_admin_if_needed(db)
     else:
         # Safety gate: auth-disabled mode is only safe on a single-user DB.
         # If anyone has been writing data under a non-default user_id (i.e.
