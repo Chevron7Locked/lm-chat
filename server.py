@@ -3,7 +3,7 @@ lm-chat — lightweight web UI for LM Studio with MCP tool integration.
 Serves a PWA-ready single-page app, proxies to LM Studio, persists chats in SQLite.
 """
 
-import base64, binascii, gzip, hashlib, hmac, html as html_mod, json, logging, math, os, re, secrets, signal, sqlite3, struct, sys, threading, time, uuid, urllib.request, urllib.error
+import base64, binascii, gzip, hashlib, hmac, html as html_mod, json, logging, math, os, re, secrets, signal, sqlite3, struct, subprocess, sys, threading, time, uuid, urllib.request, urllib.error
 import http.cookies
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -2306,7 +2306,10 @@ class Handler(BaseHTTPRequestHandler):
         # send SSE keep-alive comments every 10 s.  Without this, the 30-second
         # Handler.timeout fires on the idle client socket while LM Studio spends
         # 18-24 s connecting its MCP integrations before sending the first byte.
-        _result = [None, None]  # [resp, exc]
+        # [resp, exc] — mutable slot the background thread writes into.
+        # Annotated as ``list[Any]`` so the type checker accepts the
+        # Exception or response-object assignments below.
+        _result: list = [None, None]
         _ready  = threading.Event()
 
         def _do_open():
@@ -2342,7 +2345,7 @@ class Handler(BaseHTTPRequestHandler):
                         headers=headers,
                         method="POST",
                     )
-                    _result2 = [None, None]
+                    _result2: list = [None, None]
                     _ready2  = threading.Event()
                     def _do_open2():
                         try:
@@ -2358,9 +2361,15 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         exc = _result2[1] or Exception("retry failed")
                 if exc is not None:
-                    err_msg = json.dumps({"type": "error", "error": {"message": f"LM Studio error {str(exc.code)+': ' if hasattr(exc, 'code') else ''}{err_detail}"}})
+                    # exc.code only exists on HTTPError; narrow via isinstance
+                    # so the type checker accepts the attribute access.
+                    if isinstance(exc, urllib.error.HTTPError):
+                        prefix = f"{exc.code}: "
+                    else:
+                        prefix = ""
+                    err_msg = json.dumps({"type": "error", "error": {"message": f"LM Studio error {prefix}{err_detail}"}})
                 else:
-                    exc = None  # retry succeeded — fall through to normal streaming below
+                    err_msg = ""  # retry succeeded — won't be written below
             else:
                 log.error(f"chat stream: {exc}")
                 err_msg = json.dumps({"type": "error", "error": {"message": "upstream service unavailable"}})
@@ -3960,14 +3969,16 @@ Curated list:"""
         except FileNotFoundError:
             self.send_error(404)
             return
+        # Either pull (raw, gz, etag) from the in-memory cache when the
+        # mtime matches, or compute them fresh and store.  Branches assign
+        # the same three names so the rest of the method can use them
+        # unconditionally.
         with self._file_cache_lock:
-            cached = self._file_cache.get(filename)
-            if cached and cached[2] == st.st_mtime:
-                raw, gz, etag = cached[0], cached[1], cached[3]
-                cached = True
-            else:
-                cached = False
-        if not cached:
+            entry = self._file_cache.get(filename)
+            fresh = entry is not None and entry[2] == st.st_mtime
+        if fresh:
+            raw, gz, _mtime, etag = entry  # type: ignore[misc]
+        else:
             with open(path, "rb") as f:
                 raw = f.read()
             gz = gzip.compress(raw, compresslevel=6)
@@ -4029,7 +4040,6 @@ def _kill_stale_server():
             old_pid = int(open(pidfile).read().strip())
             if old_pid != os.getpid():
                 # Verify PID is actually server.py before killing
-                import subprocess
                 try:
                     cmdline = subprocess.check_output(
                         ["ps", "-p", str(old_pid), "-o", "command="], text=True
@@ -4070,7 +4080,6 @@ def _kill_stale_server():
         s.close()
         # Something is listening — only kill it if it's actually server.py
         try:
-            import subprocess
             out = subprocess.check_output(["lsof", "-ti", f":{PORT}"], text=True).strip()
             for pid_str in out.splitlines():
                 pid = int(pid_str)
@@ -4149,7 +4158,9 @@ if __name__ == "__main__":
         log.info("Shutting down gracefully...")
         # Set the internal flag directly — server.shutdown() deadlocks when
         # called from a signal handler in the same thread as serve_forever().
-        server._BaseServer__shutdown_request = True
+        # The attribute name is BaseServer's name-mangled private member;
+        # type checkers don't see through the mangling.
+        server._BaseServer__shutdown_request = True  # type: ignore[attr-defined]
 
     signal.signal(signal.SIGTERM, shutdown_handler)
     signal.signal(signal.SIGINT, shutdown_handler)
