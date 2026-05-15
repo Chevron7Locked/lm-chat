@@ -1412,31 +1412,39 @@ class Handler(BaseHTTPRequestHandler):
         self._send_security_headers()
         self.end_headers()
 
-    def do_POST(self):
+    def _read_json_body(self):
+        """Read and JSON-decode the request body, applying MAX_BODY_SIZE.
+
+        Returns the parsed body on success.  On any framing/size/parse error
+        it calls ``self._error`` with the appropriate status and returns the
+        sentinel ``None`` so callers can short-circuit dispatch.
+        """
         try:
             length = int(self.headers.get("Content-Length", 0))
             if length < 0:
-                return self._error(400, "invalid content-length")
+                self._error(400, "invalid content-length")
+                return None
             if length > MAX_BODY_SIZE:
-                return self._error(413, "request too large")
-            body = json.loads(self.rfile.read(length)) if length else {}
+                self._error(413, "request too large")
+                return None
+            return json.loads(self.rfile.read(length)) if length else {}
         except (ValueError, json.JSONDecodeError):
-            return self._error(400, "invalid request body")
+            self._error(400, "invalid request body")
+            return None
+
+    def do_POST(self):
+        body = self._read_json_body()
+        if body is None:
+            return
         self._dispatch("POST", body)
 
     def do_DELETE(self):
         self._dispatch("DELETE")
 
     def do_PATCH(self):
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            if length < 0:
-                return self._error(400, "invalid content-length")
-            if length > MAX_BODY_SIZE:
-                return self._error(413, "request too large")
-            body = json.loads(self.rfile.read(length)) if length else {}
-        except (ValueError, json.JSONDecodeError):
-            return self._error(400, "invalid request body")
+        body = self._read_json_body()
+        if body is None:
+            return
         self._dispatch("PATCH", body)
 
     # --- Auth endpoints ---

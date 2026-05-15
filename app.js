@@ -463,6 +463,15 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     msg.textContent = "Passwords do not match";
                     return;
                 }
+                // Password change invalidates the user's other sessions
+                // server-side and rotates this one's cookie to a fresh
+                // token.  Any background fetch (e.g. checkConnection's
+                // poll) that started under the old cookie can still land
+                // afterward with a 401.  Without the suppression window,
+                // apiFetch would show the login screen even though the
+                // change succeeded.  2 s comfortably covers the in-flight
+                // window for the small set of background polls this app
+                // runs; lengthen it if you add new ones.
                 _suppressAuth = true;
                 try {
                     const r = await fetch("/api/auth/change-password", {
@@ -802,7 +811,10 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 if (c)
                     try {
                         return JSON.parse(c);
-                    } catch {}
+                    } catch {
+                        // Corrupted localStorage blob — fall back to defaults
+                        // silently so an old/broken value never blocks the UI.
+                    }
                 return DEFAULT_STARTERS;
             }
             function saveStarters(list) {
@@ -890,6 +902,13 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 input = $("input"),
                 send = $("send"),
                 modelSel = $("model-sel");
+
+            // Set true while a programmatic scroll is in flight so the user's
+            // scroll handlers don't interpret it as manual movement (which
+            // would disable autoscroll-on-new-token).  Was an implicit global
+            // before — caught both as a `'use strict'` hazard and because
+            // linters lose the binding for cross-reference.
+            let ignoreScrollEvent = false;
 
             // --- Server settings state ---
             let serverSettings = { hasApiKey: false, lmUrl: "" };
@@ -1079,7 +1098,10 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 } catch (e) {
                     setConn("red", "Disconnected");
                     if (!modelSel.options.length)
-                        modelSel.innerHTML = "<option>qwen3.5-9b</option>";
+                        // Empty value + disabled so any accidental send is
+                        // rejected at the server with a clear "model too short"
+                        // error rather than going out under a fake model id.
+                        modelSel.innerHTML = '<option value="" disabled selected>No model — LM Studio offline</option>';
                 }
             }
             // checkConnection interval is started inside initApp after auth check
@@ -1132,7 +1154,7 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     const el = $("s-memory");
                     if (el) el.checked = d.memory_enabled !== "false";
                 })
-                .catch(() => {});
+                .catch((e) => console.error("insight settings GET failed:", e));
 
             // --- System Prompt Presets ---
             const PRESETS = {
@@ -1437,7 +1459,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     on: localStorage.getItem("lsc-mcp-" + s.id) !== "0",
                 }));
                 renderMcpList();
-            }).catch(() => {});
+            }).catch((e) => console.error("mcp servers GET failed:", e));
             renderMcpList();
 
             // --- Remote MCP servers (H4: auth stored server-side) ---
@@ -1453,7 +1475,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ remote_mcps: payload }),
-                }).catch(() => {});
+                }).catch((e) => console.error("remote_mcps toggle save failed:", e));
             }
             function renderRemoteMcps() {
                 const list = $("remote-mcp-list");
@@ -1518,7 +1540,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             renderRemoteMcps();
                         }
                     })
-                    .catch(() => {});
+                    .catch((e) => console.error("remote_mcps add/edit save failed:", e));
                 renderRemoteMcps();
             }
             async function setMcpAuth(i) {
@@ -1553,7 +1575,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             renderRemoteMcps();
                         }
                     })
-                    .catch(() => {});
+                    .catch((e) => console.error("remote_mcps auth save failed:", e));
             }
             function removeRemoteMcp(i) {
                 remoteMcps.splice(i, 1);
@@ -2788,7 +2810,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             text: text.slice(0, match.index).trimEnd(),
                             followups,
                         };
-                } catch {}
+                } catch {
+                    // Malformed JSON in the assistant's followups block —
+                    // the model didn't follow the format.  Fall through to
+                    // returning the original text with no followups.
+                }
                 return { text, followups: [] };
             }
 
@@ -3289,7 +3315,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 if (data) {
                     try {
                         parsed = JSON.parse(data);
-                    } catch (e) {}
+                    } catch (e) {
+                        // SSE frame with non-JSON payload — event handlers
+                        // below check for the fields they need on `parsed`
+                        // and tolerate the empty object, so leaving parsed={}
+                        // is the right fallback.  Logging would spam the
+                        // console on every keep-alive comment.
+                    }
                 }
 
                 switch (event) {
@@ -5716,6 +5748,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 if (authed) await initApp();
             })();
             if ("serviceWorker" in navigator)
+                // SW registration failures (file 404, scope mismatch,
+                // private-window restrictions) must not break the page —
+                // the app works fine without the PWA install prompt.
                 navigator.serviceWorker.register("/sw.js").catch(() => {});
 
 // --- Expose functions needed by dynamically-rendered HTML (innerHTML) ---
