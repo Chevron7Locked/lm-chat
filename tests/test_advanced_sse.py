@@ -78,38 +78,39 @@ def _stream_body(chat_id=None, **kwargs):
 
 class TestSCCoVe:
     def test_sc_enabled_triggers_multiple_upstream_calls(self, app_server, client, mock_lmstudio):
-        # SC makes N=3 parallel non-streaming calls, so call_count >= 3.
-        # Set sc_enabled via per-chat DB settings (PATCH), then stream without
-        # the field in the body — _resolve_chat_settings merges it in.
+        """Self-consistency mode issues N=3 parallel non-streaming calls
+        then a synthesis call — total >= 2 upstream calls per request.
+
+        Previously this test had ``pytest.skip("SC/CoVe not triggering
+        multiple calls")`` when ``call_count < 2``, which masked the exact
+        regression it was supposed to catch.  Skip removed: if SC doesn't
+        fire, that IS the bug.
+        """
         mock_lmstudio.configure(chunks=["result"])
         chat_id = _create_chat(client)
         client.patch(f"/api/chats/{chat_id}/settings", {"sc_enabled": True})
         mock_lmstudio.reset()
         mock_lmstudio.configure(chunks=["result"])
-        try:
-            _read_sse(app_server, _stream_body(chat_id=chat_id), cookie=client.cookie)
-        except Exception:
-            pass
+        _read_sse(app_server, _stream_body(chat_id=chat_id), cookie=client.cookie)
         time.sleep(0.3)
-        if mock_lmstudio.call_count < 2:
-            pytest.skip("SC/CoVe not triggering multiple calls — may need real LM responses")
-        assert mock_lmstudio.call_count >= 2
+        assert mock_lmstudio.call_count >= 2, (
+            f"sc_enabled should fan out to >=2 upstream calls; got {mock_lmstudio.call_count}"
+        )
 
     def test_cove_enabled_triggers_multiple_upstream_calls(self, app_server, client, mock_lmstudio):
-        # CoVe makes >= 2 sequential calls (draft + VQ extraction + optional verification).
+        """CoVe makes >= 2 sequential calls (draft + verification questions
+        + optional final).  Skip + bare except removed for the same reason
+        as the SC test above."""
         mock_lmstudio.configure(chunks=["draft answer"])
         chat_id = _create_chat(client)
         client.patch(f"/api/chats/{chat_id}/settings", {"cove_enabled": True})
         mock_lmstudio.reset()
         mock_lmstudio.configure(chunks=["draft answer"])
-        try:
-            _read_sse(app_server, _stream_body(chat_id=chat_id), cookie=client.cookie)
-        except Exception:
-            pass
+        _read_sse(app_server, _stream_body(chat_id=chat_id), cookie=client.cookie)
         time.sleep(0.3)
-        if mock_lmstudio.call_count < 2:
-            pytest.skip("SC/CoVe not triggering multiple calls — may need real LM responses")
-        assert mock_lmstudio.call_count >= 2
+        assert mock_lmstudio.call_count >= 2, (
+            f"cove_enabled should fan out to >=2 upstream calls; got {mock_lmstudio.call_count}"
+        )
 
     def test_sc_disabled_single_upstream_call(self, app_server, client, mock_lmstudio):
         mock_lmstudio.configure(chunks=["hello"])
@@ -200,19 +201,35 @@ class TestSSEReasoning:
                 pytest.fail("reasoning.delta appeared after message.delta")
 
     def test_reasoning_parts_persisted(self, app_server, client, mock_lmstudio):
-        mock_lmstudio.configure(reasoning_chunks=["thought"], chunks=["answer"])
+        """The reasoning text emitted in reasoning.delta events must be
+        persisted alongside the assistant message.  Previously the fallback
+        assertion was ``"thought" in str(asst)`` which stringifies the entire
+        row dict — passes if the literal "thought" appears anywhere, including
+        content metadata.  This rewrite checks the dedicated field directly
+        (the server stores reasoning as a ``<think>...</think>`` prefix in the
+        assistant content column when no separate column exists).
+        """
+        mock_lmstudio.configure(reasoning_chunks=["thought-marker-r9"], chunks=["answer"])
         chat_id = _create_chat(client)
         _read_sse(app_server, _stream_body(chat_id=chat_id), cookie=client.cookie)
         time.sleep(0.3)
         msgs = json.loads(client.get(f"/api/chats/{chat_id}/messages").read())
         asst = next((m for m in msgs if m["role"] == "assistant"), None)
-        assert asst is not None
-        has_reasoning = (
-            asst.get("reasoning") or
-            asst.get("thinking") or
-            "thought" in str(asst)
+        assert asst is not None, f"no assistant message persisted: {msgs!r}"
+        # Reasoning lives in either a dedicated column or the content field
+        # wrapped in <think>...</think>.  Either is acceptable as long as it's
+        # carrying the exact reasoning text — not just incidentally containing
+        # the word "thought".
+        reasoning = asst.get("reasoning") or asst.get("thinking") or ""
+        content = asst.get("content") or ""
+        if not reasoning and "<think>" in content:
+            # Strip the <think> wrapper to extract the reasoning body.
+            start = content.find("<think>") + len("<think>")
+            end = content.find("</think>", start)
+            reasoning = content[start:end] if end > start else ""
+        assert "thought-marker-r9" in reasoning, (
+            f"reasoning text not persisted; got reasoning={reasoning!r} content={content!r}"
         )
-        assert has_reasoning
 
     def test_reasoning_not_persisted_in_incognito(self, app_server, client, mock_lmstudio):
         mock_lmstudio.configure(reasoning_chunks=["secret thought"], chunks=["answer"])
@@ -299,14 +316,23 @@ class TestSSEToolCalls:
         assert len(starts) == 2
 
     def test_partial_tool_call_on_disconnect_handled(self, app_server, mock_lmstudio):
-        # Disconnect mid-stream — server must not crash.
+        """A mid-stream disconnect from upstream must not take the server
+        down — verify the server keeps responding to /api/health after the
+        bad stream attempt.  Previously the test wrapped the request in
+        ``try/except: pass`` with no follow-up assertion, so it passed even
+        if the server thread had crashed.
+        """
         mock_lmstudio.configure(
             tool_calls=[self._tc()],
             chunks=["done"],
             disconnect_after=1,  # drop after first message.delta chunk
         )
-        # Should not raise an unhandled server error; client-side disconnect is acceptable.
+        # The bad stream is allowed to raise on the client side (the upstream
+        # closed early); what we care about is that the server stays alive.
         try:
             _read_sse(app_server, _stream_body())
         except Exception:
-            pass  # client-side disconnect is also acceptable
+            pass
+        import urllib.request
+        with urllib.request.urlopen(app_server + "/api/health", timeout=5) as resp:
+            assert resp.status == 200, "server crashed after partial-tool-call disconnect"

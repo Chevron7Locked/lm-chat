@@ -75,12 +75,17 @@ class TestBasicStream:
         assert deltas == ["alpha", " beta", " gamma"]
 
     def test_final_done_event_has_response_id(self, app_server, mock_lmstudio):
+        """The chat.end frame must carry result.response_id in the shape real
+        LM Studio emits — server.py:_collect_stream reads it from there for
+        chained ``previous_response_id`` requests."""
         mock_lmstudio.configure(chunks=["Hello"])
         events = _read_sse(app_server, _stream_body())
         end_events = [e for e in events if e.get("_event") == "chat.end"]
         assert len(end_events) == 1
-        assert "response_id" in end_events[0]
-        assert end_events[0]["response_id"] == "resp-mock-001"
+        # Real LM Studio nests response_id under ``result`` — see
+        # https://lmstudio.ai/docs/local-server/native-api (chat.end event).
+        result = end_events[0].get("result") or {}
+        assert result.get("response_id") == "resp-mock-001"
 
     def test_content_concatenation(self, app_server, mock_lmstudio):
         words = ["The ", "quick ", "brown ", "fox"]
@@ -140,12 +145,17 @@ class TestStreamEdgeCases:
         assert len(total) == len(word) * 100
 
     def test_mid_stream_disconnect_delivers_partial(self, app_server, mock_lmstudio):
+        """When upstream disconnects mid-stream, the client must still see
+        the chunks delivered before the cut.  Previously the assertion was
+        ``"A" in deltas or len(deltas) == 0``, which passed when zero chunks
+        arrived — i.e. exactly the regression this test should catch."""
         mock_lmstudio.configure(chunks=["A", "B", "C", "D", "E"], disconnect_after=2)
         events = _read_sse(app_server, _stream_body())
         deltas = [e["content"] for e in events if e.get("_event") == "message.delta"]
-        # Server disconnects after 2 chunks — client gets at most 2
-        assert len(deltas) <= 2
-        assert "A" in deltas or len(deltas) == 0  # at least partial
+        # Server disconnects after 2 chunks — client gets at most 2, and at
+        # LEAST 1 must arrive (zero deltas = no partial = the bug).
+        assert 1 <= len(deltas) <= 2, f"expected partial delivery, got {deltas!r}"
+        assert "A" in deltas, f"first chunk missing from partial delivery: {deltas!r}"
 
     def test_slow_drip_chunks_arrive_incrementally(self, app_server, mock_lmstudio):
         mock_lmstudio.configure(chunks=["A", "B", "C"], delay_ms=80)
@@ -210,6 +220,9 @@ class TestReasoningSSE:
         assert "tool_call.success" in event_types
 
     def test_response_id_present_after_tool_call_stream(self, app_server, mock_lmstudio):
+        """After a tool call interleaves into the stream, the final chat.end
+        still carries result.response_id — server uses it for the next turn's
+        previous_response_id pointer."""
         mock_lmstudio.configure(
             tool_calls=[{"id": "tc1", "tool": "search", "arguments": '{}', "output": "result"}],
             chunks=["final"],
@@ -217,7 +230,7 @@ class TestReasoningSSE:
         events = _read_sse(app_server, _stream_body())
         end = next((e for e in events if e.get("_event") == "chat.end"), None)
         assert end is not None
-        assert "response_id" in end
+        assert (end.get("result") or {}).get("response_id") == "resp-mock-001"
 
     def test_empty_reasoning_produces_no_reasoning_events(self, app_server, mock_lmstudio):
         mock_lmstudio.configure(reasoning_chunks=[], chunks=["hello"])

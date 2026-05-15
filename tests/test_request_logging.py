@@ -46,9 +46,47 @@ def test_4xx_error_response_includes_req_id(inproc_server):
     assert len(body["req_id"]) == 12  # uuid4().hex[:12]
 
 
-def test_404_error_response_includes_req_id(inproc_server):
-    """Routes that fall off the bottom of the dispatcher still tag the response."""
-    # An unknown PATCH route triggers 404 via send_error — confirm req_id makes it through.
+def test_404_from_app_routes_includes_req_id(inproc_server):
+    """Routes that go through ``_error`` (e.g. chat-not-found) DO surface
+    req_id in the response body.  Stdlib's ``send_error`` for completely
+    unmatched paths emits an HTML body without req_id — that's a separate
+    case covered below.
+
+    Originally this test was named ``test_404_error_response_includes_req_id``
+    and its body only asserted ``e.code == 404`` with a comment admitting
+    the req_id check was not in scope — i.e., the name lied.  Split into
+    two tests so the intent is clear.
+    """
+    # Hit an _error-routed 404 (PATCH a chat that doesn't exist).
+    body = json.dumps({"title": "irrelevant"}).encode()
+    req = urllib.request.Request(
+        inproc_server.url + "/api/chats/nope-not-here/title",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Requested-With": "lm-chat",
+        },
+        method="PATCH",
+    )
+    try:
+        urllib.request.urlopen(req, timeout=5)
+        assert False, "expected 4xx"
+    except urllib.error.HTTPError as e:
+        # Could be 401 (unauthenticated) or 404 (auth passes but no chat) —
+        # either one goes through ``_error`` and must include req_id.
+        assert e.code in (401, 404), f"unexpected status {e.code}"
+        body = json.loads(e.read() or b"{}")
+        assert isinstance(body.get("req_id"), str), f"req_id missing: {body!r}"
+        assert len(body["req_id"]) == 12, f"req_id wrong length: {body!r}"
+
+
+def test_unmatched_path_returns_404(inproc_server):
+    """Path that falls off the bottom of the dispatcher returns 404.
+
+    Stdlib ``send_error`` emits an HTML body for these (not JSON), so no
+    req_id is expected.  This is documented behaviour, not a bug — but
+    the test name in the original suite implied otherwise.
+    """
     req = urllib.request.Request(
         inproc_server.url + "/api/this-does-not-exist",
         method="GET",
@@ -58,9 +96,6 @@ def test_404_error_response_includes_req_id(inproc_server):
         assert False, "expected 404"
     except urllib.error.HTTPError as e:
         assert e.code == 404
-        # send_error from stdlib doesn't emit JSON; only routes that go
-        # through ``_error`` do.  This test covers the stdlib path — we
-        # don't expect a body, just the status.
 
 
 def test_request_ids_are_unique_per_request(inproc_server):

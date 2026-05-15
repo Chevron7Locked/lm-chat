@@ -52,6 +52,31 @@ class TestStaticAndHealth:
         assert data.get("lmstudio") is True
         assert data.get("db") is True
 
+    def test_health_reports_lmstudio_down_when_unreachable(self, client, mock_lmstudio):
+        """Paired with test_health_lmstudio_up — without this, the lmstudio=True
+        assertion above only proves the mock answered, not that the health
+        check actually probes upstream and reports failures honestly.
+
+        ``_health_check`` returns 503 when ``ok`` is False (db AND lmstudio
+        both up), so urlopen raises HTTPError; the body still has the JSON
+        diagnostic we want to verify.
+        """
+        mock_lmstudio.configure(status_code=503)
+        try:
+            resp = client.get("/api/health")
+            body_bytes = resp.read()
+            status = resp.status
+        except urllib.error.HTTPError as e:
+            status = e.code
+            body_bytes = e.read()
+        assert status == 503, f"expected 503 service-degraded, got {status}"
+        data = json.loads(body_bytes)
+        assert data.get("db") is True
+        assert data.get("lmstudio") is False, (
+            f"health check did not detect upstream 503: {data!r}"
+        )
+        assert data.get("ok") is False
+
     def test_health_has_version_field(self, client):
         resp = client.get("/api/health")
         data = client.json(resp)
@@ -136,6 +161,9 @@ class TestChat:
         assert exc.value.code == 403
 
     def test_upstream_error_propagates(self, client, mock_lmstudio):
+        """Server forwards LM Studio's 5xx status AND wraps the body as JSON
+        so the SPA can render a useful error.  Previously we only asserted
+        the status code — leaving the door open for HTML pass-through bodies."""
         mock_lmstudio.configure(status_code=503)
         chat_id = _create_chat(client)
         with pytest.raises(urllib.error.HTTPError) as exc:
@@ -144,8 +172,16 @@ class TestChat:
                 "input":   "Hello",
                 "chat_id": chat_id,
             })
-        # Server proxies upstream error code (503) or converts to 502 for connection failures
         assert exc.value.code in (502, 503)
+        # Body must be JSON (Content-Type plus parseable) — the frontend
+        # treats non-JSON bodies as a fatal disconnect, so plain-text or HTML
+        # error bodies would surface as a "lost connection" toast instead of
+        # the actual upstream error message.
+        body_bytes = exc.value.read()
+        ct = exc.value.headers.get("Content-Type", "")
+        assert "application/json" in ct, f"non-JSON error body Content-Type: {ct!r}"
+        body = json.loads(body_bytes)
+        assert "error" in body, f"missing error field: {body!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -229,14 +265,28 @@ class TestChatCrud:
         assert len(msgs_after) < len(msgs_before)
 
     def test_search_messages(self, client):
+        """Seed a chat with distinctive content, then assert search actually
+        returns it.  Previously this test only checked ``isinstance(results,
+        list)`` — trivially true for any non-empty query.
+        """
         chat_id = _create_chat(client)
-        _send_message(client, chat_id, "The quick brown fox")
-        resp = client.post("/api/search", {"query": "quick brown"})
+        unique_phrase = "the quick brown fox jumps over a lazy dog"
+        _send_message(client, chat_id, unique_phrase)
+        resp = client.post("/api/search", {"query": "quick brown fox"})
         assert resp.status == 200
         data = client.json(resp)
-        # Returns {mode: "text"|"semantic", results: [...]}
         results = data.get("results", data) if isinstance(data, dict) else data
-        assert isinstance(results, list)
+        assert isinstance(results, list) and len(results) > 0, (
+            f"search did not return seeded content: {data!r}"
+        )
+        # The seeded message must actually appear in the returned hits.
+        snippet = " ".join(
+            str(r.get("content") or r.get("snippet") or r.get("text") or r)
+            for r in results
+        ).lower()
+        assert "quick brown fox" in snippet, (
+            f"seeded phrase missing from search hits: {results!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -517,21 +567,21 @@ class TestGlobalPins:
 # ---------------------------------------------------------------------------
 
 class TestSearch:
-    def test_search_returns_results_field(self, client):
-        resp = client.post("/api/search", {"query": "test"})
+    def test_search_no_match_returns_empty_results(self, client):
+        """Query for a string that shouldn't appear anywhere — must come back
+        with an empty results list, not a list of unrelated hits.  Previously
+        we only asserted ``"results" in data`` which is tautologically true.
+        """
+        resp = client.post("/api/search", {"query": "zzzz_nonexistent_token_xyz_9999"})
         data = json.loads(resp.read())
-        assert "results" in data or isinstance(data, list)
+        results = data.get("results", data) if isinstance(data, dict) else data
+        assert isinstance(results, list)
+        assert results == [], f"unexpected hits for nonsense query: {results!r}"
 
     def test_search_empty_query_returns_400(self, client):
         with pytest.raises(urllib.error.HTTPError) as exc:
             client.post("/api/search", {"query": ""})
         assert exc.value.code == 400
-
-    def test_search_results_is_list(self, client):
-        resp = client.post("/api/search", {"query": "anything"})
-        data = json.loads(resp.read())
-        results = data.get("results", data) if isinstance(data, dict) else data
-        assert isinstance(results, list)
 
     def test_search_matching_content(self, client):
         chat_id = _create_chat(client)

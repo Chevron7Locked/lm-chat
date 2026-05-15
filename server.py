@@ -2112,7 +2112,24 @@ class Handler(BaseHTTPRequestHandler):
                 )
             self._json_response(200, data)
         except urllib.error.HTTPError as e:
-            self._json_response(e.code, e.read())
+            # Wrap upstream errors in a JSON envelope.  Real LM Studio returns
+            # JSON, but a misconfigured proxy or a generic 5xx page could send
+            # HTML — we still set Content-Type: application/json upstream, so
+            # forward unwrapped bytes would lie about the body shape and the
+            # SPA's error parser would choke.  Truncate at 500 chars to keep
+            # giant HTML error pages from blowing up the response.
+            err_body = e.read().decode("utf-8", errors="replace")
+            try:
+                upstream = json.loads(err_body)
+                if isinstance(upstream, dict) and isinstance(upstream.get("error"), dict):
+                    msg = upstream["error"].get("message") or err_body
+                elif isinstance(upstream, dict) and "error" in upstream:
+                    msg = upstream.get("error") or err_body
+                else:
+                    msg = err_body
+            except (json.JSONDecodeError, ValueError):
+                msg = err_body[:500]
+            self._json_response(e.code, {"error": f"LM Studio error: {msg}"})
         except Exception as e:
             log.error(f"chat completion: {e}")
             self._error(502, "upstream service unavailable")

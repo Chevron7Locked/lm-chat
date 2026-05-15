@@ -117,6 +117,14 @@ class _MockLMStudioHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/v1/models":
+            # Honour status_code on GET too so the health-check probe can be
+            # made to simulate LM Studio being down (the probe is a GET to
+            # /api/v1/models — without this, the only failure path the test
+            # suite can exercise is the POST chat path).
+            cfg = self.config.snapshot()
+            if cfg["status_code"] != 200:
+                self.send_error(cfg["status_code"])
+                return
             body = json.dumps(CANNED_MODELS).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -252,9 +260,27 @@ class _MockLMStudioHandler(BaseHTTPRequestHandler):
         # invent an error frame on the client's behalf.
         if cfg["skip_chat_end"]:
             return
+        # Match the real LM Studio chat.end shape — server.py:_collect_stream
+        # reads ``data["result"]["response_id"]`` and ``data["result"]["stats"]``.
+        # Verified against LM Studio v0.4+ on 2026-05-15 by hitting
+        # /api/v1/chat with stream=true; the shape is documented at
+        # https://lmstudio.ai/docs/local-server/native-api (events: chat.end).
         end_event = {
-            "response_id": "resp-mock-001",
-            "usage": {"input_tokens": 10, "output_tokens": len(chunks)},
+            "type":   "chat.end",
+            "result": {
+                "model_instance_id": "test-model",
+                "output": [
+                    {"type": "message", "content": "".join(chunks)},
+                ],
+                "stats": {
+                    "input_tokens":         10,
+                    "total_output_tokens":  len(chunks),
+                    "reasoning_output_tokens": 0,
+                    "tokens_per_second":    50.0,
+                    "time_to_first_token_seconds": 0.05,
+                },
+                "response_id": "resp-mock-001",
+            },
         }
         try:
             self.wfile.write(

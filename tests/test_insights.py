@@ -260,15 +260,22 @@ class TestInsightSettings:
 
 class TestMemoryInjection:
     def test_memory_injected_into_upstream_request(self, client, app_server, mock_lmstudio):
-        """After seeding an insight, the upstream LLM request should contain it."""
-        client.post("/api/insights", {"content": "The user always writes Python 3.12", "category": "skill"})
+        """After seeding an insight, the upstream LLM request must contain it
+        in the ``system_prompt`` field specifically — not just anywhere in the
+        request JSON.  Previously this test serialised the whole request and
+        used substring matching, so the insight text could land in any field
+        (e.g. echoed via a debug dump) and the test would still pass.
+        """
+        unique_marker = "user always writes Python-marker-x42"
+        client.post("/api/insights", {"content": unique_marker, "category": "skill"})
         mock_lmstudio.configure(chunks=["OK"])
         _stream_chat(app_server, {"model": "test-model", "input": "Hello"}, cookie=client.cookie)
         time.sleep(0.2)
-        req = mock_lmstudio.last_request
-        # Memory is injected into system_prompt field of the upstream request
-        req_str = json.dumps(req)
-        assert "Python 3.12" in req_str
+        req = mock_lmstudio.last_request or {}
+        system_prompt = req.get("system_prompt") or ""
+        assert unique_marker in system_prompt, (
+            f"insight not injected into system_prompt; full request: {req!r}"
+        )
 
     def test_memory_not_injected_when_disabled(self, client, app_server, mock_lmstudio):
         client.post("/api/insights", {"content": "Secret insight must not appear", "category": "context"})
