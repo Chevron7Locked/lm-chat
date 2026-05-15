@@ -850,6 +850,38 @@ class PooledHTTPServer(ThreadingHTTPServer):
 class Handler(BaseHTTPRequestHandler):
     timeout = 30  # seconds — prevents slow-loris and thread leaks
 
+    # --- Request lifecycle hooks ---
+
+    def setup(self):
+        # Generate a short correlation ID for every connection so access logs,
+        # error logs, and (eventually) SSE error frames can all be cross-
+        # referenced.  12 hex chars = 48 bits — enough to make collisions on
+        # an in-memory dashboard effectively impossible.
+        super().setup()
+        self.request_id = uuid.uuid4().hex[:12]
+        self._req_started_at = time.monotonic()
+
+    def log_request(self, code="-", size="-"):
+        # ``log_request`` is called by ``send_response`` once per response,
+        # which is the right place for an access log.  We emit at INFO so
+        # the default console handler shows it; the rotating file handler
+        # captures it at any level.  Output is structured: a reviewer can
+        # grep ``req_id=...`` and follow a single request through every
+        # other log line.
+        try:
+            latency_ms = int((time.monotonic() - self._req_started_at) * 1000)
+        except AttributeError:
+            latency_ms = 0
+        log.info(
+            "req_id=%s ip=%s method=%s path=%s status=%s latency_ms=%d",
+            getattr(self, "request_id", "?"),
+            self.client_address[0],
+            self.command,
+            self.path,
+            code,
+            latency_ms,
+        )
+
     # --- Auth middleware ---
 
     def _parse_session_cookie(self):
@@ -2942,8 +2974,13 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         return ""
 
     def _error(self, code, msg):
-        """Send a JSON error response."""
-        self._json_response(code, {"error": msg})
+        """Send a JSON error response.
+
+        Includes the per-request ``req_id`` so a user can quote it when
+        opening a bug report and the operator can grep the corresponding
+        access log + any subsequent stack traces with a single token.
+        """
+        self._json_response(code, {"error": msg, "req_id": getattr(self, "request_id", None)})
 
     def _build_lmstudio_payload(self, body, system_prompt=None, stream=False):
         """Build the common LM Studio API payload."""
@@ -3886,7 +3923,12 @@ Curated list:"""
             self._error(502, "upstream service unavailable")
 
     def log_message(self, format, *args):
-        log.debug(f"HTTP {args[0]}")
+        # Suppress the default ``"GET / HTTP/1.1" 200 -`` line — our
+        # ``log_request`` override above emits a structured ``req_id=...``
+        # line at INFO that covers the same ground.  Keep this method as a
+        # silent override so BaseHTTPRequestHandler's ``log_error`` fallback
+        # (called by ``send_error``) doesn't double-log over stderr.
+        pass
 
 
 def _pid_file():

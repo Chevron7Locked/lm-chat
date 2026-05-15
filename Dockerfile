@@ -1,9 +1,15 @@
-FROM python:3.14-slim
+# Pinned by manifest-list digest so the build is reproducible and Trivy/SBOM
+# tooling has something stable to reference.  Dependabot updates both the
+# digest and the trailing tag comment together.
+FROM python:3.14-slim@sha256:7a500125bc50693f2214e842a621440a1b1b9cbb2188f74ab045d29ed2ea5856
 
 LABEL org.opencontainers.image.title="lm-chat" \
       org.opencontainers.image.description="Deeply-integrated chat UI for LM Studio" \
       org.opencontainers.image.source="https://github.com/Chevron7Locked/lm-chat" \
       org.opencontainers.image.licenses="AGPL-3.0"
+
+# PYTHONDONTWRITEBYTECODE keeps the image immutable under read_only: true
+# (no .pyc cache writes to attempt during runtime).
 
 # Non-root user for security
 RUN groupadd -r lmchat && useradd -r -g lmchat -d /app -s /sbin/nologin lmchat
@@ -21,7 +27,8 @@ ENV PORT=3001 \
     LM_CHAT_AUTH=true \
     LM_CHAT_DB=/app/data/chats.db \
     LM_CHAT_LOGS=/app/data/logs \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 USER lmchat
 

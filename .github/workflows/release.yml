@@ -50,6 +50,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Attach an SPDX SBOM and SLSA-style provenance attestation to the
+          # pushed manifest.  Both surface in the GHCR UI and let downstream
+          # consumers verify what's in the image without re-pulling layers.
+          sbom: true
+          provenance: mode=max
 
       - name: Lowercase image name
         id: img
