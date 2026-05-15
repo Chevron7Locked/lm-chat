@@ -41,11 +41,29 @@ class TestPageLoad:
         expect(page_at.locator("#send")).to_be_visible()
 
     def test_no_console_errors_on_load(self, page: Page, app_server: str):
-        errors = []
-        page.on("console", lambda msg: errors.append(msg) if msg.type == "error" else None)
+        """Catch console errors, warnings, AND uncaught promise rejections.
+
+        Previously this test only filtered ``msg.type == "error"`` which
+        misses Promise rejections (``pageerror``), deprecation warnings,
+        and CSP / mixed-content notices — all of which have surfaced as
+        real production issues in this codebase before.
+        """
+        errors: list[str] = []
+        page_errors: list[str] = []
+        page.on(
+            "console",
+            lambda msg: errors.append(f"[{msg.type}] {msg.text}")
+            if msg.type in ("error", "warning") else None,
+        )
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
         page.goto(app_server)
         page.wait_for_timeout(500)
-        assert errors == [], f"Console errors on load: {[e.text for e in errors]}"
+        # Allow-list: serviceWorker registration warnings on insecure
+        # contexts in test harness are noise; everything else is a real
+        # signal worth investigating.
+        filtered = [e for e in errors if "service worker" not in e.lower()]
+        assert filtered == [], f"console issues on load: {filtered!r}"
+        assert page_errors == [], f"uncaught page errors on load: {page_errors!r}"
 
 
 # ---------------------------------------------------------------------------

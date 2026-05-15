@@ -903,13 +903,6 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 send = $("send"),
                 modelSel = $("model-sel");
 
-            // Set true while a programmatic scroll is in flight so the user's
-            // scroll handlers don't interpret it as manual movement (which
-            // would disable autoscroll-on-new-token).  Was an implicit global
-            // before — caught both as a `'use strict'` hazard and because
-            // linters lose the binding for cross-reference.
-            let ignoreScrollEvent = false;
-
             // --- Server settings state ---
             let serverSettings = { hasApiKey: false, lmUrl: "" };
 
