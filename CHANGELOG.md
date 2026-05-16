@@ -3,7 +3,35 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.5.0] — 2026-05-14
+## [0.5.1] — 2026-05-16
+
+Memory v3 + frontend polish + LM Studio robustness.  No schema breaks;
+old embedding rows are rebuilt lazily on next retrieval; old chats
+render unchanged.
+
+### Added
+- Memory v3: per-row `embedding_model_id` + 60s-TTL `_current_embedding_model_id()`.  Retrieval skips rows whose model id no longer matches active model — cosine similarity is only meaningful within a single embedding model.  Backfill is atomic (one transaction) and idempotent.
+- Memory v3: `pinned` boolean on `user_insights` with a global `_PINNED_INSIGHTS_LIMIT = 5` cap.  Pinned rows always surface ahead of retrieval; unpinning falls back to similarity ranking.  Server enforces the cap; client UI exposes a star toggle in the right-panel pins view.
+- Memory v3: MD5 content-hash dedup (Mem0 precedent) — `_content_hash_text()` normalizes whitespace + case and writes `user_insights.content_hash`.  Re-emitting the same insight is a no-op instead of a duplicate row.
+- Memory v3: `POST /api/memory/reindex` — atomic per-user re-embed.  Used after a model swap to rebuild stale rows up front instead of waiting for lazy refresh.
+- Universal per-model rejected-param cache (already on `main` as `940b402`) — persisted in SQLite (`unsupported_params` table), keyed `(model_id, param_name)`.  Replaces the retry-every-turn loop with proactive skip on subsequent payloads.
+- SPA route 404 fallback — `/chat/<id>` on hard refresh now serves `index.html` instead of `404`, so deep links and back/forward navigation always land in the SPA.
+- E2E test suite for the 9-phase refactor: `tests/test_e2e_refactor.py` exercises the state machine, declarative renders, routing, toasts, orphan-stream recovery, and outside-click hardening end-to-end.
+
+### Fixed
+- Markdown renderer (`app.js: md()`) was running bold/italic regexes on code-fence content, so ``**kwargs`` inside Python blocks rendered `<strong>kwargs</strong>` inside `<code>` — highlight.js then emitted "unescaped HTML" warnings on every chat load.  Code fences and inline code are now extracted to placeholders before `esc()` and restored after all other transforms.  Zero hljs warnings in console.
+- Right-panel (chat-settings / pins) overlay used to clip chat content under the panel.  Adding `body.has-right-panel` reflows `main` with `padding-right: clamp(16rem, 14rem + 2vw, 20rem)`; mobile keeps full-width overlay.
+- Admin user list exposed the synthetic `default` user (the auth-disabled-mode FK-integrity placeholder) with a `Delete` button.  `_auth_list_users` now filters `WHERE username != 'default'`.
+- Settings panel showed the floating `scroll-to-bottom` arrow over its content.  `openSettings` / `closeSettings` now toggle that button's display alongside the rest of the chat UI.
+- User-avatar dropdown sticky-reopened after clicking Settings / Sign Out because the inner button's click bubbled up to the avatar's toggle handler.  Click handler now checks `e.target === userAvatar`.
+- Toast `text` + `detail` rendered side-by-side because `.toast` was row flex with `text` + `detail` as sibling children.  `.toast` is now column flex with absolute-positioned close button.
+- `_current_embedding_model_id()` was being called on the request hot path on every memory retrieval.  60s-TTL cache eliminates the per-request LM Studio probe.
+
+### Changed
+- VERSION constant (`server.py:14`) bumped 0.5.0 → 0.5.1.
+- `_list_insights` SELECT now returns `pinned` in its result mapping (required by the new pins UI; 11 of 17 memory tests were keying on it).
+
+
 
 Security-focused release.  Several findings from a code review were fixed in
 a single bundle; the at-rest format for stored secrets changed (existing DBs

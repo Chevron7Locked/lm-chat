@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 from qr import generate_qr_svg
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 LMSTUDIO = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_TOKEN = os.environ.get("LMSTUDIO_TOKEN", "")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -250,7 +250,8 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         args TEXT,
         output TEXT,
         created_at REAL NOT NULL,
-        token_count INTEGER
+        token_count INTEGER,
+        status TEXT
     )""",
     # Auth — totp_* columns added in 0.1.3 but inlined for fresh installs.
     """CREATE TABLE IF NOT EXISTS users (
@@ -274,7 +275,8 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
     # Memory / embeddings
     """CREATE TABLE IF NOT EXISTS embeddings (
         message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-        vector BLOB NOT NULL
+        vector BLOB NOT NULL,
+        model_id TEXT
     )""",
     """CREATE TABLE IF NOT EXISTS user_settings (
         user_id TEXT NOT NULL,
@@ -302,6 +304,8 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         ups REAL DEFAULT 0,
         downs REAL DEFAULT 0,
         last_feedback_at REAL,
+        pinned INTEGER DEFAULT 0,
+        content_hash TEXT,
         FOREIGN KEY (origin_chat_id) REFERENCES chats(id) ON DELETE SET NULL
     )""",
     """CREATE TABLE IF NOT EXISTS insight_activations (
@@ -343,6 +347,17 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         title TEXT NOT NULL,
         messages TEXT NOT NULL,
         created_at REAL NOT NULL
+    )""",
+    # Per-model parameter blacklist — survives restarts so a fresh
+    # container doesn't re-burn one 400-roundtrip per (model, param) on
+    # every deploy.  Seeded proactively from /api/v1/models capabilities
+    # where available, and additively from runtime 400 retries.
+    """CREATE TABLE IF NOT EXISTS model_param_blacklist (
+        model_key TEXT NOT NULL,
+        param     TEXT NOT NULL,
+        source    TEXT NOT NULL,
+        added_at  REAL NOT NULL,
+        PRIMARY KEY (model_key, param)
     )""",
     # Indexes — keep adjacent to the table they cover so the diff stays
     # easy to read when adding new columns.
@@ -398,6 +413,28 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("user_insights", "ups",               "REAL DEFAULT 0"),
     ("user_insights", "downs",             "REAL DEFAULT 0"),
     ("user_insights", "last_feedback_at",  "REAL"),
+    # Lifecycle marker for assistant rows.
+    # ENUM (extend additively, never repurpose a value):
+    #   NULL          — completed (healthy turn, default)
+    #   "interrupted" — stream cut before chat.end; SPA renders retry UI
+    # Convo-context builders MUST filter out anything other than NULL with
+    # ``(status IS NULL OR status != 'interrupted')`` — interrupted rows
+    # are SPA UI markers, not model-context content.
+    ("messages",      "status",            "TEXT"),
+    # Memory system Tier-1 columns (spec v3, 2026-05-16):
+    # - embeddings.model_id: which embedding model produced this vector.
+    #   Mixing vectors from different model versions in cosine retrieval
+    #   is mathematically meaningless — different spaces.  Retrieval
+    #   filters by current model; legacy NULL rows excluded until user
+    #   opts into re-index.
+    ("embeddings",    "model_id",          "TEXT"),
+    # - user_insights.pinned: must-remember flag.  Pinned insights inject
+    #   unconditionally up to _PINNED_INSIGHTS_LIMIT (=5).
+    ("user_insights", "pinned",            "INTEGER DEFAULT 0"),
+    # - user_insights.content_hash: MD5 of normalised content.
+    #   UNIQUE (user_id, content_hash) prevents byte-identical re-distills.
+    #   Backfill + unique-index creation happen post-migration in init_db.
+    ("user_insights", "content_hash",      "TEXT"),
 )
 
 
@@ -417,6 +454,117 @@ def _run_migrations(db: sqlite3.Connection) -> None:
             pass
 
 
+def _load_param_blacklist(db: sqlite3.Connection) -> dict:
+    """Return ``{model_key: set[param]}`` from the persisted blacklist.
+
+    Called once at startup to seed ``Handler._unsupported_params`` so a
+    fresh container doesn't re-burn 400 round-trips against LM Studio
+    for every (model, param) pair it had already learned about before
+    the restart.
+    """
+    out: dict = {}
+    try:
+        for model_key, param in db.execute(
+            "SELECT model_key, param FROM model_param_blacklist"
+        ):
+            out.setdefault(model_key, set()).add(param)
+    except sqlite3.OperationalError:
+        # Table missing on a pre-migration upgrade path — _create_schema
+        # adds it idempotently on the same init_db() call so this never
+        # actually fires at runtime; the guard is defensive.
+        pass
+    return out
+
+
+def _persist_param_blacklist(model_key: str, param: str, source: str) -> None:
+    """Idempotent INSERT into ``model_param_blacklist``.
+
+    Called from the retry-on-400 block once we've seen LM Studio reject
+    a (model, param) pair, and from the proactive seed in ``_get_models``
+    when ``capabilities.reasoning.allowed_options`` excludes the user's
+    setting.  ``source`` is informational (``"reactive_400"`` or
+    ``"capability_gate"``) — debugging only, not used for behaviour.
+    """
+    if not model_key or not param:
+        return
+    try:
+        db = get_db()
+        db.execute(
+            "INSERT OR IGNORE INTO model_param_blacklist "
+            "(model_key, param, source, added_at) VALUES (?,?,?,?)",
+            (model_key, param, source, time.time()),
+        )
+        db.commit()
+    except Exception as e:
+        log.warning(f"could not persist param blacklist {model_key!r}/{param!r}: {e}")
+
+
+def _content_hash_text(content: str) -> str:
+    """Normalize whitespace + case, MD5 hash.  Matches Mem0's dedup
+    precedent.  Stable across re-runs.  Lives at module scope so the
+    backfill helper (also module scope) can use it without a Handler
+    instance.
+    """
+    norm = " ".join((content or "").lower().split())
+    return hashlib.md5(norm.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+def _backfill_content_hashes(db: sqlite3.Connection) -> None:
+    """One-time backfill of user_insights.content_hash for legacy rows.
+
+    Runs in a single transaction — partial state on any exception is
+    rolled back so a fresh `init_db` retry sees the pre-backfill state.
+    Collapses any legacy duplicates by keeping the older row (lower
+    `created_at`) and deleting the rest.
+
+    Called from `init_db` AFTER `_run_migrations` (so `content_hash`
+    column exists) and BEFORE creating the UNIQUE index (so that
+    duplicates can be resolved without failing the index build).
+    """
+    rows = db.execute(
+        "SELECT id, user_id, content, created_at FROM user_insights "
+        "WHERE content_hash IS NULL"
+    ).fetchall()
+    if not rows:
+        return
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        # (user_id, hash) -> (winning_row_id, winning_created_at)
+        seen: dict = {}
+        deletes: set = set()
+        updates: list = []  # (hash, row_id)
+        for row_id, user_id, content, created_at in rows:
+            h = _content_hash_text(content or "")
+            key = (user_id, h)
+            if key in seen:
+                existing_id, existing_created = seen[key]
+                if created_at > existing_created:
+                    deletes.add(row_id)
+                else:
+                    deletes.add(existing_id)
+                    seen[key] = (row_id, created_at)
+                    updates.append((h, row_id))
+            else:
+                seen[key] = (row_id, created_at)
+                updates.append((h, row_id))
+        for d in deletes:
+            db.execute("DELETE FROM user_insights WHERE id = ?", (d,))
+        for h, row_id in updates:
+            if row_id in deletes:
+                continue
+            db.execute(
+                "UPDATE user_insights SET content_hash = ? WHERE id = ?",
+                (h, row_id),
+            )
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise
+
+
 def _seed_default_user(db: sqlite3.Connection) -> None:
     """Ensure the ``default`` user row exists.
 
@@ -433,13 +581,22 @@ def _seed_default_user(db: sqlite3.Connection) -> None:
 
 
 def init_db():
-    """Run once at startup: pragmas → schema → migrations → seed."""
+    """Run once at startup: pragmas → schema → migrations → seed →
+    backfill → late indexes."""
     db = sqlite3.connect(DB_PATH)
     try:
         _apply_pragmas(db)
         _create_schema(db)
         _run_migrations(db)
         _seed_default_user(db)
+        # Backfill content_hash for any legacy user_insights rows BEFORE
+        # the UNIQUE index is created — otherwise the index build would
+        # fail on legacy duplicates.
+        _backfill_content_hashes(db)
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_insights_user_content_hash "
+            "ON user_insights(user_id, content_hash)"
+        )
         db.commit()
     finally:
         db.close()
@@ -1470,6 +1627,7 @@ class Handler(BaseHTTPRequestHandler):
         (re.compile(r'^/api/search$'),                                         lambda s,m,b: s._search_messages(b)),
         (re.compile(r'^/api/insights/distill$'),                               lambda s,m,b: s._distill_insights(b)),
         (re.compile(r'^/api/insights/refine$'),                                lambda s,m,b: s._refine_insights(b)),
+        (re.compile(r'^/api/insights/reindex$'),                               lambda s,m,b: s._reindex_embeddings()),
         (re.compile(r'^/api/insights$'),                                       lambda s,m,b: s._add_insight(b)),
         (re.compile(r'^/api/insights/(?P<id>[^/]+)/edit$'),                    lambda s,m,b: s._edit_insight(m.group("id"),b)),
         (re.compile(r'^/api/messages/(?P<id>\d+)/feedback$'),                  lambda s,m,b: s._post_message_feedback(int(m.group("id")),b)),
@@ -1507,16 +1665,10 @@ class Handler(BaseHTTPRequestHandler):
             log.warning(f"Health check DB failed: {e}")
         try:
             req = urllib.request.Request(f"{LMSTUDIO}/api/v1/models", method="GET")
-            # Try env var token first, then any stored user key
-            token = LMSTUDIO_TOKEN
-            if not token:
-                try:
-                    db2 = get_db()
-                    row = db2.execute("SELECT value FROM user_settings WHERE key='lm_apikey' AND value != '' LIMIT 1").fetchone()
-                    if row:
-                        token = row[0]
-                except Exception as e:
-                    log.warning(f"Health check: cannot read API key from DB: {e}")
+            # Centralised: env var first, else any stored user key.
+            # Goes through ``decrypt_at_rest`` — no raw row[0] reads of
+            # encrypted columns (root fix for 2026-05-16 enc$v1$ leak).
+            token = self._get_any_user_lm_apikey()
             if token:
                 req.add_header("Authorization", f"Bearer {token}")
             with urllib.request.urlopen(req, timeout=3) as resp:
@@ -1574,6 +1726,18 @@ class Handler(BaseHTTPRequestHandler):
             if m:
                 handler(self, m, body)
                 return
+        # SPA-fallback: a deep-linked URL like /chat/:id or /settings/:tab
+        # (Phase 6 routing) reaches the server on page reload because the
+        # browser GETs the path before the SPA's history API kicks in.
+        # Anything that isn't an /api/* call AND isn't a static asset is
+        # treated as an SPA route — serve index.html so the SPA can read
+        # window.location.pathname and apply the route client-side.  POST
+        # / DELETE / etc. still 404 — only GET gets the fallback.
+        if (method == "GET"
+                and not path.startswith("/api/")
+                and not path.startswith("/share/")
+                and "." not in path.rsplit("/", 1)[-1]):
+            return self._serve_file("index.html", "text/html")
         self.send_error(404)
 
     def do_GET(self):
@@ -1834,7 +1998,15 @@ class Handler(BaseHTTPRequestHandler):
         if not user.get("is_admin"):
             return self._error(403, "admin required")
         db = get_db()
-        rows = db.execute("SELECT id,username,display_name,is_admin,created_at FROM users ORDER BY created_at").fetchall()
+        # Exclude the synthetic ``default`` user — it exists for FK
+        # integrity in auth-disabled mode, not as a real account, and
+        # has no password to log in with.  Surfacing it in the admin
+        # users list (with a Delete button) was a polish-pass defect.
+        rows = db.execute(
+            "SELECT id,username,display_name,is_admin,created_at FROM users "
+            "WHERE username != 'default' "
+            "ORDER BY created_at"
+        ).fetchall()
         users = [{"id": r[0], "username": r[1], "display_name": r[2], "is_admin": r[3], "created_at": r[4]} for r in rows]
         self._json_response(200, users)
 
@@ -1955,7 +2127,8 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     mcps = json.loads(plain) if plain else []
                     result[key] = [{"label": m.get("label", ""), "url": m.get("url", ""),
-                                    "on": m.get("on", True), "has_auth": bool(m.get("auth"))}
+                                    "on": m.get("on", True), "has_auth": bool(m.get("auth")),
+                                    "allowed_tools": m.get("allowed_tools") or []}
                                    for m in mcps]
                 except (json.JSONDecodeError, TypeError):
                     result[key] = []
@@ -2003,6 +2176,11 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         entry["auth"] = existing_auth.get(
                             (entry["label"], entry["url"]), "")
+                    # Optional per-integration tool whitelist — empty list
+                    # / missing means "all tools the server exposes."
+                    at = m.get("allowed_tools") or []
+                    if isinstance(at, list):
+                        entry["allowed_tools"] = [str(t) for t in at if t]
                     new_mcps.append(entry)
                 stored = encrypt_at_rest(
                     json.dumps(new_mcps), "user_settings.remote_mcps"
@@ -2012,7 +2190,8 @@ class Handler(BaseHTTPRequestHandler):
                     (user["id"], key, stored),
                 )
                 saved[key] = [{"label": m["label"], "url": m["url"],
-                               "on": m["on"], "has_auth": bool(m.get("auth"))}
+                               "on": m["on"], "has_auth": bool(m.get("auth")),
+                               "allowed_tools": m.get("allowed_tools") or []}
                               for m in new_mcps]
             else:
                 str_val = str(value).strip() if value else ""
@@ -2025,7 +2204,18 @@ class Handler(BaseHTTPRequestHandler):
         self._json_response(200, saved)
 
     def _get_user_lm_apikey(self, user_id):
-        """Get stored LM Studio API key for a user (decrypts at-rest value)."""
+        """Get stored LM Studio API key for a user (decrypts at-rest value).
+
+        IMPORTANT: this is one of only THREE legitimate read paths for
+        encrypted user_settings columns.  The others are
+        ``_get_any_user_lm_apikey`` (server-internal contexts with no
+        active user, like health-check) and ``_get_user_remote_mcps``.
+        Every other read of ``user_settings.value`` for ``lm_apikey`` or
+        ``remote_mcps`` is a bug — the stored value is ciphertext of
+        format ``enc$v1$...`` and LM Studio rejects it as malformed.
+        See: 2026-05-16 incident where the health-check read row[0]
+        directly and shipped the envelope as a Bearer header.
+        """
         db = get_db()
         row = db.execute(
             "SELECT value FROM user_settings WHERE user_id=? AND key='lm_apikey'",
@@ -2036,6 +2226,73 @@ class Handler(BaseHTTPRequestHandler):
         plain = decrypt_at_rest(row[0], "user_settings.lm_apikey")
         # ``None`` means tamper or wrong key — fail closed (no apikey).
         return plain or ""
+
+    # =====================================================================
+    # Embedding-model identity cache (Memory spec v3, Change 1).
+    # Server-wide TTL cache for the currently-loaded LM Studio embedding
+    # model id.  Each row in the ``embeddings`` table is tagged with the
+    # model that produced its vector; retrieval filters by current model
+    # so old vectors from a since-superseded model don't poison ranking.
+    # Embedding-model selection is server-scoped, not per-user — a single
+    # cache entry covers all users.
+    # =====================================================================
+    _embed_model_cache: tuple = (0.0, None)
+    _embed_model_cache_lock: threading.Lock = threading.Lock()
+
+    def _current_embedding_model_id(self) -> str | None:
+        """Return the id of the currently-loaded embedding model.
+
+        60-second TTL cache.  Returns ``None`` if LM Studio is offline or
+        no embedding model is loaded.  On lookup failure, falls back to
+        the last successful value so a flaky LM Studio doesn't wipe the
+        cache mid-session.
+        """
+        now = time.monotonic()
+        with Handler._embed_model_cache_lock:
+            ts, cached = Handler._embed_model_cache
+            if now - ts < 60.0:
+                return cached
+        try:
+            token = self._get_any_user_lm_apikey()
+            req = urllib.request.Request(f"{LMSTUDIO}/api/v1/models")
+            if token:
+                req.add_header("Authorization", f"Bearer {token}")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                payload = json.loads(resp.read())
+        except Exception as e:
+            log.debug(f"embedding model lookup failed: {e}")
+            # Preserve last known value on transient failure.
+            return Handler._embed_model_cache[1]
+        chosen = None
+        for m in payload.get("models", []) or []:
+            if m.get("type") == "embedding" and (m.get("loaded_instances") or []):
+                chosen = m.get("key") or m.get("id")
+                break
+        with Handler._embed_model_cache_lock:
+            Handler._embed_model_cache = (now, chosen)
+        return chosen
+
+    def _get_any_user_lm_apikey(self):
+        """Decrypted LM Studio API key for non-user contexts (health-check,
+        startup probes).  Returns the env-var token first, else the first
+        non-empty stored apikey decrypted on read.  Returns ``""`` if no
+        token is available.  Centralised so every "any-user" lookup goes
+        through ONE decrypt path — no more raw row[0] leaks.
+        """
+        if LMSTUDIO_TOKEN:
+            return LMSTUDIO_TOKEN
+        try:
+            db = get_db()
+            row = db.execute(
+                "SELECT value FROM user_settings "
+                "WHERE key='lm_apikey' AND value != '' LIMIT 1"
+            ).fetchone()
+        except Exception as e:
+            log.warning(f"any-user lm_apikey lookup failed: {e}")
+            return ""
+        if not row or not row[0]:
+            return ""
+        return decrypt_at_rest(row[0], "user_settings.lm_apikey") or ""
 
     def _get_user_remote_mcps(self, user_id):
         """Get stored remote MCP configs (with auth) for a user.  Decrypts at-rest."""
@@ -2166,14 +2423,46 @@ class Handler(BaseHTTPRequestHandler):
             log.error(f"memory injection: {e}")
         return system_prompt, injected_ids
 
-    def _collect_stream(self, resp, is_incognito: bool) -> tuple:
+    def _collect_stream(self, resp, is_incognito: bool, chat_id: str = "") -> tuple:
         """Proxy SSE stream to client, collecting data for persistence.
         Returns (content_parts, reasoning_parts, tool_calls, response_id, stream_usage, stream_complete).
+
+        When ``chat_id`` is non-empty AND we are not in incognito mode, the
+        ``response_id`` carried by ``chat.end`` is committed to
+        ``chats.response_id`` inline — before the rest of the message is
+        persisted — so a post-chat.end exception (resp.close raising,
+        thread-cleanup error, etc.) cannot break the conversation chain.
+        Losing the message body is recoverable (the user re-asks); losing
+        the chain ID is not, because LM Studio's response-store keeps
+        moving forward.
         """
         content_parts = []
         reasoning_parts = []
         tool_calls = []
-        current_tool = None
+        # Open tool calls, in arrival order.  A single-variable
+        # ``current_tool`` worked for serial wire format (which is all
+        # current LM Studio emits per /tmp/probe-tool2.txt) but would
+        # corrupt state under any future interleave — 0.3.19's changelog
+        # says "Improved handling of parallel tool calls via the
+        # streaming API" but does not promise serial events, and a $0
+        # defensive structure here protects us if LM Studio interleaves
+        # later.  Match events to opens by ``data.id`` when present;
+        # fall back to most-recent-open for the no-id wire format we see
+        # today.
+        open_tools: list = []
+        def _match_open(tc_id):
+            if tc_id:
+                for t in reversed(open_tools):
+                    if t.get("id") == tc_id:
+                        return t
+            return open_tools[-1] if open_tools else None
+        def _ensure_open(tc_id):
+            t = _match_open(tc_id)
+            if t is None:
+                t = {"id": tc_id or "", "tool": "", "arguments": "",
+                     "output": None, "provider": ""}
+                open_tools.append(t)
+            return t
         response_id = None
         event_type = ""
         stream_usage = {}
@@ -2198,30 +2487,100 @@ class Handler(BaseHTTPRequestHandler):
                         data = {}
 
                     if event_type != "message.delta" and not is_incognito:
-                        log.debug(f"SSE {event_type}")
+                        # Tool-call events: log the full data payload so we
+                        # can see exactly what LM Studio is emitting per
+                        # call — sizes are tiny and this is the only way
+                        # to debug tool-rendering issues from the logs
+                        # without replaying the whole stream.
+                        if event_type.startswith("tool_call."):
+                            log.info(f"SSE {event_type}: {data!r}")
+                        else:
+                            log.debug(f"SSE {event_type}")
 
                     if event_type == "message.delta":
                         content_parts.append(data.get("content") or "")
                     elif event_type == "reasoning.delta":
                         reasoning_parts.append(data.get("content") or "")
+                    # Tool-call events — real LM Studio wire shape (verified
+                    # live 2026-05-15 against qwen3.6 + searxng MCP):
+                    #   tool_call.start     {"type":"tool_call.start"}
+                    #     — empty marker; one such event per tool call.
+                    #   tool_call.name      {"tool_name":"…","provider_info":{
+                    #                          "type":"plugin","plugin_id":"…"}}
+                    #     — sets the tool name (the "id" we previously hoped
+                    #     for on tool_call.start doesn't exist in current
+                    #     LM Studio).
+                    #   tool_call.arguments {"tool":"…","arguments":{…},
+                    #                        "provider_info":{…}}
+                    #     — COMPLETE arguments snapshot per call (dict, not
+                    #     a string delta); same call can fire several times
+                    #     before success when the model refines its plan,
+                    #     but each event carries the final args for its call.
+                    #   tool_call.success   {"tool":"…","arguments":{…},
+                    #                        "output":"…","provider_info":{…}}
+                    #     — full record at completion; we use these as the
+                    #     authoritative source for the persisted call.
+                    #   tool_call.failure   {"tool":"…","arguments":{…},
+                    #                        "error":"…","provider_info":{…}}
                     elif event_type == "tool_call.start":
-                        current_tool = {
-                            "id": data.get("id", ""),
-                            "tool": data.get("tool", ""),
-                            "arguments": data.get("arguments", ""),
+                        open_tools.append({
+                            "id":     data.get("id") or "",
+                            "tool":   data.get("tool") or data.get("tool_name") or "",
+                            "arguments": "",
                             "output": None,
-                        }
-                    elif event_type == "tool_call.arguments" and current_tool:
-                        current_tool["arguments"] += data.get("arguments", "")
-                    elif event_type == "tool_call.success" and current_tool:
-                        current_tool["output"] = data.get("output")
-                        tool_calls.append(current_tool)
-                        current_tool = None
+                            "provider": "",
+                        })
+                    elif event_type == "tool_call.name":
+                        t = _ensure_open(data.get("id"))
+                        t["tool"] = data.get("tool_name") or t["tool"]
+                        prov = data.get("provider_info") or {}
+                        if isinstance(prov, dict):
+                            t["provider"] = prov.get("plugin_id") or ""
+                    elif event_type == "tool_call.arguments":
+                        # ``arguments`` is opaque: current LM Studio sends a
+                        # dict snapshot per event; older builds and the
+                        # 0.3.17 changelog ("tokens streamed as generated")
+                        # suggest some models stream string deltas instead.
+                        # If the running buffer is a string AND the incoming
+                        # field is a string, append (delta semantics); in
+                        # every other case overwrite (snapshot semantics).
+                        # ``argumentsDelta`` covers an older field name.
+                        t = _ensure_open(data.get("id"))
+                        incoming = data.get("arguments")
+                        if incoming is None:
+                            incoming = data.get("argumentsDelta")
+                        if isinstance(incoming, str) and isinstance(t.get("arguments"), str) and t["arguments"]:
+                            t["arguments"] = t["arguments"] + incoming
+                        elif incoming is not None:
+                            t["arguments"] = incoming
+                        if data.get("tool") and not t.get("tool"):
+                            t["tool"] = data["tool"]
+                    elif event_type == "tool_call.success":
+                        t = _ensure_open(data.get("id"))
+                        # Final record carries everything — prefer its fields
+                        # over the running state when present.
+                        if data.get("tool"):
+                            t["tool"] = data["tool"]
+                        if data.get("arguments") is not None:
+                            t["arguments"] = data["arguments"]
+                        t["output"] = data.get("output")
+                        try:
+                            open_tools.remove(t)
+                        except ValueError:
+                            pass
+                        tool_calls.append(t)
                     elif event_type == "tool_call.failure":
-                        if current_tool:
-                            current_tool["output"] = data.get("error", "Tool call failed")
-                            tool_calls.append(current_tool)
-                            current_tool = None
+                        t = _ensure_open(data.get("id"))
+                        if data.get("tool"):
+                            t["tool"] = data["tool"]
+                        if data.get("arguments") is not None:
+                            t["arguments"] = data["arguments"]
+                        t["output"] = data.get("error") or "Tool call failed"
+                        try:
+                            open_tools.remove(t)
+                        except ValueError:
+                            pass
+                        tool_calls.append(t)
                     elif event_type == "chat.end":
                         result = data.get("result", {})
                         response_id = result.get("response_id")
@@ -2231,6 +2590,25 @@ class Handler(BaseHTTPRequestHandler):
                             "output_tokens": stats.get("total_output_tokens", 0),
                         }
                         stream_complete = True
+                        # Commit the chain ID immediately so a later
+                        # exception in this function or its caller cannot
+                        # orphan the upstream chain.  ``_persist_chat_messages``
+                        # will redundantly UPDATE the same column at the
+                        # end of the request; that no-op is the cost of
+                        # this defence.
+                        if response_id and chat_id and not is_incognito:
+                            try:
+                                _db_resp = get_db()
+                                _db_resp.execute(
+                                    "UPDATE chats SET response_id=?, updated_at=? WHERE id=?",
+                                    (response_id, time.time(), chat_id),
+                                )
+                                _db_resp.commit()
+                            except Exception as _e:
+                                log.warning(
+                                    f"could not eagerly persist response_id "
+                                    f"for chat {chat_id!r}: {_e}"
+                                )
                         if not is_incognito:
                             log.debug(f"RESP chat.end resp_id={response_id} usage={stream_usage}")
                             log.debug(f"RESP content: [{len(''.join(content_parts))} chars]")
@@ -2248,7 +2626,14 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             log.error(f"Stream unexpected error: {e}", exc_info=True)
         finally:
-            resp.close()
+            # ``resp.close()`` is the last action in the only finally
+            # block on this path; if it ever raised it would propagate
+            # past every except above and out of this function, defeating
+            # the post-loop persistence in the caller.  Swallow.
+            try:
+                resp.close()
+            except Exception:
+                pass
 
         if not stream_complete and not is_incognito:
             log.warning(f"Stream ended without chat.end (lines_seen={lines_seen})")
@@ -2434,6 +2819,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Older builds may omit ``param``; we fall back to a known
                 # message-substring list keyed by param name.
                 err_lower = err_detail.lower() if isinstance(err_detail, str) else ""
+                err_code = err_obj.get("code") if isinstance(err_obj.get("code"), str) else ""
                 bad_param = err_obj.get("param") if isinstance(err_obj.get("param"), str) else None
                 if not bad_param:
                     # Legacy phrasings without ``error.param``.  Extend this
@@ -2441,11 +2827,27 @@ class Handler(BaseHTTPRequestHandler):
                     # so the retry stays universal.
                     legacy_patterns = {
                         "reasoning": ("does not support reasoning", "does not expose reasoning"),
+                        "previous_response_id": ("could not find stored response", "previous_response_not_found"),
                     }
                     for p, markers in legacy_patterns.items():
                         if any(marker in err_lower for marker in markers):
                             bad_param = p
                             break
+                # Two distinct "drop the param and retry" scenarios from LM Studio:
+                #
+                #   (a) model_unsupports_param — model rejects the param
+                #       entirely (e.g. ``reasoning`` on a fixed-depth model).
+                #       Recovery: cache (model, param) so we strip it up
+                #       front on every subsequent request.
+                #
+                #   (b) ephemeral_param_evicted — server-side state the
+                #       param references is no longer available (e.g.
+                #       ``previous_response_id`` after LM Studio's response
+                #       store evicted the chain).  Recovery: strip the param
+                #       AND clear our stored copy so subsequent turns don't
+                #       keep sending the same dead reference.  Verified
+                #       shape: ``{"param":"previous_response_id","code":"previous_response_not_found"}``
+                #       per lmstudio-ai/lmstudio-bug-tracker#1188.
                 model_unsupports_param = (
                     exc.code == 400
                     and bad_param is not None
@@ -2453,21 +2855,53 @@ class Handler(BaseHTTPRequestHandler):
                     and ("does not support" in err_lower or "does not expose" in err_lower
                          or "not configurable" in err_lower)
                 )
+                ephemeral_param_evicted = (
+                    exc.code == 400
+                    and bad_param is not None
+                    and bad_param in payload
+                    and (err_code == "previous_response_not_found"
+                         or "not found" in err_lower
+                         or "no longer available" in err_lower)
+                )
+                should_retry_without_param = False
                 if model_unsupports_param and bad_param:
-                    # Cache (model, param) so _build_lmstudio_payload strips
-                    # it up front on every subsequent request.  No more
-                    # wasted round-trip per chat turn.
                     model_id = payload.get("model") or ""
                     if model_id:
                         with Handler._unsupported_params_lock:
                             Handler._unsupported_params.setdefault(
                                 model_id, set()
                             ).add(bad_param)
+                        # Persist so a restart doesn't re-learn this pair.
+                        _persist_param_blacklist(model_id, bad_param, "reactive_400")
                         log.info(
                             f"unsupported_params: cached {{{model_id!r}: {bad_param!r}}} "
                             f"(LM Studio said: {err_detail!r})"
                         )
                     payload.pop(bad_param, None)
+                    should_retry_without_param = True
+                elif ephemeral_param_evicted and bad_param:
+                    # Don't cache — the next turn's reference will be valid
+                    # again.  But do clear our DB copy so we stop sending
+                    # the dead one.
+                    if bad_param == "previous_response_id" and chat_id and not is_incognito:
+                        try:
+                            _db_clear = get_db()
+                            _db_clear.execute(
+                                "UPDATE chats SET response_id=NULL WHERE id=?", (chat_id,),
+                            )
+                            _db_clear.commit()
+                            log.info(
+                                f"previous_response_id evicted from LM Studio "
+                                f"for chat {chat_id!r}; cleared from DB and retrying without"
+                            )
+                        except Exception as e:
+                            log.warning(
+                                f"could not clear stale previous_response_id "
+                                f"for {chat_id!r}: {e}"
+                            )
+                    payload.pop(bad_param, None)
+                    should_retry_without_param = True
+                if should_retry_without_param:
                     req2 = urllib.request.Request(
                         f"{LMSTUDIO}/api/v1/chat",
                         data=json.dumps(payload).encode(),
@@ -2515,7 +2949,7 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             content_parts, reasoning_parts, tool_calls, response_id, stream_usage, stream_complete = \
-                self._collect_stream(resp, is_incognito)
+                self._collect_stream(resp, is_incognito, chat_id=body.get("chat_id") or "")
         except Exception as e:
             log.error(f"chat stream collect: {e}", exc_info=True)
             try:
@@ -2551,12 +2985,38 @@ class Handler(BaseHTTPRequestHandler):
                 db, chat_id, body.get("input", ""), content, tool_calls,
                 response_id, stream_usage, injected_insight_ids=injected_insight_ids,
             )
+        elif chat_id and not is_incognito:
+            # Stream cut before chat.end — synthesise an "interrupted"
+            # assistant row so the chat history reflects what happened.
+            # Fires even when content_parts AND tool_calls are empty (LM
+            # Studio timed out before any token); without that, a
+            # zero-token cut leaves the user wondering whether their turn
+            # was sent at all.  The SPA renders interrupted rows with a
+            # Retry affordance regardless of whether content is present.
+            try:
+                db = get_db()
+                reasoning = "".join(reasoning_parts).strip()
+                content = ("".join(content_parts))
+                if reasoning:
+                    content = f"<think>{reasoning}</think>{content}"
+                self._persist_chat_messages(
+                    db, chat_id, body.get("input", ""), content, tool_calls,
+                    response_id, stream_usage,
+                    injected_insight_ids=injected_insight_ids,
+                    assistant_status="interrupted",
+                )
+            except Exception as e:
+                log.warning(f"failed to persist interrupted stream stub: {e}")
 
             # Index embeddings in background thread (truly non-blocking)
             _embed_token = self._get_lmstudio_token(user["id"])
             def _index_embeddings(cid, tok2):
                 try:
                     db2 = get_db()
+                    # Tag every new embedding with the model that produced
+                    # it.  Retrieval filters by current model so old
+                    # vectors don't poison ranking after a model swap.
+                    embed_model = self._current_embedding_model_id() or "unknown"
                     for role_to_embed in ("user", "assistant"):
                         rows = db2.execute(
                             "SELECT m.id, m.content FROM messages m LEFT JOIN embeddings e ON m.id = e.message_id WHERE m.chat_id=? AND m.role=? AND e.message_id IS NULL ORDER BY m.id DESC LIMIT 2",
@@ -2567,7 +3027,7 @@ class Handler(BaseHTTPRequestHandler):
                                 vec = get_embedding(emb_content, tok2)
                                 if vec:
                                     blob = struct.pack(f'{len(vec)}f', *vec)
-                                    db2.execute("INSERT OR IGNORE INTO embeddings (message_id, vector) VALUES (?, ?)", (mid, blob))
+                                    db2.execute("INSERT OR IGNORE INTO embeddings (message_id, vector, model_id) VALUES (?, ?, ?)", (mid, blob, embed_model))
                     db2.commit()
                 except Exception:
                     log.debug("Background embedding indexing failed", exc_info=True)
@@ -2642,7 +3102,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         rows = db.execute("""
             SELECT m.id, m.role, m.content, m.name, m.args, m.output, m.token_count,
-                   mf.rating
+                   m.status, mf.rating
             FROM messages m
             LEFT JOIN message_feedback mf ON m.id = mf.message_id AND mf.user_id = ?
             WHERE m.chat_id = ?
@@ -2660,7 +3120,8 @@ class Handler(BaseHTTPRequestHandler):
                 try: m["output"] = json.loads(r[5])
                 except (json.JSONDecodeError, ValueError, TypeError): m["output"] = r[5]
             if r[6]: m["token_count"] = r[6]
-            if r[7] is not None: m["feedback"] = r[7]  # rating from message_feedback
+            if r[7]: m["status"]   = r[7]  # NULL means "completed"
+            if r[8] is not None: m["feedback"] = r[8]  # rating from message_feedback
             msgs.append(m)
         self._json_response(200, msgs)
 
@@ -2748,9 +3209,14 @@ class Handler(BaseHTTPRequestHandler):
             "INSERT INTO chats (id,title,model,response_id,updated_at,user_id) VALUES (?,?,?,?,?,?)",
             (new_id, new_title, body.get("model", ""), src_response_id, now, user["id"]),
         )
-        # Copy messages up to and including the specified message id
+        # Copy messages up to and including the specified message id.
+        # Filter ``status='interrupted'`` stubs — they're SPA-only UI rows
+        # and forking them just propagates the broken-stream marker.
         rows = db.execute(
-            "SELECT role,content,name,args,output,created_at FROM messages WHERE chat_id=? AND id<=? ORDER BY id",
+            "SELECT role,content,name,args,output,created_at FROM messages "
+            "WHERE chat_id=? AND id<=? "
+            "AND (status IS NULL OR status != 'interrupted') "
+            "ORDER BY id",
             (source_id, up_to),
         ).fetchall()
         for r in rows:
@@ -2768,9 +3234,13 @@ class Handler(BaseHTTPRequestHandler):
         db = get_db()
         if not self._verify_chat_owner(db, chat_id, user["id"]):
             return
-        # Fetch all messages
+        # Fetch all messages — exclude ``status='interrupted'`` stubs so
+        # the compacted summary doesn't include role=assistant/content=""
+        # turns that would confuse LM Studio's downstream context build.
         msg_rows = db.execute(
-            "SELECT id, role, content, name, args, output FROM messages WHERE chat_id=? ORDER BY id",
+            "SELECT id, role, content, name, args, output FROM messages "
+            "WHERE chat_id=? AND (status IS NULL OR status != 'interrupted') "
+            "ORDER BY id",
             (chat_id,),
         ).fetchall()
         db_messages = []
@@ -2912,9 +3382,12 @@ class Handler(BaseHTTPRequestHandler):
                               (chat_id, user["id"])).fetchone()
         if existing:
             return self._json_response(200, {"share_id": existing[0], "url": f"/share/{existing[0]}"})
-        # Build message snapshot (text only — no system prompts, no base64 images, max 500 messages)
+        # Build message snapshot (text only — no system prompts, no base64
+        # images, max 500 messages, no ``status='interrupted'`` stubs).
         rows = db.execute(
-            "SELECT role, content, name, args, output FROM messages WHERE chat_id=? ORDER BY id LIMIT 500",
+            "SELECT role, content, name, args, output FROM messages "
+            "WHERE chat_id=? AND (status IS NULL OR status != 'interrupted') "
+            "ORDER BY id LIMIT 500",
             (chat_id,)
         ).fetchall()
         snapshot = []
@@ -3075,15 +3548,24 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
 
         db = get_db()
         where, params = self._user_filter(user)
+        # Filter embeddings by current model so vectors from a previous
+        # model don't mix with the query's space — cosine across spaces
+        # is mathematically meaningless.  Legacy NULL / "unknown" rows
+        # are excluded until the user opts into /api/insights/reindex.
+        current_model = self._current_embedding_model_id()
+        if not current_model:
+            # No embedding model loaded — fall back to LIKE search.
+            return self._search_messages_like(user, query)
         rows = db.execute(f"""
             SELECT e.message_id, e.vector, m.content, m.role, m.chat_id, chats.title
             FROM embeddings e
             JOIN messages m ON e.message_id = m.id
             JOIN chats ON m.chat_id = chats.id
             {where}
+            AND e.model_id = ?
             ORDER BY m.created_at DESC
             LIMIT ?
-        """, (*params, SEARCH_MAX_RESULTS)).fetchall()
+        """, (*params, current_model, SEARCH_MAX_RESULTS)).fetchall()
         results = []
         q_norm = math.sqrt(sum(x*x for x in query_vec))
         for mid, blob, content, role, chat_id, title in rows:
@@ -3219,12 +3701,55 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         """
         self._json_response(code, {"error": msg, "req_id": getattr(self, "request_id", None)})
 
+    # Mixed-content input parts we know how to forward.  Anything outside
+    # this set is logged-and-passed-through so a future LM Studio release
+    # adding (e.g.) "audio" or "video" parts doesn't silently drop them
+    # before the upstream sees them.
+    _KNOWN_INPUT_PART_TYPES = {"text", "message", "image"}
+
+    @staticmethod
+    def _normalize_input(raw):
+        """Validate and normalise the ``input`` field.
+
+        Accepts ``str`` (returned as-is) or a list of mixed-content
+        dicts.  Malformed items (non-dict, missing ``type``, missing
+        the type-appropriate payload) are dropped with a warning so the
+        upstream POST stays well-formed and the SPA gets a clean error
+        on the next round-trip if everything was dropped.  Unknown
+        types are forwarded untouched — only deliberate malformations
+        are stripped.
+        """
+        if not isinstance(raw, list):
+            return raw
+        out = []
+        for item in raw:
+            if not isinstance(item, dict):
+                log.warning(f"input: dropping non-dict part {type(item).__name__}")
+                continue
+            t = item.get("type")
+            if not t:
+                log.warning("input: dropping part with no 'type' field")
+                continue
+            if t in ("text", "message"):
+                if not (item.get("text") or item.get("content")):
+                    log.warning(f"input: dropping {t!r} part with empty body")
+                    continue
+            elif t == "image":
+                if not (item.get("data_url") or item.get("url")):
+                    log.warning("input: dropping image part with no data_url/url")
+                    continue
+            # Unknown ``type`` — forward; LM Studio's parser will 400
+            # if it really cannot handle it, and our universal error
+            # branch surfaces that with a useful message.
+            out.append(item)
+        return out
+
     def _build_lmstudio_payload(self, body, system_prompt=None, stream=False):
         """Build the common LM Studio API payload."""
         integrations = body.get("integrations", [])
         payload = {
             "model": body.get("model", ""),
-            "input": body.get("input", ""),
+            "input": self._normalize_input(body.get("input", "")),
             "integrations": integrations,
             "stream": stream,
         }
@@ -3255,15 +3780,29 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         # structured error from LM Studio.  Lookup is O(1) and runs after
         # every other payload-building step so it catches any param we
         # might add in future code paths without needing per-param coupling.
+        #
+        # ``user_set_params`` from the client is a one-shot bypass: any
+        # param the user JUST set via an inline UI control (e.g. the
+        # reasoning cycle button) is exempt from the gate for this turn.
+        # The user explicitly asked to try this value; let LM Studio
+        # answer authoritatively rather than silently dropping the param.
+        # If LM Studio still rejects, the reactive retry path catches it
+        # and adds the (model, param) pair to the blacklist as usual.
         model_id = payload.get("model") or body.get("model") or ""
+        user_overrides = set(body.get("user_set_params") or [])
         if model_id:
             with Handler._unsupported_params_lock:
                 rejected = set(Handler._unsupported_params.get(model_id, ()))
             for p in rejected:
+                if p in user_overrides:
+                    continue  # explicit user request — let LM Studio decide
                 payload.pop(p, None)
         # context_length omitted — it's a load-time parameter in LM Studio.
         # Sending it per-request triggers JIT model reloads.
-        if body.get("incognito"):
+        # ``store=False`` fires for incognito (system-level) OR for an
+        # explicit per-chat "Stateless turns" preference (user-level).
+        # Both ask LM Studio to skip allocating response-store state.
+        if body.get("incognito") or body.get("store") is False:
             payload["store"] = False
         return payload
 
@@ -3521,6 +4060,19 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
     }
     _LAPLACE_ALPHA = 1.0  # Bayesian Laplace smoothing for insight feedback scoring
     _LAPLACE_BETA  = 2.0
+    # Maximum number of pinned insights injected unconditionally.
+    # Larger values risk blowing the system-prompt budget with pinned
+    # rows alone.  5 was minimax's stress-test recommendation; raise
+    # with caution.
+    _PINNED_INSIGHTS_LIMIT = 5
+
+    @staticmethod
+    def _content_hash(content: str) -> str:
+        """Per-spec dedup hash.  Delegates to the module-level helper so
+        the backfill (which runs without a Handler instance) can use the
+        exact same normalization.
+        """
+        return _content_hash_text(content)
 
     def _score_insights(self, db, user_id):
         """Update freshness scores for all active insights. Pure SQL, no LLM."""
@@ -3533,14 +4085,38 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         db.commit()
 
     def _get_top_insights(self, db, user_id, limit=30, max_tokens=500):
-        """Retrieve top-N active insights sorted by weighted freshness score."""
+        """Retrieve insights for injection.
+
+        Pinned insights (capped at ``_PINNED_INSIGHTS_LIMIT``) inject
+        first, unconditionally, in insertion order.  If pinned alone
+        consumes the char budget, the unpinned loop never runs.
+        Otherwise top-scored unpinned rows fill the remainder.
+        """
         self._score_insights(db, user_id)
+        char_budget = max_tokens * 4
+
+        # 1. Pinned (capped + oldest first so the set is stable across reranks).
+        pinned_rows = db.execute("""
+            SELECT id, content, category FROM user_insights
+            WHERE user_id = ? AND state = 'active' AND pinned = 1
+            ORDER BY created_at
+            LIMIT ?
+        """, (user_id, self._PINNED_INSIGHTS_LIMIT)).fetchall()
+        result = [{"id": r[0], "content": r[1], "category": r[2],
+                   "score": float("inf"), "pinned": True}
+                  for r in pinned_rows]
+        chars = sum(len(p["content"]) + 20 for p in result)
+        # Pinned takes priority — if it alone exceeds budget, stop here.
+        if chars >= char_budget:
+            return result
+
+        # 2. Scored unpinned.
         rows = db.execute("""
             SELECT id, content, category, ups, downs,
                 (1.0 / (1.0 + (julianday('now') - julianday(last_used, 'unixepoch')) / 30.0))
                 * (1.0 + 0.3 * ln(1 + use_count)) AS base_score
             FROM user_insights
-            WHERE user_id = ? AND state = 'active'
+            WHERE user_id = ? AND state = 'active' AND pinned = 0
             ORDER BY base_score DESC
             LIMIT ?
         """, (user_id, limit * 2)).fetchall()
@@ -3551,14 +4127,15 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             ups, downs = r[3] or 0.0, r[4] or 0.0
             bayesian = (ups + self._LAPLACE_ALPHA) / (ups + downs + self._LAPLACE_BETA)
             weighted.append({"id": r[0], "content": r[1], "category": r[2],
-                             "score": r[5] * cat_w * bayesian})
+                             "score": r[5] * cat_w * bayesian, "pinned": False})
         weighted.sort(key=lambda x: x["score"], reverse=True)
 
-        result, chars = [], 0
-        for w in weighted[:limit]:
-            chars += len(w["content"]) + 20
-            if chars > max_tokens * 4:
+        remaining = max(0, limit - len(result))
+        for w in weighted[:remaining]:
+            next_chars = chars + len(w["content"]) + 20
+            if next_chars > char_budget:
                 break
+            chars = next_chars
             result.append(w)
         return result
 
@@ -3613,11 +4190,21 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             if not line or len(line) < 5:
                 continue
             insight_id = uuid.uuid4().hex[:12]
-            db.execute(
-                """INSERT INTO user_insights (id, user_id, content, category, origin_chat_id, created_at, last_used)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (insight_id, user_id, line, category, chat_id, now, now),
-            )
+            chash = self._content_hash(line)
+            try:
+                db.execute(
+                    """INSERT INTO user_insights
+                       (id, user_id, content, category, origin_chat_id,
+                        created_at, last_used, content_hash)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (insight_id, user_id, line, category, chat_id, now, now, chash),
+                )
+            except sqlite3.IntegrityError:
+                # UNIQUE (user_id, content_hash) hit \u2014 byte-identical
+                # re-distill.  Skip silently; refine pass handles
+                # legitimate re-categorisation.
+                log.debug(f"insight dedup: {line[:50]!r}")
+                continue
             new_insights.append({"id": insight_id, "content": line, "category": category})
         if new_insights:
             db.commit()
@@ -3642,6 +4229,68 @@ Conversation:
 
 Distill insights (or respond "none" if nothing new):"""
 
+    def _reindex_embeddings(self):
+        """POST /api/insights/reindex — re-embed messages whose stored
+        vectors were produced by a different embedding model than the
+        one currently loaded on LM Studio.  Opt-in, idempotent.
+
+        Atomic per call: all updates commit together; any exception
+        triggers ROLLBACK and returns 500 with no changes applied.
+        Per-row embedding failures (rate limit, transient) are counted
+        and reported in the response — does NOT abort the batch.
+        """
+        user = self._require_auth()
+        if not user:
+            return
+        current = self._current_embedding_model_id()
+        if not current:
+            return self._error(503, "no embedding model loaded on LM Studio")
+        db = get_db()
+        rows = db.execute("""
+            SELECT m.id, m.content
+            FROM messages m
+            JOIN embeddings e ON e.message_id = m.id
+            JOIN chats c ON m.chat_id = c.id
+            WHERE c.user_id = ? AND (e.model_id IS NULL OR e.model_id != ?)
+        """, (user["id"], current)).fetchall()
+        if not rows:
+            return self._json_response(200, {
+                "updated": 0, "skipped": 0, "total_seen": 0,
+                "model_id": current,
+            })
+        token = self._get_lmstudio_token(user["id"])
+        updated = 0
+        failed = 0
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            for mid, content in rows:
+                if not content:
+                    continue
+                vec = get_embedding(content, token)
+                if not vec:
+                    failed += 1
+                    continue
+                blob = struct.pack(f"{len(vec)}f", *vec)
+                db.execute(
+                    "UPDATE embeddings SET vector=?, model_id=? WHERE message_id=?",
+                    (blob, current, mid),
+                )
+                updated += 1
+            db.commit()
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            log.error(f"reindex failed: {e}")
+            return self._error(500, "reindex failed; no changes applied")
+        self._json_response(200, {
+            "updated":     updated,
+            "skipped":     failed,
+            "total_seen":  len(rows),
+            "model_id":    current,
+        })
+
     def _distill_insights(self, body):
         """Extract user insights from a chat conversation via LLM call."""
         user = self._require_auth()
@@ -3662,9 +4311,12 @@ Distill insights (or respond "none" if nothing new):"""
             if not self._verify_chat_owner(db, chat_id, user["id"]):
                 return
 
-            # Fetch conversation
+            # Fetch conversation — skip interrupted stubs so distillation
+            # doesn't pull "the model said nothing" as a real signal.
             msg_rows = db.execute(
-                "SELECT role, content, name, output FROM messages WHERE chat_id=? ORDER BY id",
+                "SELECT role, content, name, output FROM messages "
+                "WHERE chat_id=? AND (status IS NULL OR status != 'interrupted') "
+                "ORDER BY id",
                 (chat_id,),
             ).fetchall()
             if not msg_rows:
@@ -3721,15 +4373,15 @@ Distill insights (or respond "none" if nothing new):"""
         db = get_db()
         rows = db.execute(
             """SELECT id, content, category, origin_chat_id, weight,
-                      created_at, last_used, use_count, state
+                      created_at, last_used, use_count, state, pinned
                FROM user_insights WHERE user_id=? AND state != 'removed'
-               ORDER BY created_at DESC""",
+               ORDER BY pinned DESC, created_at DESC""",
             (user["id"],),
         ).fetchall()
         insights = [
             {"id": r[0], "content": r[1], "category": r[2], "origin_chat_id": r[3],
              "weight": r[4], "created_at": r[5], "last_used": r[6],
-             "use_count": r[7], "state": r[8]}
+             "use_count": r[7], "state": r[8], "pinned": r[9] or 0}
             for r in rows
         ]
         self._json_response(200, insights)
@@ -3747,17 +4399,61 @@ Distill insights (or respond "none" if nothing new):"""
             category = "context"
         now = time.time()
         insight_id = uuid.uuid4().hex[:12]
+        chash = self._content_hash(content)
         db = get_db()
-        db.execute(
-            """INSERT INTO user_insights (id, user_id, content, category, created_at, last_used)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (insight_id, user["id"], content, category, now, now),
-        )
+        try:
+            db.execute(
+                """INSERT INTO user_insights (id, user_id, content, category, created_at, last_used, content_hash)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (insight_id, user["id"], content, category, now, now, chash),
+            )
+        except sqlite3.IntegrityError:
+            existing = db.execute(
+                "SELECT id FROM user_insights WHERE user_id=? AND content_hash=?",
+                (user["id"], chash),
+            ).fetchone()
+            return self._error(409, {
+                "error":       "duplicate_content",
+                "existing_id": existing[0] if existing else None,
+            })
         db.commit()
         self._json_response(201, {"id": insight_id, "content": content, "category": category})
 
+    # Per spec v3: PATCH-style fields the SPA is allowed to update on
+    # an insight.  Anything outside this set is ignored silently.
+    ALLOWED_INSIGHT_UPDATE_FIELDS = {"content", "category", "pinned"}
+
+    @staticmethod
+    def _coerce_bool_flag(value, field_name: str):
+        """Accept 0/1, True/False, "0"/"1"/"true"/"false" (case-insensitive),
+        return 0 or 1.  Raises ValueError on garbage so the caller can
+        return a real 400 instead of silently defaulting to 0 (which was
+        the v2 bug minimax flagged as N3+N5).
+        """
+        truthy = {1, True}
+        falsy  = {0, False, None}
+        if value in truthy:
+            return 1
+        if value in falsy:
+            return 0
+        s = str(value).strip().lower()
+        if s in {"1", "true", "yes", "on"}:
+            return 1
+        if s in {"0", "false", "no", "off", ""}:
+            return 0
+        raise ValueError(f"invalid {field_name} value: {value!r}")
+
     def _edit_insight(self, insight_id, body):
-        """POST /api/insights/:id/edit — edit an insight."""
+        """POST /api/insights/:id/edit — edit an insight.
+
+        Allowed fields: content, category, pinned (see
+        ALLOWED_INSIGHT_UPDATE_FIELDS).  Validates per-field:
+        - content: stripped non-empty; recomputes content_hash; rejects
+          409 if the new hash collides with another row.
+        - category: must be in VALID_INSIGHT_CATEGORIES, else 'context'.
+        - pinned: coerced via _coerce_bool_flag; enforces
+          _PINNED_INSIGHTS_LIMIT on the user's active pinned count.
+        """
         user = self._require_auth()
         if not user:
             return
@@ -3769,15 +4465,51 @@ Distill insights (or respond "none" if nothing new):"""
             return self._error(404, "insight not found")
         updates = []
         params = []
-        if "content" in body:
-            updates.append("content=?")
-            params.append((body["content"] or "").strip())
-        if "category" in body:
-            cat = body["category"] if body["category"] in self.VALID_INSIGHT_CATEGORIES else "context"
-            updates.append("category=?")
-            params.append(cat)
+        new_pinned_val = None
+        for key, value in (body or {}).items():
+            if key not in self.ALLOWED_INSIGHT_UPDATE_FIELDS:
+                continue
+            if key == "content":
+                stripped = (value or "").strip()
+                if not stripped:
+                    return self._error(400, "content cannot be empty")
+                new_hash = self._content_hash(stripped)
+                collision = db.execute(
+                    "SELECT id FROM user_insights "
+                    "WHERE user_id=? AND content_hash=? AND id != ?",
+                    (user["id"], new_hash, insight_id),
+                ).fetchone()
+                if collision:
+                    return self._error(409, {
+                        "error":       "duplicate_content",
+                        "existing_id": collision[0],
+                    })
+                updates.append("content=?");      params.append(stripped)
+                updates.append("content_hash=?"); params.append(new_hash)
+            elif key == "category":
+                cat = value if value in self.VALID_INSIGHT_CATEGORIES else "context"
+                updates.append("category=?");     params.append(cat)
+            elif key == "pinned":
+                try:
+                    coerced = self._coerce_bool_flag(value, "pinned")
+                except ValueError as e:
+                    return self._error(400, str(e))
+                new_pinned_val = coerced
+                updates.append("pinned=?");       params.append(coerced)
         if not updates:
             return self._error(400, "nothing to update")
+        # Pin-limit gate: only check when actually pinning (not unpinning).
+        if new_pinned_val == 1:
+            cur_pinned = db.execute(
+                "SELECT COUNT(*) FROM user_insights "
+                "WHERE user_id=? AND state='active' AND pinned=1 AND id != ?",
+                (user["id"], insight_id),
+            ).fetchone()[0]
+            if cur_pinned >= self._PINNED_INSIGHTS_LIMIT:
+                return self._error(409, {
+                    "error": "pin_limit",
+                    "limit": self._PINNED_INSIGHTS_LIMIT,
+                })
         params.append(insight_id)
         db.execute(f"UPDATE user_insights SET {','.join(updates)} WHERE id=?", params)
         db.commit()
@@ -3955,20 +4687,70 @@ Curated list:"""
         log.debug(f"memory: refined: {result}")
         self._json_response(200, result)
 
-    def _persist_chat_messages(self, db, chat_id, user_input, content, tool_calls, response_id, usage, now=None, injected_insight_ids=None):
-        """Persist user message, tool calls, and assistant response."""
+    # Per-row size caps for tool-call persistence.  MCP search results
+    # commonly run 30-80 KB each; without a cap a multi-turn conversation
+    # with parallel searches inflates SQLite by tens of MB per chat.  Caps
+    # are large enough to preserve any "small" result intact and any
+    # "large" result as a truncated preview the SPA can still render.
+    _TOOL_ARGS_PERSIST_CAP   = 8 * 1024
+    _TOOL_OUTPUT_PERSIST_CAP = 32 * 1024
+
+    @staticmethod
+    def _cap_for_persist(value, cap: int):
+        """Serialise ``value`` to JSON and truncate to ``cap`` bytes if
+        oversize, returning a sentinel JSON envelope on truncation.
+
+        The envelope keeps the round-trip parseable: SPA reads JSON, sees
+        ``{"truncated": true, ...}``, renders the preview + size marker.
+        """
+        if value is None:
+            return None
+        try:
+            blob = json.dumps(value)
+        except (TypeError, ValueError):
+            blob = json.dumps(str(value))
+        if len(blob) <= cap:
+            return blob
+        return json.dumps({
+            "truncated":     True,
+            "preview":       blob[: max(1, cap - 256)],
+            "original_size": len(blob),
+        })
+
+    def _persist_chat_messages(self, db, chat_id, user_input, content, tool_calls, response_id, usage, now=None, injected_insight_ids=None, assistant_status=None):
+        """Persist user message, tool calls, and assistant response.
+
+        ``assistant_status`` defaults to NULL (= "completed") and is set
+        to "interrupted" by the orphan-stream recovery path so the SPA
+        can render a retry affordance on partial turns.
+        """
         if now is None:
             now = time.time()
         prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
         completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
-        # Extract text from array input (don't store base64 image data)
+        # Extract text + structured markers from array input.  We don't
+        # store base64 image/audio payloads in SQLite — they'd inflate
+        # the DB by orders of magnitude — but we DO emit one marker per
+        # part so the history view can render "image attached" /
+        # "audio attached" affordances rather than silently losing them
+        # (which is what the prior code did for any type the count
+        # ignored, e.g. a future "audio").  Unknown types get a generic
+        # marker so a `git log` of this column shows up the gap.
         if isinstance(user_input, list):
-            text_parts = [item.get("text", "") or item.get("content", "") for item in user_input if item.get("type") in ("text", "message")]
-            image_count = sum(1 for item in user_input if item.get("type") == "image")
-            persist_text = "\n".join(text_parts)
-            if image_count:
-                prefix = "\n" if persist_text else ""
-                persist_text += f"{prefix}[{image_count} image{'s' if image_count > 1 else ''} attached]"
+            persist_chunks: list[str] = []
+            for item in user_input:
+                if not isinstance(item, dict):
+                    continue
+                t = item.get("type") or ""
+                if t in ("text", "message"):
+                    txt = item.get("text") or item.get("content") or ""
+                    if txt:
+                        persist_chunks.append(txt)
+                elif t == "image":
+                    persist_chunks.append("[image attached]")
+                elif t:
+                    persist_chunks.append(f"[{t} attached]")
+            persist_text = "\n".join(persist_chunks)
         else:
             persist_text = user_input
         try:
@@ -3981,14 +4763,20 @@ Curated list:"""
                 db.execute(
                     "INSERT INTO messages (chat_id,role,name,args,output,created_at) VALUES (?,?,?,?,?,?)",
                     (chat_id, "tool", tc.get("tool", ""),
-                     json.dumps(tc.get("arguments")) if tc.get("arguments") else None,
-                     json.dumps(tc.get("output")) if tc.get("output") else None,
+                     self._cap_for_persist(tc.get("arguments"), self._TOOL_ARGS_PERSIST_CAP),
+                     self._cap_for_persist(tc.get("output"),    self._TOOL_OUTPUT_PERSIST_CAP),
                      now),
                 )
-            if content:
+            # Persist the assistant row even on empty content WHEN the
+            # stream was interrupted — the row's mere presence (with status
+            # marker) tells the SPA to render a Retry affordance instead of
+            # silently swallowing the failed turn.  Healthy turns require
+            # non-empty content as before.
+            if content or assistant_status:
                 assistant_message_id = db.execute(
-                    "INSERT INTO messages (chat_id,role,content,token_count,created_at) VALUES (?,?,?,?,?)",
-                    (chat_id, "assistant", content, completion_tokens or None, now),
+                    "INSERT INTO messages (chat_id,role,content,token_count,created_at,status) VALUES (?,?,?,?,?,?)",
+                    (chat_id, "assistant", content or "",
+                     completion_tokens or None, now, assistant_status),
                 ).lastrowid
                 if injected_insight_ids:
                     db.executemany(
@@ -4160,18 +4948,57 @@ Curated list:"""
         self.end_headers()
         self.wfile.write(data)
 
+    # ------------------------------------------------------------------
+    # Upstream HTTP wrapper (class fix for the 2026-05-16 login-bounce bug).
+    # ALL future proxy paths to LM Studio MUST go through this — never call
+    # ``urllib.request.urlopen`` against LM Studio directly from a request
+    # handler.  The wrapper centralises:
+    #   - Upstream 401/403 translation to 502 (so the SPA's ``apiFetch``
+    #     interceptor never sees an HTTP 401 it didn't itself originate,
+    #     which prevented an infinite login-bounce loop when our LM Studio
+    #     token was missing or rejected).
+    #   - Network errors translate to a uniform 502 body.
+    #   - 4xx other than 401/403 propagate verbatim (the universal
+    #     capability gate depends on structured 400s flowing through).
+    #
+    # Returns (response_bytes, error_dict).  Exactly one is None.  Error
+    # dict shape: ``{"code": int, "message": str}``.  Caller decides
+    # whether to write the upstream bytes verbatim or parse them first.
+    # ------------------------------------------------------------------
+    def _proxy_lmstudio(self, req: "urllib.request.Request", *, timeout: int = 10):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read(), None
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                hint = ("LM Studio rejected our API token.  Open Settings → "
+                        "LM Studio API key and paste a valid one, or unset "
+                        "LM Studio's API-key requirement.")
+                log.warning(f"_proxy_lmstudio: upstream {e.code} — {hint}")
+                return None, {"code": 502, "message": hint}
+            # Pass through other 4xx (structured 400s, 404 etc.) so the
+            # caller can decide what to do — the capability gate parses
+            # 400 bodies, /models prefers verbatim, etc.
+            try:
+                body = e.read()
+            except Exception:
+                body = b""
+            return None, {"code": e.code, "message": body.decode("utf-8", errors="replace")
+                                                 if body else f"upstream HTTP {e.code}"}
+        except Exception as e:
+            log.error(f"_proxy_lmstudio: {e}")
+            return None, {"code": 502, "message": "upstream service unavailable"}
+
     def _proxy_get(self, path, user_id=None):
         headers = {}
         token = self._get_lmstudio_token(user_id)
         if token:
             headers["Authorization"] = f"Bearer {token}"
         req = urllib.request.Request(f"{LMSTUDIO}{path}", headers=headers)
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                self._json_response(200, resp.read())
-        except Exception as e:
-            log.error(f"proxy GET: {e}")
-            self._error(502, "upstream service unavailable")
+        body, err = self._proxy_lmstudio(req, timeout=10)
+        if err:
+            return self._error(err["code"], err["message"])
+        self._json_response(200, body)
 
     def _get_models(self):
         """Fetch LM Studio's /api/v1/models and augment each LLM entry with
@@ -4194,19 +5021,45 @@ Curated list:"""
         if token:
             headers["Authorization"] = f"Bearer {token}"
         req = urllib.request.Request(f"{LMSTUDIO}/api/v1/models", headers=headers)
+        body, err = self._proxy_lmstudio(req, timeout=10)
+        if err:
+            return self._error(err["code"], err["message"])
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                payload = json.loads(resp.read())
-        except urllib.error.HTTPError as e:
-            try:
-                self._json_response(e.code, json.loads(e.read()))
-            except Exception:
-                self._error(e.code, "upstream rejected models request")
-            return
-        except Exception as e:
-            log.error(f"proxy /api/v1/models: {e}")
-            self._error(502, "upstream service unavailable")
-            return
+            payload = json.loads(body)
+        except (ValueError, TypeError) as e:
+            log.error(f"proxy /api/v1/models: malformed JSON: {e}")
+            return self._error(502, "upstream returned malformed response")
+
+        # Proactive seed: any LLM whose ``capabilities.reasoning`` object
+        # is absent cannot accept a ``reasoning`` parameter at all — LM
+        # Studio returns the documented "does not expose reasoning
+        # configuration" 400.  Mark it in the cache now (and persist) so
+        # the very first chat against that model goes out without the
+        # reasoning param, no retry round-trip needed.  This is the
+        # capability gate the operator asked for — runtime cache stays as
+        # the fallback for params LM Studio doesn't yet expose flags for
+        # (top_p, top_k, etc.).
+        newly_seeded: list = []
+        for m in payload.get("models", []) or []:
+            if m.get("type") != "llm":
+                continue
+            caps = m.get("capabilities") or {}
+            if "reasoning" not in caps:
+                model_key = m.get("key") or ""
+                if not model_key:
+                    continue
+                with Handler._unsupported_params_lock:
+                    existing = Handler._unsupported_params.setdefault(model_key, set())
+                    if "reasoning" not in existing:
+                        existing.add("reasoning")
+                        newly_seeded.append(model_key)
+        for k in newly_seeded:
+            _persist_param_blacklist(k, "reasoning", "capability_gate")
+        if newly_seeded:
+            log.info(
+                f"unsupported_params: capability-seeded reasoning for "
+                f"{len(newly_seeded)} model(s) lacking capabilities.reasoning"
+            )
 
         # Snapshot the cache once so the augmentation is consistent across
         # all entries in the response.
@@ -4323,6 +5176,21 @@ def _remove_pid():
 
 if __name__ == "__main__":
     init_db()
+    # Restore the per-(model, param) blacklist learned in previous runs so
+    # we don't waste a 400-roundtrip per pair after every restart.  Done
+    # before serve_forever() so the very first request after boot sees a
+    # warm cache.
+    try:
+        _boot_db = get_db()
+        Handler._unsupported_params = _load_param_blacklist(_boot_db)
+        if Handler._unsupported_params:
+            _pair_count = sum(len(v) for v in Handler._unsupported_params.values())
+            log.info(
+                f"unsupported_params: loaded {_pair_count} pair(s) across "
+                f"{len(Handler._unsupported_params)} model(s) from DB"
+            )
+    except Exception as e:
+        log.warning(f"could not load param blacklist at boot: {e}")
     _kill_stale_server()
     server = PooledHTTPServer(("0.0.0.0", PORT), Handler)
     _write_pid()

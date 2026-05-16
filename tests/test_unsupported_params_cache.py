@@ -105,6 +105,58 @@ def test_models_endpoint_includes_empty_unsupported_params(srv):
 
 
 # ---------------------------------------------------------------------------
+# Proactive capability gate — a model that lacks ``capabilities.reasoning``
+# is auto-blacklisted for the ``reasoning`` param on the first /api/models
+# fetch, so the first chat request against it never burns a 400 round-trip
+# to discover what /api/v1/models already documents.
+# ---------------------------------------------------------------------------
+
+def test_proactive_gate_seeds_reasoning_when_capability_missing(srv, monkeypatch):
+    import conftest as _conftest
+    server, admin = srv
+
+    # Mutate the canned models for this test only.  Monkeypatch restores
+    # the original list at teardown so the rest of the suite still sees
+    # the reasoning-capable mock.
+    no_reasoning_models = {
+        "models": [
+            {
+                "type":               "llm",
+                "publisher":          "test",
+                "key":                "fixed-depth-model",
+                "display_name":       "Fixed-Depth Model",
+                "architecture":       "test_arch",
+                "loaded_instances":   [{"id": "fixed-depth-model",
+                                        "config": {"context_length": 8192}}],
+                "max_context_length": 8192,
+                "format":             "test",
+                # No "reasoning" key here — this is the qwen3.6 / gemma-style
+                # fixed-depth-thinking model class that the live LM Studio
+                # rejects with "does not expose reasoning configuration."
+                "capabilities":       {"vision": False, "trained_for_tool_use": True},
+            }
+        ]
+    }
+    monkeypatch.setattr(_conftest, "CANNED_MODELS", no_reasoning_models)
+    # Also clear the runtime cache so a previous test's seed doesn't
+    # bleed through.  The Handler class attribute is shared across the
+    # in-process server instance, so we reach into it directly.
+    server.module.Handler._unsupported_params.pop("fixed-depth-model", None)
+
+    models = _models(server.url, admin.cookie)
+    target = [m for m in models if m.get("key") == "fixed-depth-model"]
+    assert target, f"mock did not return fixed-depth-model: {models!r}"
+    caps = target[0].get("capabilities") or {}
+    assert "reasoning" in (caps.get("unsupported_params") or []), (
+        f"capability gate should have seeded 'reasoning' for a model "
+        f"lacking capabilities.reasoning; got {caps!r}"
+    )
+
+    # Clean up so subsequent tests don't see the proactively-seeded entry.
+    server.module.Handler._unsupported_params.pop("fixed-depth-model", None)
+
+
+# ---------------------------------------------------------------------------
 # First-request flow: 400 → cache → retry → success
 # ---------------------------------------------------------------------------
 

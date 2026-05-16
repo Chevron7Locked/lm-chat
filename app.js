@@ -1,6 +1,231 @@
 if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
+
+            // =================================================================
+            // Type definitions (JSDoc).  ``// @ts-check`` is intentionally
+            // NOT enabled at the top of the file — that would surface
+            // thousands of pre-existing typing issues across 6800 lines of
+            // legacy vanilla JS.  Instead, key primitives below carry
+            // ``@param``/``@returns`` annotations so VS Code's IntelliSense
+            // catches typos at the load-bearing surface (setState shape,
+            // subscribe keys, effectiveReasoning return).  New code can
+            // opt in by adding ``// @ts-check`` to the function scope.
+            //
+            // @typedef {Object} AuthState
+            //   @property {boolean} enabled
+            //   @property {?{id:string, username:string, display_name?:string, is_admin?:number}} user
+            //   @property {boolean} needs_setup
+            //
+            // @typedef {Object} ViewState
+            //   @property {"welcome"|"chat"|"settings"|"pins"} route
+            //   @property {null|"settings"|"pins"} rightPanel
+            //   @property {boolean} settingsOpen
+            //   @property {string}  settingsTab
+            //
+            // @typedef {Object} ServerInfo
+            //   @property {boolean} hasApiKey
+            //   @property {string}  lmUrl
+            //   @property {"off"|"on"|"low"|"medium"|"high"} defaultReasoning
+            //
+            // @typedef {Object} ChatSettings
+            //   Per-chat overrides.  Empty object = "use server defaults".
+            //   @property {?string}  reasoning      — "off"|"on"|"low"|"medium"|"high" or absent
+            //   @property {?number}  temperature
+            //   @property {?number}  top_p
+            //   @property {?number}  top_k
+            //   @property {?number}  min_p
+            //   @property {?number}  repeat_penalty
+            //   @property {?number}  max_output_tokens
+            //   @property {?boolean} sc_enabled
+            //   @property {?boolean} cove_enabled
+            //   @property {?false}   store          — false = stateless turns; absent = use chain
+            //   @property {?string}  system_prompt
+            //
+            // @typedef {Object} BootState
+            //   @property {"init"|"auth"|"profile"|"conversations"|"ready"} phase
+            //   @property {?{phase:string, message:string}} error
+            //
+            // @typedef {Object} Model
+            //   @property {string} id
+            //   @property {string} key
+            //   @property {string} display_name
+            //   @property {{vision:boolean, trained_for_tool_use:boolean,
+            //              reasoning?:{allowed_options:string[], default:string},
+            //              unsupported_params?:string[]}} capabilities
+            //   @property {number} context_length
+            //   @property {?{config:Object, id:string}[]} loaded_instances
+            //
+            // @typedef {Object} Chat
+            //   @property {string} id
+            //   @property {string} title
+            //   @property {string} model
+            //   @property {?string} response_id
+            //   @property {number} updated_at
+            //   @property {number} pinned
+            //   @property {string} folder
+            //
+            // @typedef {Object} State
+            //   @property {AuthState}      auth
+            //   @property {ViewState}      view
+            //   @property {Model[]}        models
+            //   @property {Chat[]}         chats
+            //   @property {?string}        activeChatId
+            //   @property {ChatSettings}   chatSettings
+            //   @property {ServerInfo}     serverInfo
+            //   @property {Array<Object>}  mcps
+            //   @property {Array<Object>}  remoteMcps
+            //   @property {{sending:boolean, abortCtrl:?AbortController}} stream
+            //   @property {Object<string,boolean>} busy
+            //   @property {BootState}      boot
+            // =================================================================
+
+            // =================================================================
+            // State machine — single source of truth.
+            //
+            // Every UI mutation must go through ``setState(partial)``.  Renders
+            // subscribe to specific top-level keys via ``subscribe(keys, fn)``
+            // and rerun on the next animation frame when any subscribed key
+            // changes.  Multiple ``setState`` calls within the same tick are
+            // batched into one render pass.
+            //
+            // ``state`` is the live object — read directly from any callsite.
+            // Mutating it without ``setState`` works but skips the change
+            // dispatch (renders won't update).  Treat direct mutation as a bug.
+            //
+            // Legacy mirror: a number of older ``let`` globals (chatSettingsCache,
+            // cachedModels, MCPS, etc.) still exist and are kept in sync with
+            // ``state`` via the setState reducer below.  They are removed
+            // phase-by-phase as their owning surfaces migrate to subscribe().
+            // =================================================================
+            const state = {
+                auth:         { enabled: false, user: null, needs_setup: false },
+                view:         { route: "welcome", rightPanel: null, settingsOpen: false, settingsTab: "chat" },
+                models:       [],
+                chats:        [],
+                activeChatId: null,
+                chatSettings: {},          // per-chat overrides for the active chat
+                serverInfo:   { hasApiKey: false, lmUrl: "", defaultReasoning: "off" },
+                mcps:         [],
+                remoteMcps:   [],
+                stream:       { sending: false, abortCtrl: null },
+                busy:         {},          // {fetchId: bool} — drives per-region spinners
+                // Boot lifecycle.  ``phase`` is one of:
+                //   "init"          — initial value, before checkAuth runs
+                //   "auth"          — checkAuth in flight
+                //   "profile"       — loading models + settings + MCPs in parallel
+                //   "conversations" — loading chat list + restoring active chat
+                //   "ready"         — boot complete; SPA fully interactive
+                // ``error`` is null unless a phase failed irrecoverably.
+                // Subscribed by the boot-status indicator + retry banner.
+                boot:         { phase: "init", error: null },
+            };
+
+            // Nested objects merged shallowly so ``setState({chatSettings:
+            // {reasoning: "high"}})`` updates one field without clobbering the
+            // rest of chatSettings.  Other types replace.
+            const _MERGEABLE_KEYS = new Set([
+                "auth", "view", "chatSettings", "serverInfo", "stream", "busy", "boot",
+            ]);
+            const _changedKeys = new Set();
+            let   _renderScheduled = false;
+            const _subscriptions  = [];
+
+            /**
+             * Merge ``partial`` into ``state``.  Keys listed in
+             * ``_MERGEABLE_KEYS`` shallow-merge into their existing object;
+             * other keys are replaced (arrays, primitives).  Schedules a
+             * batched RAF that invokes subscribers whose key set intersects
+             * the changed keys.
+             * @param {Partial<State>} partial
+             */
+            function setState(partial) {
+                if (!partial || typeof partial !== "object") return;
+                for (const k in partial) {
+                    const next = partial[k];
+                    if (_MERGEABLE_KEYS.has(k) && next && typeof next === "object" && !Array.isArray(next)) {
+                        Object.assign(state[k], next);
+                    } else {
+                        state[k] = next;
+                    }
+                    _changedKeys.add(k);
+                }
+                if (_renderScheduled) return;
+                _renderScheduled = true;
+                requestAnimationFrame(() => {
+                    _renderScheduled = false;
+                    const keys = [..._changedKeys];
+                    _changedKeys.clear();
+                    for (const sub of _subscriptions) {
+                        if (sub._disabled) continue;
+                        if (keys.some((k) => sub.keys.has(k))) {
+                            try {
+                                sub.fn(state);
+                                sub._consecutiveErrors = 0;
+                            } catch (err) {
+                                sub._consecutiveErrors = (sub._consecutiveErrors || 0) + 1;
+                                console.error(
+                                    `subscribe render error (count=${sub._consecutiveErrors}):`,
+                                    err,
+                                );
+                                // Cut off a consistently-failing subscriber so
+                                // it can't burn frames indefinitely.  Manual
+                                // re-subscribe required after fixing.
+                                if (sub._consecutiveErrors >= 5) {
+                                    sub._disabled = true;
+                                    console.error(
+                                        "subscriber disabled after 5 consecutive errors:",
+                                        sub.fn.name || "(anonymous)",
+                                    );
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            /**
+             * Register ``fn`` to run on next animation frame when any of
+             * ``keys`` changes via setState.  Returns an unsubscribe fn.
+             * @param {string[]} keys  Top-level state keys to watch.
+             * @param {(state: State) => void} fn
+             * @returns {() => void} Unsubscribe.
+             */
+            function subscribe(keys, fn) {
+                const sub = { keys: new Set(keys), fn };
+                _subscriptions.push(sub);
+                return () => {
+                    const i = _subscriptions.indexOf(sub);
+                    if (i >= 0) _subscriptions.splice(i, 1);
+                };
+            }
+
+            // Single read function for reasoning effort — chat override wins,
+            // else user/server default, else "off".  All three reasoning UI
+            // surfaces (cycle button, chat-settings dropdown, global-settings
+            // dropdown) read this — guarantees they always agree.
+            //
+            // Treat empty string as "no override" — the chat-settings
+            // dropdown's "Global" option is encoded as ``value=""`` and the
+            // saveChatSetting binding stores null OR "" depending on path;
+            // ``?? ""`` would let an empty string pass as a real value.
+            /**
+             * Resolve the reasoning effort for the next chat send.  Single
+             * read path so the cycle button, chat-settings dropdown, and
+             * global-settings dropdown can never disagree with what
+             * actually goes on the wire.
+             * @returns {"off"|"on"|"low"|"medium"|"high"}
+             */
+            function effectiveReasoning() {
+                const chat = state.chatSettings.reasoning;
+                if (chat) return chat;  // non-empty string only
+                const def = state.serverInfo.defaultReasoning;
+                if (def)  return def;
+                return "off";
+            }
+
             // --- Auth state ---
-            let AUTH_STATE = { enabled: false, user: null, needs_setup: false };
+            // Legacy mirror — kept in sync with state.auth via setState below.
+            // New code reads state.auth.* directly.
+            let AUTH_STATE = state.auth;
 
             async function checkAuth() {
                 try {
@@ -13,6 +238,11 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     AUTH_STATE.enabled = false;
                     AUTH_STATE.user = null;
                 }
+                // Broadcast — the direct mutations above wouldn't fire any
+                // "auth" subscribers.  setState refreshes them.  Object
+                // spread copies into the same merged target (no identity
+                // change to state.auth, so AUTH_STATE alias is preserved).
+                setState({ auth: { ...state.auth } });
                 if (!AUTH_STATE.enabled) {
                     // Auth disabled — hide auth screen, proceed
                     document
@@ -232,6 +462,14 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 document.getElementById("user-dd").classList.remove("open");
                 await apiFetch("/api/auth/logout", { method: "POST" });
                 AUTH_STATE.user = null;
+                setState({ auth: { user: null } });
+                // Stop the connection-poll interval — re-login boots fresh.
+                // Without this, every logout+login cycle compounds another
+                // 30-second timer running checkConnection forever.
+                if (_connInterval) {
+                    clearInterval(_connInterval);
+                    _connInterval = null;
+                }
                 document.getElementById("user-avatar").classList.add("hidden");
                 const gear = document.getElementById("global-settings-btn");
                 if (gear) gear.classList.remove("hidden");
@@ -262,14 +500,394 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 const isOpen = dd.classList.toggle("open");
                 av.setAttribute("aria-expanded", isOpen ? "true" : "false");
             }
-            // Close user dropdown on outside click
-            document.addEventListener("click", (e) => {
-                const av = document.getElementById("user-avatar");
-                if (av && !av.contains(e.target)) {
-                    document.getElementById("user-dd").classList.remove("open");
-                    av.setAttribute("aria-expanded", "false");
+            // =================================================================
+            // Outside-click primitive.
+            //
+            // A naive ``click`` handler with ``container.contains(e.target)``
+            // false-triggers on events whose target was outside but whose
+            // press started inside (or vice versa) — text-selection drags
+            // ending outside, devtools focus-change events, programmatic
+            // clicks from extensions.  The user-visible bug: settings
+            // panels won't open with devtools open, because the focus-change
+            // fires a click whose target lives in the Chrome devtools DOM.
+            //
+            // Fix: only treat as "outside click" when BOTH mousedown AND
+            // mouseup landed outside the container.  Press-inside + drag-out
+            // (selecting text) no longer closes.
+            //
+            // ``onOutside(container, handler)`` returns an unregister fn.
+            // ``container`` may be a function returning the live element
+            // (handles late-mounted nodes).  Handler runs once per
+            // outside-press-release pair.
+            // =================================================================
+            /**
+             * Fire ``handler`` when both mousedown AND mouseup land outside
+             * ``container``.  Eliminates spurious closes from press-inside
+             * + drag-out events (text selection) and focus-change clicks
+             * with mismatched targets (devtools open).
+             * @param {Element|(()=>Element|null)} container
+             * @param {(e: MouseEvent) => void} handler
+             * @returns {() => void} Teardown.
+             */
+            function onOutside(container, handler) {
+                let downOutside = false;
+                const resolve = () => typeof container === "function" ? container() : container;
+                const onDown = (e) => {
+                    const c = resolve();
+                    downOutside = !!(c && !c.contains(e.target));
+                };
+                const onUp = (e) => {
+                    if (!downOutside) return;
+                    downOutside = false;
+                    const c = resolve();
+                    if (c && !c.contains(e.target)) handler(e);
+                };
+                document.addEventListener("mousedown", onDown, true);
+                document.addEventListener("mouseup",   onUp,   true);
+                return () => {
+                    document.removeEventListener("mousedown", onDown, true);
+                    document.removeEventListener("mouseup",   onUp,   true);
+                };
+            }
+
+            // =================================================================
+            // Toast / notification system.
+            //
+            // Replaces ~25 silent console.error sites with a user-visible
+            // surface.  Stacks top-right at --z-toast (10000) — above the
+            // auth overlay so a network error during login shows.
+            //
+            // toast.success(msg) | toast.info(msg) | toast.warn(msg) |
+            // toast.error(msg, {detail, persistent}) — error is sticky by
+            // default (manual dismiss); others auto-fade after 6s.
+            //
+            // Network monitoring: navigator.onLine + fetch-error pattern.
+            // A single offline toast pins until back online.
+            //
+            // ARIA: ``role="status"`` for non-errors (polite), ``role="alert"``
+            // for errors (assertive).  Toasts are aria-live regions.
+            // =================================================================
+            const TOAST_CONTAINER_ID = "toast-container";
+            const TOAST_DEFAULT_TIMEOUT = 6000;
+            let _offlineToast = null;
+
+            function _toastContainer() {
+                let c = document.getElementById(TOAST_CONTAINER_ID);
+                if (!c) {
+                    c = document.createElement("div");
+                    c.id = TOAST_CONTAINER_ID;
+                    document.body.appendChild(c);
+                }
+                return c;
+            }
+
+            function _showToast(variant, msg, { detail, persistent } = {}) {
+                if (!msg) return null;
+                const t = document.createElement("div");
+                t.className = `toast toast-${variant}`;
+                t.setAttribute("role", variant === "error" ? "alert" : "status");
+                t.setAttribute("aria-live", variant === "error" ? "assertive" : "polite");
+                const text = document.createElement("div");
+                text.className = "toast-text";
+                text.textContent = String(msg);
+                t.appendChild(text);
+                if (detail) {
+                    const det = document.createElement("div");
+                    det.className = "toast-detail";
+                    det.textContent = typeof detail === "string" ? detail : (detail.message || String(detail));
+                    t.appendChild(det);
+                }
+                const close = document.createElement("button");
+                close.className = "toast-close";
+                close.setAttribute("aria-label", "Dismiss");
+                close.textContent = "×";
+                close.addEventListener("click", () => dismiss());
+                t.appendChild(close);
+                let timer = null;
+                function dismiss() {
+                    if (timer) clearTimeout(timer);
+                    t.classList.add("toast-leaving");
+                    setTimeout(() => t.remove(), 200);
+                }
+                _toastContainer().appendChild(t);
+                const stickByDefault = variant === "error" || persistent;
+                if (!stickByDefault) {
+                    timer = setTimeout(dismiss, TOAST_DEFAULT_TIMEOUT);
+                }
+                return { dismiss, el: t };
+            }
+
+            const toast = {
+                success: (m, o) => _showToast("success", m, o),
+                info:    (m, o) => _showToast("info",    m, o),
+                warn:    (m, o) => _showToast("warn",    m, o),
+                error:   (m, o) => _showToast("error",   m, o),
+            };
+
+            // Boot-error subscriber upgrade — was console.warn in Phase 3,
+            // now a real toast so users see what failed.
+            subscribe(["boot"], () => {
+                if (state.boot.error) {
+                    toast.error(
+                        `Startup error in ${state.boot.error.phase} phase`,
+                        { detail: state.boot.error.message },
+                    );
+                    // Clear so a subsequent setState doesn't re-toast the
+                    // same error.  Keep state.boot.phase as-is so any
+                    // ready gate still trips.
+                    state.boot.error = null;
                 }
             });
+
+            // Network online/offline — show a persistent offline toast
+            // while disconnected, dismiss when back.
+            window.addEventListener("offline", () => {
+                if (_offlineToast) return;
+                _offlineToast = toast.warn("You're offline.  Reconnect when ready.", { persistent: true });
+            });
+            window.addEventListener("online", () => {
+                if (_offlineToast) { _offlineToast.dismiss(); _offlineToast = null; }
+                toast.success("Back online.");
+            });
+
+            // =================================================================
+            // URL router.
+            //
+            // Routes:
+            //   /                  → welcome screen
+            //   /chat/:id          → open chat ``id``
+            //   /settings/:tab?    → system settings, optional tab
+            //   /pins              → right-panel pins
+            //
+            // The SPA is single-page; routes are reflected in the URL via
+            // history.pushState so the browser back/forward buttons work
+            // and links to specific chats/settings can be shared.  Routes
+            // are derived from + write into state.view; subscribers can
+            // ignore the route detail and read state.view.* as before.
+            //
+            // Conventions:
+            //   - ``navigate(path, {replace})``: programmatic.  Default
+            //     pushes; pass replace:true for state-mirror changes that
+            //     shouldn't grow the back stack.
+            //   - ``popstate`` listener re-derives view from current URL.
+            //   - On initial load (boot) the route is parsed once and
+            //     dispatched as the SPA's first view-set action.
+            // =================================================================
+            const ROUTES = {
+                parse(pathname) {
+                    const path = (pathname || "/").replace(/\/+$/, "") || "/";
+                    if (path === "/")             return { name: "welcome" };
+                    let m;
+                    if ((m = path.match(/^\/chat\/([^\/]+)$/)))     return { name: "chat",     chatId: m[1] };
+                    if ((m = path.match(/^\/settings(?:\/([^\/]+))?$/))) return { name: "settings", tab: m[1] || "chat" };
+                    if (path === "/pins")         return { name: "pins" };
+                    return { name: "welcome" };  // unknown path → welcome
+                },
+                build(route) {
+                    if (!route || route.name === "welcome") return "/";
+                    if (route.name === "chat")     return `/chat/${route.chatId}`;
+                    if (route.name === "settings") return route.tab && route.tab !== "chat" ? `/settings/${route.tab}` : "/settings";
+                    if (route.name === "pins")     return "/pins";
+                    return "/";
+                },
+            };
+
+            // Apply a parsed route to SPA state by invoking the existing
+            // navigation primitives (loadChat, openSettings, openRightPanel).
+            // Each one already mutates the right state slices + DOM; the
+            // router just dispatches.  Idempotent: if state already matches,
+            // it's a cheap no-op.
+            let _applyingRoute = false;
+            function applyRoute(route) {
+                _applyingRoute = true;
+                try {
+                    if (route.name === "chat" && route.chatId) {
+                        if (activeId !== route.chatId) {
+                            if (chatMeta[route.chatId]) {
+                                loadChat(route.chatId);
+                            } else {
+                                // Chat not in memory.  Two cases:
+                                //   1. Pre-boot: chats haven't loaded yet —
+                                //      _bootPhaseConversations re-reads the
+                                //      URL on completion and dispatches
+                                //      then.  Silent retry.
+                                //   2. Post-boot: chat is genuinely missing
+                                //      (deleted, foreign user, typo).
+                                //      Surface as a toast + welcome
+                                //      redirect so the user isn't left
+                                //      staring at the previous chat's
+                                //      content with the wrong URL.
+                                if (state.boot.phase === "ready") {
+                                    console.warn(`[router] chat ${route.chatId} not found`);
+                                    if (typeof toast !== "undefined") {
+                                        toast.warn(`Chat not found — it may have been deleted.`);
+                                    }
+                                    // Redirect to welcome.  replaceState
+                                    // so the back button doesn't bring
+                                    // us back to this dead route.
+                                    activeId = null;
+                                    setState({ activeChatId: null });
+                                    renderWelcome();
+                                    history.replaceState({}, "", "/");
+                                }
+                            }
+                        }
+                    } else if (route.name === "settings") {
+                        if (!settingsOpen) openSettings(route.tab);
+                        else if (route.tab) {
+                            switchSettingsTab(route.tab);
+                        }
+                    } else if (route.name === "pins") {
+                        if (state.view.rightPanel !== "pins") openRightPanel("pins");
+                    } else {
+                        // welcome — close transient surfaces; do NOT
+                        // unload the active chat (back-button to welcome
+                        // is meaningful only when leaving a chat URL,
+                        // which is rare in practice).
+                        if (settingsOpen) closeSettings();
+                        if (state.view.rightPanel) closeRightPanel();
+                    }
+                } finally {
+                    _applyingRoute = false;
+                }
+            }
+
+            function navigate(path, { replace = false } = {}) {
+                if (_applyingRoute) return;  // ignore re-entry from applyRoute → state updates
+                const cur = window.location.pathname;
+                if (cur === path) return;
+                if (replace) history.replaceState({}, "", path);
+                else         history.pushState ({}, "", path);
+                applyRoute(ROUTES.parse(path));
+            }
+
+            // Browser back/forward — re-derive view from URL.
+            window.addEventListener("popstate", () => {
+                applyRoute(ROUTES.parse(window.location.pathname));
+            });
+
+            // State → URL: when activeChatId changes, sync the URL.
+            // Uses ``replaceState`` rather than ``pushState`` so flipping
+            // between chats doesn't fill the back stack with one entry
+            // per click — chat switches collapse into a single "in this
+            // app" history entry.  This is a deliberate tradeoff: users
+            // who want to share a chat use the per-chat "Copy link"
+            // affordance; the back button is reserved for crossing
+            // surface boundaries (chat → settings → pins).
+            subscribe(["activeChatId"], () => {
+                if (_applyingRoute) return;
+                const target = state.activeChatId ? `/chat/${state.activeChatId}` : "/";
+                if (window.location.pathname !== target) {
+                    history.replaceState({}, "", target);
+                }
+            });
+
+            // =================================================================
+            // Busy / loading-state primitive.
+            //
+            // ``withBusy(key, fn)`` flips ``state.busy[key] = true`` before
+            // running ``fn`` (sync or async) and clears it after.  Renders
+            // subscribed to ``"busy"`` can show per-region spinners by
+            // reading state.busy[key].  Reentry safe — nested withBusy
+            // calls with the same key count refs so the busy flag stays
+            // on until all calls settle.
+            //
+            // Keys are arbitrary strings.  Convention: hyphenated region
+            // name matching the rendered area (``sidebar-chats``,
+            // ``settings-mcps``, ``model-list``).  No central registry —
+            // callers and renderers must agree on the key.
+            // =================================================================
+            const _busyRefs = new Map();
+            /**
+             * Wrap ``fn`` in a busy-state flag.  Sets state.busy[key]=true
+             * before, clears after.  Refcounted so nested calls keep the
+             * flag on until all settle.
+             * @template T
+             * @param {string} key
+             * @param {() => Promise<T>} fn
+             * @returns {Promise<T>}
+             */
+            async function withBusy(key, fn) {
+                const prev = _busyRefs.get(key) || 0;
+                _busyRefs.set(key, prev + 1);
+                if (prev === 0) setState({ busy: { [key]: true } });
+                try {
+                    return await fn();
+                } finally {
+                    const cur = (_busyRefs.get(key) || 1) - 1;
+                    if (cur <= 0) {
+                        _busyRefs.delete(key);
+                        setState({ busy: { [key]: false } });
+                    } else {
+                        _busyRefs.set(key, cur);
+                    }
+                }
+            }
+
+            // =================================================================
+            // Popover primitive.
+            //
+            // Wraps a "trigger + panel + close-on-outside + close-on-ESC"
+            // pattern that the SPA repeats for the user dropdown, export
+            // dropdown, model dropdowns, slash menu, and the share dialog.
+            // Reuses ``onOutside`` so all popovers get the same press-and-
+            // release semantics — no more spurious closes from focus
+            // changes when devtools is open.
+            //
+            // ``openPopover({trigger, panel, onClose, returnFocus = true})``
+            //   - trigger: the button/anchor; receives ``aria-expanded``.
+            //   - panel: the popover content element; receives ``open`` class.
+            //   - onClose: optional hook fired exactly once on close.
+            //   - returnFocus: when true, focus returns to ``trigger`` on
+            //     close (correct keyboard semantics).
+            // Returns a ``close()`` function.  Calling it manually does the
+            // same work as ESC or outside-press: removes class, restores
+            // aria-expanded, calls onClose, optionally returns focus.
+            // =================================================================
+            function openPopover({ trigger, panel, onClose, returnFocus = true } = {}) {
+                if (!panel) return () => {};
+                let closed = false;
+                let teardownOutside = null;
+                let teardownEsc     = null;
+                function close() {
+                    if (closed) return;
+                    closed = true;
+                    panel.classList.remove("open");
+                    if (trigger) trigger.setAttribute("aria-expanded", "false");
+                    teardownOutside?.();
+                    teardownEsc?.();
+                    if (returnFocus && trigger && typeof trigger.focus === "function") {
+                        try { trigger.focus(); } catch (_) {}
+                    }
+                    onClose?.();
+                }
+                panel.classList.add("open");
+                if (trigger) trigger.setAttribute("aria-expanded", "true");
+                teardownOutside = onOutside(panel, close);
+                const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
+                document.addEventListener("keydown", onKey, true);
+                teardownEsc = () => document.removeEventListener("keydown", onKey, true);
+                return close;
+            }
+
+            // Track teardowns for parse-time onOutside hookups.  No
+            // caller invokes ``_globalTeardowns`` today — these listeners
+            // live as long as the page does — but capturing the handles
+            // here means a future componentization phase can call them
+            // without rewriting every hookup site.  Pattern: anything
+            // installed at IIFE parse time that should die with the SPA
+            // pushes its teardown here.
+            const _globalTeardowns = [];
+
+            // Close user dropdown on outside press-and-release.
+            _globalTeardowns.push(onOutside(
+                () => document.getElementById("user-avatar"),
+                () => {
+                    const av = document.getElementById("user-avatar");
+                    document.getElementById("user-dd")?.classList.remove("open");
+                    av?.setAttribute("aria-expanded", "false");
+                },
+            ));
 
             // --- System Settings Panel ---
             let settingsOpen = false;
@@ -280,10 +898,27 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 settingsOpen = true;
                 $("scroll").style.display = "none";
                 $("input-area").style.display = "none";
+                // Scroll-bottom arrow is a sibling of #scroll and would
+                // otherwise stay visible center-page when settings opens.
+                const _sb = document.getElementById("scroll-bottom");
+                if (_sb) _sb.style.display = "none";
                 if ($("starters")) $("starters").style.display = "none";
                 if ($("thinking")) $("thinking").style.display = "none";
                 $("sys-settings").classList.add("open");
                 renderSettingsTab();
+                // URL sync — use ``pushState`` so the back button takes
+                // the user out of settings back to their chat (matching
+                // user expectation), not all the way out of the app.
+                // For internal tab switches the URL still updates but a
+                // back-button-then-forward round trip would re-traverse
+                // tab changes; acceptable given tab switches are rare.
+                if (!_applyingRoute) {
+                    const target = settingsTab && settingsTab !== "chat"
+                        ? `/settings/${settingsTab}` : "/settings";
+                    if (window.location.pathname !== target) {
+                        history.pushState({}, "", target);
+                    }
+                }
             }
 
             function closeSettings() {
@@ -300,7 +935,25 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 $("sys-settings").innerHTML = "";
                 $("scroll").style.display = "";
                 $("input-area").style.display = "";
+                const _sb = document.getElementById("scroll-bottom");
+                if (_sb) _sb.style.display = "";
                 if ($("starters")) $("starters").style.display = "";
+                // URL sync — when the user dismisses via the X button (not
+                // browser back), step the history back so the address bar
+                // matches the SPA state.  Uses history.back() when the
+                // current entry is the /settings push we created in
+                // openSettings; otherwise replaceState to the prior chat.
+                if (!_applyingRoute && window.location.pathname.startsWith("/settings")) {
+                    const target = activeId ? `/chat/${activeId}` : "/";
+                    // Prefer back() so the previously-pushed entry doesn't
+                    // strand in history.  replaceState is the fallback for
+                    // cold deep links where no prior entry exists.
+                    if (window.history.length > 1) {
+                        history.back();
+                    } else if (window.location.pathname !== target) {
+                        history.replaceState({}, "", target);
+                    }
+                }
             }
 
             function switchSettingsTab(tab) {
@@ -770,7 +1423,14 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
 
             // MCP servers discovered from ~/.lmstudio/mcp.json via /api/mcp/servers.
             // Populated on init — all off by default, persisted per-server in localStorage.
-            let MCPS = [];
+            // Aliased to state.mcps (same array reference) — direct
+            // mutations are immediately visible to anyone reading state,
+            // but renders subscribed to "mcps" need an explicit
+            // ``setState({mcps: state.mcps})`` after a mutation to fire.
+            // Use the broadcastMcps() helper below at every write site.
+            let MCPS = state.mcps;
+            function broadcastMcps()      { setState({ mcps: state.mcps }); }
+            function broadcastRemoteMcps(){ setState({ remoteMcps: state.remoteMcps }); }
 
             const STARTER_ICONS = {
                 summarize:
@@ -1048,11 +1708,15 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                     serverSettings.hasApiKey = !!d.lm_apikey;
                     serverSettings.lmUrl = d.lm_url || "";
                     if (d.remote_mcps) {
-                        remoteMcps = d.remote_mcps;
+                        // Mutate in place to preserve the remoteMcps alias.
+                        remoteMcps.length = 0;
+                        d.remote_mcps.forEach((m) => remoteMcps.push(m));
+                        broadcastRemoteMcps();
                         renderRemoteMcps();
                     }
                 } catch (e) {
                     console.error("loadSettings:", e);
+                    toast.error("Failed to load your settings.", { detail: e.message });
                 }
             }
 
@@ -1126,6 +1790,13 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 // below: ``param-name → [element-id, ...]``.  Keep map keys
                 // matching the exact field name LM Studio reports back so
                 // the lookup is direct.
+                // The reasoning cycle button intentionally STAYS clickable
+                // even when capabilities.unsupported_params contains
+                // "reasoning" — a user-explicit click is a request to TRY
+                // the param on this model, and the server treats explicit
+                // user sets as a bypass of the blacklist for that turn.
+                // Only the form-style controls (panel dropdowns) honour
+                // the gate and disable themselves.
                 const PARAM_CONTROLS = {
                     reasoning: ["s-reasoning", "cs-reasoning"],
                 };
@@ -1142,6 +1813,14 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                         ctl.title = tooltip;
                     });
                 });
+
+                // Reasoning button — sync its visible label and data-state
+                // to whatever the current chat has (or "off" if not set),
+                // and use the model's documented allowed_options if
+                // available.  The cycle handler below uses the same
+                // ordering so the button can't show a value the active
+                // model doesn't accept.
+                syncReasoningBtn();
 
                 if (!el) return;
                 const tags = [];
@@ -1165,6 +1844,167 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                         :   "")
                     :   "";
             }
+
+            // ---- Reasoning effort (universal across providers) -------------
+            // SPA stores a canonical value in cs.reasoning ∈
+            // {"off","low","medium","high","on"}.  The payload-builder for
+            // each backend translates: LM Studio native = ``reasoning`` enum
+            // (current); OpenAI-compat would map to ``reasoning.effort``;
+            // Anthropic would map to a thinking budget tokens int; OpenRouter
+            // forwards provider-specific.  The SPA UI is one button that
+            // cycles through the values the ACTIVE MODEL declares it accepts.
+            const REASONING_CANONICAL = ["off", "low", "medium", "high", "on"];
+            function _activeAllowedReasoning() {
+                const m = cachedModels.find((x) => x.id === modelSel.value);
+                const caps = (m && m.capabilities) || {};
+                const opts = caps.reasoning && Array.isArray(caps.reasoning.allowed_options)
+                    ? caps.reasoning.allowed_options
+                    : null;
+                if (!opts || !opts.length) {
+                    // Capability metadata absent — fall back to the full
+                    // canonical set so the button stays interactive.  The
+                    // server's proactive blacklist (capabilities.unsupported_params)
+                    // governs whether the button is DISABLED entirely; if
+                    // we reach here at all, the param isn't blacklisted.
+                    return REASONING_CANONICAL.slice();
+                }
+                // Preserve canonical ordering, filter to model's allowed set.
+                const allowed = new Set(opts);
+                return REASONING_CANONICAL.filter((v) => allowed.has(v));
+            }
+            // Single render function for ALL reasoning UI surfaces.  Reads
+            // from state via effectiveReasoning() so the cycle button label,
+            // the chat-settings dropdown, and the global-settings dropdown
+            // can never disagree.  Subscribed below to state.chatSettings +
+            // state.serverInfo — runs whenever either changes.
+            function renderReasoningUI() {
+                const value = effectiveReasoning();
+                const allowed = _activeAllowedReasoning();
+                const inAllowed = allowed.includes(value);
+                const clamped = inAllowed ? value : (allowed[0] || "off");
+
+                const btn = document.getElementById("reasoning-btn");
+                if (btn) {
+                    btn.dataset.reasoning = clamped;
+                    const label = btn.querySelector(".reasoning-label");
+                    if (label) label.textContent = clamped.toUpperCase();
+                    btn.title = btn.disabled
+                        ? "This model does not expose reasoning configuration."
+                        : `Reasoning effort: ${clamped.toUpperCase()} — click to cycle`;
+                }
+                const chatDd = document.getElementById("cs-reasoning");
+                if (chatDd) {
+                    // Empty string = "use global" for the chat-settings dropdown.
+                    chatDd.value = state.chatSettings.reasoning ?? "";
+                }
+                const globalDd = document.getElementById("s-reasoning");
+                if (globalDd) {
+                    globalDd.value = state.serverInfo.defaultReasoning ?? "off";
+                }
+            }
+            // Legacy name kept as alias for any external caller.
+            const syncReasoningBtn = renderReasoningUI;
+            // ``models`` not subscribed — _activeAllowedReasoning() reads
+            // cachedModels lazily inside cycleReasoning(), so the reasoning
+            // UI doesn't need to rerender on every model-list refresh.
+            subscribe(["chatSettings", "serverInfo", "activeChatId"], renderReasoningUI);
+
+            // -----------------------------------------------------------------
+            // Alias-integrity runtime guard.  Catches the pattern where a
+            // developer reassigns a legacy mirror (``MCPS = [...]``) instead
+            // of mutating in place — which would silently sever the alias to
+            // state.mcps and starve subscribed renders.  Runs after every
+            // state change in dev mode; logs at error level + offers a
+            // ``console.dir(state)`` breadcrumb so the regression is loud.
+            // -----------------------------------------------------------------
+            function _assertAliases() {
+                const bad = [];
+                if (MCPS         !== state.mcps)         bad.push("MCPS / state.mcps");
+                if (remoteMcps   !== state.remoteMcps)   bad.push("remoteMcps / state.remoteMcps");
+                if (cachedModels !== state.models)       bad.push("cachedModels / state.models");
+                if (chatSettingsCache !== state.chatSettings) bad.push("chatSettingsCache / state.chatSettings");
+                if (bad.length) {
+                    console.error(
+                        "Alias integrity broken — these legacy mirrors diverged " +
+                        "from state and will starve subscribed renders:\n  " +
+                        bad.join("\n  ") +
+                        "\nLikely cause: a write site reassigned the variable " +
+                        "(e.g. ``MCPS = [...]``) instead of mutating in place " +
+                        "(``MCPS.length = 0; MCPS.push(...)``)."
+                    );
+                }
+            }
+            subscribe(["mcps", "remoteMcps", "models", "chatSettings"], _assertAliases);
+
+            // Toggle ``.busy`` class on regions whose state.busy[key] is true.
+            // Adding a new busy region: add one selector here + a CSS rule
+            // for ``[data-busy] > .busy-indicator { display: block }`` or
+            // similar.  Keeps loading UX consistent and central.
+            const _BUSY_REGIONS = {
+                "sidebar-chats": () => document.getElementById("chat-list"),
+                "model-list":    () => document.getElementById("model-dd"),
+            };
+            subscribe(["busy"], () => {
+                for (const [key, getEl] of Object.entries(_BUSY_REGIONS)) {
+                    const el = getEl();
+                    if (!el) continue;
+                    el.classList.toggle("busy", !!state.busy[key]);
+                }
+            });
+
+            // =================================================================
+            // Phase 2 — declarative render subscriptions.
+            //
+            // Each subscribe() below ties a render function to the state
+            // keys it depends on.  When ``setState`` fires for any of those
+            // keys, the render runs on the next animation frame (batched).
+            // Old code keeps calling the render functions imperatively too —
+            // that's fine, double-render is cheap.  Over time the imperative
+            // calls disappear.
+            // =================================================================
+            // Renders below reference functions defined LATER in the file
+            // (renderMcpList, renderRemoteMcps, renderModelList,
+            // renderChatSettingsPanel, renderList).  Subscriptions register
+            // at parse time but only fire on the first setState, which can't
+            // happen until after the function definitions execute — safe.
+            subscribe(["mcps"],         () => { try { renderMcpList(); }         catch (_) {} });
+            subscribe(["remoteMcps"],   () => { try { renderRemoteMcps(); }      catch (_) {} });
+            subscribe(["models"],       () => { try { renderModelList(); }       catch (_) {} });
+            subscribe(["chats", "activeChatId"], () => { try { renderList(); }   catch (_) {} });
+            // The chat settings panel only renders when visible — skip when
+            // closed to avoid touching DOM nodes that aren't in the tree.
+            subscribe(["chatSettings", "models", "view"], () => {
+                if (state.view.rightPanel === "settings") {
+                    try { renderChatSettingsPanel(); } catch (_) {}
+                }
+            });
+
+            function cycleReasoning() {
+                const btn = document.getElementById("reasoning-btn");
+                if (!btn) return;
+                const allowed = _activeAllowedReasoning();
+                if (!allowed.length) return;
+                const cur = effectiveReasoning();
+                const idx = allowed.indexOf(cur);
+                const next = allowed[(idx + 1) % allowed.length];
+                // Single write path: setState() updates state.chatSettings;
+                // chatSettingsCache is aliased to the same object so
+                // legacy readers see the change too.  Subscribed
+                // renderReasoningUI() runs on next RAF and reflects the
+                // change across the button, chat-dropdown, and global-dropdown.
+                setState({ chatSettings: { reasoning: next } });
+                if (typeof saveChatSetting === "function") {
+                    saveChatSetting("reasoning", next);
+                }
+                // Mark explicit user choice so server's proactive capability
+                // gate doesn't strip the param this turn.
+                if (!window._userSetParams) window._userSetParams = new Set();
+                window._userSetParams.add("reasoning");
+            }
+            document.addEventListener("DOMContentLoaded", () => {
+                const btn = document.getElementById("reasoning-btn");
+                if (btn) btn.addEventListener("click", cycleReasoning);
+            });
 
             // --- Settings (localStorage only — these are per-device prefs) ---
             $("s-sys").value = localStorage.getItem("lsc-sys") || "";
@@ -1442,8 +2282,14 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     if (PRESETS[def]) $("s-sys").value = PRESETS[def];
                 }
             })();
-            $("s-reasoning").value =
-                localStorage.getItem("lsc-reasoning") || "off";
+            // Seed the global-default reasoning into the state machine
+            // from localStorage at boot.  Settings panel input reflects it;
+            // setState broadcast triggers any subscribed reasoning renders.
+            {
+                const _stored = localStorage.getItem("lsc-reasoning") || "off";
+                setState({ serverInfo: { defaultReasoning: _stored } });
+                $("s-reasoning").value = _stored;
+            }
             $("s-followups").checked =
                 localStorage.getItem("lsc-followups") !== "off";
             $("s-sc").checked =
@@ -1451,6 +2297,43 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             $("s-cove").checked =
                 localStorage.getItem("lsc-cove") === "1";
             // --- MCP toggles (populated from /api/mcp/servers) ---
+            // Comma-separated tool whitelist per integration.  Stored per
+            // plugin id in localStorage; remote MCPs round-trip via the
+            // server (encrypted at rest alongside auth).  Empty list ==
+            // "use every tool the server exposes" — that's the bare-string
+            // shape we keep emitting in that case.
+            function _allowedToolsKey(id) { return "lsc-mcp-tools-" + id; }
+            function _readAllowedTools(id) {
+                const v = localStorage.getItem(_allowedToolsKey(id));
+                if (!v) return [];
+                try { const arr = JSON.parse(v); return Array.isArray(arr) ? arr : []; }
+                catch (_) { return []; }
+            }
+            function _writeAllowedTools(id, arr) {
+                if (arr && arr.length) {
+                    localStorage.setItem(_allowedToolsKey(id), JSON.stringify(arr));
+                } else {
+                    localStorage.removeItem(_allowedToolsKey(id));
+                }
+            }
+            async function editAllowedTools(label, current, onSave) {
+                // Dialog: comma-separated tool names.  We have no
+                // upstream tools/list discovery yet (intentionally —
+                // adding an MCP JSON-RPC client to a stdlib-only server
+                // is out of scope for this delta), so the user types
+                // the names.  Empty submission clears the whitelist.
+                const val = await showDialog({
+                    title: `Allowed tools for ${label}`,
+                    message: "Comma-separated tool names. Leave blank to allow all tools the server exposes.",
+                    input: true,
+                    placeholder: "search_web, fetch_url, ...",
+                    defaultValue: (current || []).join(", "),
+                    confirmText: "Save",
+                });
+                if (val === null) return;
+                const list = val.split(",").map((t) => t.trim()).filter(Boolean);
+                onSave(list);
+            }
             function renderMcpList() {
                 const list = $("mcp-list");
                 if (!list) return;
@@ -1462,14 +2345,30 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 MCPS.forEach((s, i) => {
                     const d = document.createElement("div");
                     d.className = "mcp-i";
-                    d.innerHTML = `<input type=checkbox ${s.on ? "checked" : ""}><span>${esc(s.name)}</span>`;
+                    const toolCount = (s.allowed_tools && s.allowed_tools.length) || 0;
+                    const toolBadge = toolCount
+                        ? `<span style="color:var(--accent);font-size:0.625rem;margin-left:var(--sp-3)" title="${toolCount} allowed tool${toolCount === 1 ? "" : "s"}">&#9881; ${toolCount}</span>`
+                        : "";
+                    d.innerHTML =
+                        `<input type=checkbox ${s.on ? "checked" : ""}>` +
+                        `<span>${esc(s.name)}</span>${toolBadge}` +
+                        `<button data-action="edit-tools" data-idx="${i}" style="margin-left:auto;background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-xs);padding:0 var(--sp-2)" title="Allowed tools">tools</button>`;
                     d.querySelector("input").onchange = (e) => {
                         MCPS[i].on = e.target.checked;
                         localStorage.setItem(
                             "lsc-mcp-" + s.id,
                             e.target.checked ? "1" : "0",
                         );
+                        broadcastMcps();
                     };
+                    d.querySelector('[data-action="edit-tools"]').addEventListener("click", () => {
+                        editAllowedTools(s.name, MCPS[i].allowed_tools, (list) => {
+                            MCPS[i].allowed_tools = list;
+                            _writeAllowedTools(s.id, list);
+                            broadcastMcps();
+                            renderMcpList();
+                        });
+                    });
                     list.appendChild(d);
                 });
             }
@@ -1477,22 +2376,34 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             apiFetch("/api/mcp/servers").then(async (r) => {
                 if (!r.ok) return;
                 const d = await r.json();
-                MCPS = (d.servers || []).map((s) => ({
+                // Mutate the existing array in place so the MCPS alias to
+                // state.mcps survives, then setState to broadcast.
+                MCPS.length = 0;
+                (d.servers || []).forEach((s) => MCPS.push({
                     ...s,
                     on: localStorage.getItem("lsc-mcp-" + s.id) !== "0",
+                    allowed_tools: _readAllowedTools(s.id),
                 }));
+                broadcastMcps();
                 renderMcpList();
             }).catch((e) => console.error("mcp servers GET failed:", e));
             renderMcpList();
 
             // --- Remote MCP servers (H4: auth stored server-side) ---
-            let remoteMcps = [];
+            // Aliased to state.remoteMcps — see MCPS alias comment above.
+            // Mutations go through ``broadcastRemoteMcps()`` to fire
+            // subscribers.  Phase 2+ subscribed renders use state.remoteMcps.
+            let remoteMcps = state.remoteMcps;
             function saveRemoteMcps() {
-                // Save to server — send label/url/on but NOT auth (auth only sent when explicitly set)
+                // Save to server — send label/url/on/allowed_tools but
+                // NOT auth (auth only sent when explicitly set via the key
+                // dialog so a stale-state refresh can't unset a stored
+                // token).
                 const payload = remoteMcps.map((s) => ({
                     label: s.label,
                     url: s.url,
                     on: s.on,
+                    allowed_tools: s.allowed_tools || [],
                 }));
                 apiFetch("/api/auth/settings", {
                     method: "POST",
@@ -1511,11 +2422,24 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         s.has_auth ?
                             '<span style="color:var(--accent);font-size:0.625rem;margin-left:var(--sp-3)" title="Auth token configured">&#128274;</span>'
                         :   "";
-                    d.innerHTML = `<input type=checkbox ${s.on ? "checked" : ""}><span>${esc(s.label)}</span>${authBadge}<span style="color:var(--faint);font-size:0.6875rem;margin-left:auto">${esc(s.url)}</span><button data-action="set-mcp-auth" data-idx="${i}" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-xs);padding:0 var(--sp-2)" title="Set auth token">&#128273;</button><button data-action="remove-remote-mcp" data-idx="${i}" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-lg);padding:0 var(--sp-2)" title="Remove">&times;</button>`;
+                    const toolCount = (s.allowed_tools && s.allowed_tools.length) || 0;
+                    const toolBadge = toolCount
+                        ? `<span style="color:var(--accent);font-size:0.625rem;margin-left:var(--sp-3)" title="${toolCount} allowed tool${toolCount === 1 ? "" : "s"}">&#9881; ${toolCount}</span>`
+                        : "";
+                    d.innerHTML = `<input type=checkbox ${s.on ? "checked" : ""}><span>${esc(s.label)}</span>${authBadge}${toolBadge}<span style="color:var(--faint);font-size:0.6875rem;margin-left:auto">${esc(s.url)}</span><button data-action="edit-remote-tools" data-idx="${i}" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-xs);padding:0 var(--sp-2)" title="Allowed tools">tools</button><button data-action="set-mcp-auth" data-idx="${i}" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-xs);padding:0 var(--sp-2)" title="Set auth token">&#128273;</button><button data-action="remove-remote-mcp" data-idx="${i}" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:var(--text-lg);padding:0 var(--sp-2)" title="Remove">&times;</button>`;
                     d.querySelector('[data-action="set-mcp-auth"]').addEventListener('click', () => setMcpAuth(i));
                     d.querySelector('[data-action="remove-remote-mcp"]').addEventListener('click', () => removeRemoteMcp(i));
+                    d.querySelector('[data-action="edit-remote-tools"]').addEventListener('click', () => {
+                        editAllowedTools(s.label, remoteMcps[i].allowed_tools, (list) => {
+                            remoteMcps[i].allowed_tools = list;
+                            broadcastRemoteMcps();
+                            saveRemoteMcps();
+                            renderRemoteMcps();
+                        });
+                    });
                     d.querySelector("input").onchange = (e) => {
                         remoteMcps[i].on = e.target.checked;
+                        broadcastRemoteMcps();
                         saveRemoteMcps();
                     };
                     list.appendChild(d);
@@ -1544,11 +2468,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 });
                 if (!vals || !vals[0] || !vals[1]) return;
                 const [label, url, auth] = vals;
-                remoteMcps.push({ label, url, on: true, has_auth: !!auth });
+                remoteMcps.push({ label, url, on: true, has_auth: !!auth, allowed_tools: [] });
+                broadcastRemoteMcps();
                 const payload = remoteMcps.map((s) => ({
                     label: s.label,
                     url: s.url,
                     on: s.on,
+                    allowed_tools: s.allowed_tools || [],
                 }));
                 payload[payload.length - 1].auth = auth || "";
                 apiFetch("/api/auth/settings", {
@@ -1559,7 +2485,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     .then(async (r) => {
                         if (r.ok) {
                             const d = await r.json();
-                            if (d.remote_mcps) remoteMcps = d.remote_mcps;
+                            if (d.remote_mcps) {
+                                remoteMcps.length = 0;
+                                d.remote_mcps.forEach((m) => remoteMcps.push(m));
+                                broadcastRemoteMcps();
+                            }
                             renderRemoteMcps();
                         }
                     })
@@ -1584,6 +2514,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     label: m.label,
                     url: m.url,
                     on: m.on,
+                    allowed_tools: m.allowed_tools || [],
                     ...(j === i ? { auth } : {}),
                 }));
                 apiFetch("/api/auth/settings", {
@@ -1594,7 +2525,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     .then(async (r) => {
                         if (r.ok) {
                             const d = await r.json();
-                            if (d.remote_mcps) remoteMcps = d.remote_mcps;
+                            if (d.remote_mcps) {
+                                remoteMcps.length = 0;
+                                d.remote_mcps.forEach((m) => remoteMcps.push(m));
+                                broadcastRemoteMcps();
+                            }
                             renderRemoteMcps();
                         }
                     })
@@ -1602,6 +2537,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
             function removeRemoteMcp(i) {
                 remoteMcps.splice(i, 1);
+                broadcastRemoteMcps();
                 saveRemoteMcps();
                 renderRemoteMcps();
             }
@@ -1717,6 +2653,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     .then((r) => r.json())
                     .then((data) => {
                         if (chatMeta[id]) chatMeta[id].folder = data.folder;
+                        broadcastChats();
                         renderList();
                     });
             });
@@ -1745,24 +2682,35 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             });
 
             // --- Chat list (from server) ---
+            // Broadcast helper: ``state.chats`` is the array form; legacy
+            // ``chatMeta`` is the keyed-by-id object that most call sites
+            // still read.  Call this after any chatMeta mutation that
+            // changes membership (add, remove, rename, pin, etc.).
+            function broadcastChats() {
+                setState({ chats: Object.values(chatMeta) });
+            }
+
             async function loadChatList() {
-                try {
-                    const resp = await apiFetch("/api/chats");
-                    if (!resp.ok) throw new Error("Failed to load chats");
-                    const chats = await resp.json();
-                    chatMeta = {};
-                    chats.forEach((c) => (chatMeta[c.id] = c));
-                    renderList();
-                } catch (e) {
-                    console.error("loadChatList:", e);
-                    const el = $("chat-list");
-                    el.innerHTML =
-                        '<div style="padding:var(--sp-7);color:var(--err-text);font-size:var(--text-sm)">Failed to load chats. <button class="retry-btn" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline">Retry</button></div>';
-                    el.querySelector(".retry-btn")?.addEventListener(
-                        "click",
-                        () => loadChatList(),
-                    );
-                }
+                return withBusy("sidebar-chats", async () => {
+                    try {
+                        const resp = await apiFetch("/api/chats");
+                        if (!resp.ok) throw new Error("Failed to load chats");
+                        const chats = await resp.json();
+                        chatMeta = {};
+                        chats.forEach((c) => (chatMeta[c.id] = c));
+                        broadcastChats();
+                        renderList();
+                    } catch (e) {
+                        console.error("loadChatList:", e);
+                        const el = $("chat-list");
+                        el.innerHTML =
+                            '<div style="padding:var(--sp-7);color:var(--err-text);font-size:var(--text-sm)">Failed to load chats. <button class="retry-btn" style="color:var(--accent);background:none;border:none;cursor:pointer;text-decoration:underline">Retry</button></div>';
+                        el.querySelector(".retry-btn")?.addEventListener(
+                            "click",
+                            () => loadChatList(),
+                        );
+                    }
+                });
             }
 
             function renderList() {
@@ -1872,6 +2820,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 });
                 const data = await res.json();
                 chatMeta[id].pinned = data.pinned;
+                broadcastChats();
                 renderList();
             }
 
@@ -2112,6 +3061,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     document.body.classList.add("incognito");
                     $("incognito-btn").classList.add("active");
                     activeId = "incog_" + Date.now().toString(36);
+                    setState({ activeChatId: activeId });
                     chatMeta[activeId] = {
                         id: activeId,
                         title: "Incognito",
@@ -2122,6 +3072,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         folder: "",
                         _incognito: true,
                     };
+                    broadcastChats();
                     msgs.innerHTML = "";
                     renderList();
                     updateExportBtn();
@@ -2130,6 +3081,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 } else {
                     exitIncognito();
                     activeId = null;
+                    setState({ activeChatId: null });
                     renderWelcome();
                     renderList();
                     updateExportBtn();
@@ -2142,8 +3094,10 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 incognitoHistory = [];
                 document.body.classList.remove("incognito");
                 $("incognito-btn").classList.remove("active");
-                if (oldId && chatMeta[oldId] && chatMeta[oldId]._incognito)
+                if (oldId && chatMeta[oldId] && chatMeta[oldId]._incognito) {
                     delete chatMeta[oldId];
+                    broadcastChats();
+                }
             }
 
             // --- Chat CRUD ---
@@ -2180,6 +3134,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     folder: "",
                 };
                 activeId = id;
+                setState({ activeChatId: id });
+                broadcastChats();
                 renderList();
                 renderWelcome();
                 resetCtxGauge();
@@ -2199,6 +3155,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 // Distill insights from the chat we're leaving
                 if (activeId && activeId !== id) distillChat(activeId);
                 activeId = id;
+                setState({ activeChatId: id });
                 const meta = chatMeta[id];
                 if (
                     meta?.model &&
@@ -2289,9 +3246,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 delete chatMeta[id];
                 if (activeId === id) {
                     activeId = null;
+                    setState({ activeChatId: null });
                     renderWelcome();
                     updateExportBtn();
                 }
+                broadcastChats();
                 renderList();
             }
 
@@ -2321,6 +3280,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 }
                 chatMeta = {};
                 activeId = null;
+                setState({ activeChatId: null });
+                broadcastChats();
                 renderList();
                 renderWelcome();
                 updateExportBtn();
@@ -2417,6 +3378,15 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     if (m.role === "user") addUser(m.content, m.id);
                     else if (m.role === "assistant") {
                         let c = m.content || "";
+                        // Interrupted streams persist as assistant rows
+                        // with status="interrupted" and (possibly) empty
+                        // content.  Render with a Retry affordance so the
+                        // user can re-send the previous turn rather than
+                        // staring at silence.
+                        if (m.status === "interrupted") {
+                            addInterruptedAsst(c, { msgId: m.id });
+                            return;
+                        }
                         const tm = c.match(/<think>([\s\S]*?)<\/think>/);
                         if (tm) {
                             c = c
@@ -2513,6 +3483,38 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 d.appendChild(buildMsgRow({ role: "user", msgId }));
                 getMsgTarget().appendChild(d);
             }
+            // Renders an interrupted assistant turn — the stream cut
+            // before chat.end, so we have partial text (or none) plus a
+            // user-actionable Retry button that re-sends the previous
+            // user turn.  Server marks these with status="interrupted".
+            function addInterruptedAsst(partialText, opts = {}) {
+                const d = document.createElement("div");
+                d.className = "m-asst interrupted";
+                if (opts.msgId) d.dataset.msgId = opts.msgId;
+                const bub = document.createElement("div");
+                bub.className = "bub";
+                const partial = partialText
+                    ? md(partialText)
+                    : "<em style='color:var(--dim)'>(no content)</em>";
+                bub.innerHTML =
+                    partial +
+                    '<div style="margin-top:var(--sp-3);padding-top:var(--sp-3);' +
+                    'border-top:1px solid var(--border);' +
+                    'color:var(--err-text);font-size:var(--text-sm);' +
+                    'display:flex;align-items:center;gap:var(--sp-3)">' +
+                    '<span>Response interrupted.</span>' +
+                    '<button data-action="retry-interrupted" ' +
+                    'style="color:var(--accent);background:none;border:none;' +
+                    'cursor:pointer;text-decoration:underline;font-size:inherit">' +
+                    'Retry' +
+                    '</button></div>';
+                if (window.hljs) bub.querySelectorAll("pre code").forEach((b) => window.hljs.highlightElement(b));
+                d.appendChild(bub);
+                bub.querySelector('[data-action="retry-interrupted"]')
+                   ?.addEventListener("click", retryLast);
+                getMsgTarget().appendChild(d);
+            }
+
             function addAsst(t, opts = {}) {
                 // opts: { msgId, feedback, isPinned }
                 const d = document.createElement("div");
@@ -2576,16 +3578,20 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 d.className = "m-tool";
                 const uid = "tl" + Math.random().toString(36).slice(2, 8);
                 const label = toolLabel(name);
-                const argsStr =
-                    typeof args === "string" ? args : (
-                        JSON.stringify(args || "")
-                    );
-                const preview = toolPreview(argsStr);
+                // ``args`` and ``out`` come from the DB column populated by
+                // server.py:_persist_chat_messages, which JSON-encodes the
+                // value (with a ``{truncated:true,preview,original_size}``
+                // envelope when the original exceeded the persist cap).
+                // Decode here so the live-stream render and the history
+                // render look identical, and so the truncation envelope
+                // doesn't show through as raw JSON.
+                const argsStr  = renderStoredTool(args);
+                const preview  = toolPreview(argsStr);
                 let bodyContent = "";
                 if (args)
                     bodyContent += `<div class="t-args">${esc(argsStr)}</div>`;
                 if (out) {
-                    const o = extractToolOutput(out);
+                    const o = renderStoredTool(out);
                     if (o)
                         bodyContent += `<div class="t-out">${esc(o.length > 1000 ? o.slice(0, 1000) + "…" : o)}</div>`;
                 }
@@ -2628,11 +3634,26 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 d.querySelector('[data-action="retry-last"]').addEventListener('click', retryLast);
                 getMsgTarget().appendChild(d);
             }
-            function retryLast() {
+            async function retryLast() {
                 const userEls = [...msgs.querySelectorAll(".m-user")];
                 if (!userEls.length) return;
                 const lastText = userEls[userEls.length - 1].dataset.text;
                 if (!lastText) return;
+                // DELETE the last assistant row (including any interrupted
+                // stub) + tool calls + user row on the SERVER first, so the
+                // stale rows don't accumulate in DB.  resendText re-inserts
+                // the user row via /api/chat/stream.  Skip for incognito
+                // (no DB rows to clean).
+                if (activeId && !incognitoMode && !activeId.startsWith("incog_")) {
+                    try {
+                        await apiFetch(`/api/chats/${activeId}/messages/last`, { method: "DELETE" });
+                    } catch (e) {
+                        console.error("Failed to clean last turn before retry:", e);
+                        // Continue anyway — DOM clean still happens.  Worst
+                        // case the user sees a duplicate user message which
+                        // we re-render below.
+                    }
+                }
                 while (
                     msgs.lastChild &&
                     !(msgs.lastChild.className || "").includes("m-user")
@@ -2863,15 +3884,31 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
 
             function buildChatBody(text, systemPrompt, attachments) {
+                // Plugin (local) MCPs go out as the bare-string shorthand
+                // unless the user has set an ``allowed_tools`` whitelist,
+                // in which case we emit the documented object form so the
+                // whitelist can ride along.  Remote (ephemeral_mcp) MCPs
+                // are always objects; allowed_tools is included when set.
                 const integrations = [
-                    ...MCPS.filter((s) => s.on).map((s) => s.id),
+                    ...MCPS.filter((s) => s.on).map((s) => {
+                        const at = (s.allowed_tools || []).filter(Boolean);
+                        if (at.length) {
+                            return { type: "plugin", id: s.id, allowed_tools: at };
+                        }
+                        return s.id;
+                    }),
                     ...remoteMcps
                         .filter((s) => s.on)
-                        .map((s) => ({
-                            type: "ephemeral_mcp",
-                            server_label: s.label,
-                            server_url: s.url,
-                        })),
+                        .map((s) => {
+                            const obj = {
+                                type: "ephemeral_mcp",
+                                server_label: s.label,
+                                server_url: s.url,
+                            };
+                            const at = (s.allowed_tools || []).filter(Boolean);
+                            if (at.length) obj.allowed_tools = at;
+                            return obj;
+                        }),
                 ];
                 const meta = chatMeta[activeId] || {};
                 const model = modelSel.value || cachedModels[0]?.id || "";
@@ -2939,8 +3976,24 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             systemPrompt + FOLLOWUP_SUFFIX
                         :   systemPrompt;
                 }
-                if (!incognitoMode && meta.response_id)
+                if (!incognitoMode && meta.response_id && (chatSettingsCache?.store !== false))
                     body.previous_response_id = meta.response_id;
+                // Per-chat "Stateless turns" toggle sets store:false so
+                // LM Studio doesn't allocate response-store state for this
+                // turn.  Server-side incognito sets the same flag; UI
+                // setting is an explicit opt-in for non-incognito chats
+                // where the user just doesn't want chained context.
+                if (chatSettingsCache?.store === false) body.store = false;
+                // user_set_params: params the user just explicitly chose via
+                // an inline control (currently the reasoning cycle button).
+                // The server treats these as a one-shot bypass of the
+                // proactive capability blacklist — the user asked for it,
+                // let LM Studio decide.  Cleared on every send so a stale
+                // override doesn't survive the next turn.
+                if (window._userSetParams && window._userSetParams.size) {
+                    body.user_set_params = [...window._userSetParams];
+                    window._userSetParams.clear();
+                }
                 // Sampling params
                 // Auto-temperature: override based on active preset mode
                 const PRESET_TEMPS = {
@@ -2968,11 +4021,14 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     body.repeat_penalty = cs.repeat_penalty;
                 if (cs.max_output_tokens != null && !isNaN(cs.max_output_tokens) && cs.max_output_tokens > 0)
                     body.max_output_tokens = cs.max_output_tokens;
-                // Reasoning: per-chat override, falling back to hardcoded "off".
-                // Always send explicitly — omitting lets LM Studio use the model's
-                // default, which may be "on" for models with built-in reasoning,
-                // burning output tokens that would otherwise be needed for tool call JSON.
-                body.reasoning = cs.reasoning || "off";
+                // Reasoning: chat override → user/global default → "off".
+                // Single read path via effectiveReasoning() so the cycle
+                // button, the chat-settings dropdown, and the global-settings
+                // dropdown can never disagree with what actually goes on the
+                // wire.  Always sent explicitly — omitting lets LM Studio use
+                // the model's default, which may be "on" and burn tool-call
+                // budget unnecessarily.
+                body.reasoning = effectiveReasoning();
                 // context_length is a load-time parameter — sending it per-request
                 // triggers JIT model reloads in LM Studio. Read-only from instance config.
                 // SC/CoVe: per-chat override, falling back to global setting.
@@ -3047,6 +4103,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 if (!activeId) {
                     if (incognitoMode) {
                         activeId = "incog_" + Date.now().toString(36);
+                        setState({ activeChatId: activeId });
                         chatMeta[activeId] = {
                             id: activeId,
                             title: "Incognito",
@@ -3057,6 +4114,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             folder: "",
                             _incognito: true,
                         };
+                        broadcastChats();
                     } else {
                         try {
                             await newChat();
@@ -3378,13 +4436,61 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 }
 
                 switch (event) {
+                    case "chat.start":
+                        // No UI change; the request is acknowledged and
+                        // model_load / prompt_processing follow.  Recorded
+                        // explicitly so the default-case warning doesn't
+                        // fire for this documented event.
+                        break;
+                    case "model_load.start":
+                        $("thinking").querySelector("span").textContent =
+                            "Loading model...";
+                        break;
+                    case "model_load.progress": {
+                        // LM Studio sends progress as a 0..1 float.
+                        const pct = Math.round((parsed.progress || 0) * 100);
+                        $("thinking").querySelector("span").textContent =
+                            `Loading model ${pct}%`;
+                        break;
+                    }
+                    case "model_load.end":
+                        $("thinking").querySelector("span").textContent =
+                            "Processing...";
+                        break;
                     case "prompt_processing.start":
                         $("thinking").querySelector("span").textContent =
                             "Processing...";
                         break;
+                    case "prompt_processing.progress": {
+                        const pct = Math.round((parsed.progress || 0) * 100);
+                        $("thinking").querySelector("span").textContent =
+                            `Processing prompt ${pct}%`;
+                        break;
+                    }
+                    case "prompt_processing.end":
+                        $("thinking").querySelector("span").textContent =
+                            "Generating...";
+                        break;
                     case "message.start":
                         $("thinking").querySelector("span").textContent =
                             "Generating...";
+                        break;
+                    case "message.end":
+                        // Documented per /docs/developer/rest/streaming-events
+                        // and observed firing once per content segment in
+                        // multi-segment conversations (see /tmp/probe-tool2.txt
+                        // — 5 message.end events in a 4-tool conversation).
+                        // Treat each one as "this segment is complete, the
+                        // model is about to either invoke tools or end the
+                        // turn."  Flush the markdown render so the user
+                        // sees the final state of THIS segment before any
+                        // tool-call pause, and switch the indicator back to
+                        // a neutral wait state.
+                        if (streamState.bub && streamState.content) {
+                            streamState.bub.innerHTML = md(streamState.content);
+                        }
+                        $("thinking").querySelector("span").textContent =
+                            "Thinking...";
                         break;
                     case "reasoning.start":
                     case "reasoning.delta": {
@@ -3423,14 +4529,68 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             }
                         }
                         break;
-                    case "error":
-                        addErrRetry(
-                            parsed.error?.message ||
-                                parsed.error?.type ||
-                                "Unknown streaming error",
-                        );
+                    case "error": {
+                        // Documented error.type enum (live docs 2026-05-15):
+                        //   invalid_request | unknown | mcp_connection_error |
+                        //   plugin_connection_error | not_implemented |
+                        //   model_not_found | job_not_found | internal_error
+                        // Branch per type so the user sees an actionable
+                        // message instead of "Unknown" + retry for cases
+                        // where retry is wrong (job_not_found, not_implemented)
+                        // or where the right recovery is to refresh
+                        // something (model_not_found -> models list) rather
+                        // than re-send the same request.
+                        const e   = parsed.error || {};
+                        const etype = e.type || "";
+                        const emsg  = e.message || etype || "Unknown streaming error";
+                        const eparam = e.param ? ` [${e.param}]` : "";
+                        switch (etype) {
+                            case "model_not_found":
+                                addErrRetry(`Model not found${eparam}. Refreshing model list...`);
+                                // Force a model-list refresh so the next
+                                // retry attempt sees the current set.
+                                try { refreshModels && refreshModels(); } catch (_) { /* not loaded yet */ }
+                                break;
+                            case "job_not_found":
+                                // This request is no longer addressable on
+                                // the server — retrying with the same
+                                // previous_response_id will keep failing.
+                                // Show a plain error without a retry button.
+                                addErr(`Request invalidated: ${emsg}${eparam}`);
+                                if (activeId && chatMeta[activeId]) {
+                                    chatMeta[activeId].response_id = null;
+                                }
+                                break;
+                            case "not_implemented":
+                                addErr(`Not implemented by this LM Studio: ${emsg}${eparam}`);
+                                break;
+                            case "mcp_connection_error":
+                            case "plugin_connection_error":
+                                addErrRetry(
+                                    `Integration unreachable: ${emsg}${eparam}. ` +
+                                    `Toggle the integration off and retry, or check the MCP server.`,
+                                );
+                                break;
+                            case "invalid_request":
+                                // A bug in our payload assembly — log to
+                                // console so we notice it in dev, but still
+                                // surface a retry option since transient
+                                // body issues (e.g. a 0-length input on a
+                                // double-Enter) can be fixed by editing
+                                // and resending.
+                                console.warn("invalid_request from LM Studio:", e);
+                                addErrRetry(`Invalid request: ${emsg}${eparam}`);
+                                break;
+                            case "internal_error":
+                            case "unknown":
+                            case "":
+                            default:
+                                addErrRetry(`${emsg}${eparam}`);
+                                break;
+                        }
                         $("thinking").classList.remove("on");
                         break;
+                    }
                     case "message.delta": {
                         const delta = parsed.content || "";
                         if (!delta) break;
@@ -3529,14 +4689,32 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     case "tool_call.start":
                         $("thinking").querySelector("span").textContent =
                             `Using tools...`;
+                        // Real LM Studio's ``tool_call.start`` payload is
+                        // empty ({"type":"tool_call.start"}) — id, name,
+                        // and arguments all arrive in later events.  Older
+                        // LM Studio builds + the mock pre-fill them here,
+                        // so pass through whatever's present.
                         addToolStream(
                             parsed.id,
-                            parsed.tool,
-                            parsed.arguments || "",
+                            parsed.tool || parsed.tool_name,
+                            parsed.arguments,
+                        );
+                        break;
+                    case "tool_call.name":
+                        // 2026-05 LM Studio split tool name out of start;
+                        // patch the running tool card's header in place.
+                        setToolName(
+                            parsed.tool_name || parsed.tool,
+                            (parsed.provider_info && parsed.provider_info.plugin_id) || "",
                         );
                         break;
                     case "tool_call.arguments":
-                        updateToolArgs(parsed.arguments || "");
+                        // Complete snapshot (dict), not a delta — overwrite.
+                        // ``setToolArgs`` normalises the dict to JSON for
+                        // display.  Prior code called the long-deleted
+                        // ``updateToolArgs`` here, producing a silent
+                        // ReferenceError that left ``.t-args`` empty.
+                        setToolArgs(parsed.arguments);
                         break;
                     case "tool_call.success":
                         updateToolResult(parsed.id, parsed.output, true);
@@ -3698,8 +4876,20 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             // Tool streaming state
             let curToolEl = null,
                 curToolArgs = "";
+            // Render-side helper — turn whatever LM Studio sent for
+            // ``arguments`` into a human-readable string.  Real LM Studio
+            // sends a dict like ``{query: "..."}``; older builds + the mock
+            // can send strings (JSON-encoded or otherwise).  Without this
+            // normaliser the dict gets template-stringified to
+            // "[object Object]" — the bug behind the visible glitch.
+            function argsToText(args) {
+                if (args == null || args === "") return "";
+                if (typeof args === "string") return args;
+                try { return JSON.stringify(args, null, 2); }
+                catch { return String(args); }
+            }
             function addToolStream(id, name, args) {
-                curToolArgs = args || "";
+                curToolArgs = args ?? "";
                 const label = toolLabel(name);
                 const uid = "tl" + Math.random().toString(36).slice(2, 8);
                 const d = document.createElement("div");
@@ -3717,24 +4907,71 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     target.appendChild(streamEl);
                 ignoreScrollEvent = false;
                 curToolEl = d;
-                if (args) {
-                    curToolEl.querySelector(".t-args").textContent = args;
+                if (curToolArgs !== "") {
+                    curToolEl.querySelector(".t-args").textContent = argsToText(curToolArgs);
                     updateToolPreview();
                 }
                 autoScroll();
             }
             function updateToolPreview() {
                 if (!curToolEl) return;
-                const p = toolPreview(curToolArgs);
+                const p = toolPreview(argsToText(curToolArgs));
                 const el = curToolEl.querySelector(".t-preview");
                 if (el) el.textContent = p;
             }
-            function updateToolArgs(delta) {
+            function setToolArgs(args) {
                 if (!curToolEl) return;
-                curToolArgs += delta;
-                curToolEl.querySelector(".t-args").textContent = curToolArgs;
+                // Real LM Studio sends ``tool_call.arguments`` as a COMPLETE
+                // snapshot per call, not a delta — overwrite instead of
+                // concatenating (the old delta-style ``+=`` produced
+                // "[object Object][object Object]..." when args was a dict).
+                curToolArgs = args ?? "";
+                curToolEl.querySelector(".t-args").textContent = argsToText(curToolArgs);
                 updateToolPreview();
                 autoScroll();
+            }
+            function setToolName(name, provider) {
+                // 2026-05 LM Studio emits tool_call.name AFTER the empty
+                // ``tool_call.start`` marker — patch the header in place.
+                // ``provider`` (the plugin id like ``mcp/searxng``) goes
+                // into a dataset attribute so a future styling hook can
+                // surface it without needing another DOM walk.
+                //
+                // ORDERING ASSUMPTION (LM Studio v0.4.x verified 2026-05):
+                //   tool_call.start  →  tool_call.name  →  tool_call.arguments
+                // ``curToolEl`` is the element that ``addToolStream`` created
+                // on tool_call.start.  If LM Studio ever emits name BEFORE
+                // start (no documented case, but possible), curToolEl is
+                // null here and this becomes a silent no-op.  The name is
+                // re-attempted at .arguments and .success/.failure, where
+                // it would land on the element addToolStream eventually
+                // creates — but the visible header would stay generic
+                // until then.  Worth a probe if LM Studio changes order.
+                if (!curToolEl || !name) return;
+                curToolEl.dataset.toolName = name;
+                if (provider) curToolEl.dataset.toolProvider = provider;
+                const nameEl = curToolEl.querySelector(".t-name");
+                if (nameEl) nameEl.textContent = name;
+                const toggle = curToolEl.querySelector(".t-toggle");
+                if (toggle) {
+                    // Re-render the visible label.  Keep the existing
+                    // arrow + preview + dots elements; replace only the
+                    // text node between the arrow and the preview span.
+                    const arrow = toggle.querySelector(".t-arrow");
+                    const preview = toggle.querySelector(".t-preview");
+                    if (arrow && preview) {
+                        let n = arrow.nextSibling;
+                        while (n && n !== preview) {
+                            const next = n.nextSibling;
+                            toggle.removeChild(n);
+                            n = next;
+                        }
+                        toggle.insertBefore(
+                            document.createTextNode(" " + toolLabel(name)),
+                            preview,
+                        );
+                    }
+                }
             }
             function extractToolOutput(output) {
                 // MCP tools return [{type:"text",text:"..."}] — extract the text
@@ -3748,6 +4985,26 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 if (output && typeof output === "object")
                     return JSON.stringify(output, null, 2);
                 return "";
+            }
+            function renderStoredTool(raw) {
+                // The DB column stores JSON-encoded values written by
+                // server.py:_persist_chat_messages (json.dumps).  On
+                // history reload we get the JSON text back; parse it and
+                // delegate to ``extractToolOutput`` for the rendered form.
+                // If the parsed value is the truncation envelope the
+                // server uses for oversize rows, surface the preview plus
+                // a "[truncated NB]" marker rather than the raw envelope.
+                if (raw == null) return "";
+                if (typeof raw !== "string") return extractToolOutput(raw);
+                let parsed;
+                try { parsed = JSON.parse(raw); }
+                catch (_) { return raw; }
+                if (parsed && typeof parsed === "object" && parsed.truncated === true
+                    && typeof parsed.preview === "string") {
+                    const dropped = (parsed.original_size || 0) - parsed.preview.length;
+                    return parsed.preview + ` …[truncated ${dropped}B of ${parsed.original_size}B]`;
+                }
+                return extractToolOutput(parsed);
             }
             function updateToolResult(id, output, success) {
                 if (!curToolEl) return;
@@ -3992,13 +5249,24 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 // First: complete comment. Second: partial comment still being emitted mid-stream.
                 text = text.replace(/<!--followups:?\s*\[.*?\]\s*-->\s*$/s, "");
                 text = text.replace(/<!--followups:?[\s\S]*$/s, "");
+                // Extract fenced + inline code BEFORE escaping/transforms so
+                // other markdown regexes never mutate code content.  Without
+                // this, ``**kwargs`` inside a Python fence becomes
+                // ``<strong>kwargs</strong>`` INSIDE the <code>, which is
+                // what triggers highlight.js's "unescaped HTML" warnings.
+                // Placeholders use control characters that survive esc()
+                // unchanged and won't collide with user content.
+                const _fenced = [];
+                text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang, code) => {
+                    const i = _fenced.push({ lang, code }) - 1;
+                    return `CODE${i}`;
+                });
+                const _inlines = [];
+                text = text.replace(/`([^`\n]+)`/g, (_m, code) => {
+                    const i = _inlines.push(code) - 1;
+                    return `INLINE${i}`;
+                });
                 let h = esc(text);
-                h = h.replace(
-                    /```(\w*)\n([\s\S]*?)```/g,
-                    (_, lang, code) =>
-                        `<pre${lang ? ` data-lang="${lang}"` : ""}><code>${code}</code></pre>`,
-                );
-                h = h.replace(/`([^`]+)`/g, "<code>$1</code>");
                 h = h.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
                 h = h.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<em>$1</em>");
                 h = h.replace(/^### (.+)$/gm, "<h3>$1</h3>");
@@ -4056,6 +5324,16 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 );
                 h = h.replace(/\n\n/g, "</p><p>");
                 h = h.replace(/\n/g, "<br>");
+                // Restore code placeholders.  Re-escape the original code
+                // content so highlight.js sees textContent only (no real
+                // <strong>, <em>, or other tags inside <code>).
+                h = h.replace(/INLINE(\d+)/g, (_m, i) =>
+                    `<code>${esc(_inlines[+i])}</code>`);
+                h = h.replace(/CODE(\d+)/g, (_m, i) => {
+                    const { lang, code } = _fenced[+i];
+                    const langAttr = lang ? ` data-lang="${esc(lang)}"` : "";
+                    return `<pre${langAttr}><code>${esc(code)}</code></pre>`;
+                });
                 return "<p>" + h + "</p>";
             }
 
@@ -4256,7 +5534,12 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
 
             // --- Model management ---
-            let cachedModels = [];
+            // Aliased to state.models — same pattern as MCPS/remoteMcps.
+            // ``broadcastModels()`` after any in-place mutation fires the
+            // "models" subscribers (renderModelList, chat settings panel,
+            // reasoning button capability check, etc.).
+            let cachedModels = state.models;
+            function broadcastModels() { setState({ models: state.models }); }
             const ICON_VISION_PATH =
                 "M10 4C5.6 4 2 7 .5 10c1.5 3 5.1 6 9.5 6s8-3 9.5-6c-1.5-3-5.1-6-9.5-6zm0 10a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm0-6.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z";
             const ICON_TOOLS_PATH =
@@ -4496,6 +5779,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 }
                 _rpOpener = document.activeElement;
                 rightPanelState = mode;
+                setState({ view: { rightPanel: mode } });
+                document.body.classList.add("has-right-panel");
                 $("right-panel").classList.add("open");
                 $("right-panel").removeAttribute("aria-hidden");
                 $("right-panel-overlay").classList.add("open");
@@ -4518,24 +5803,54 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
 
             function closeRightPanel() {
+                const wasPins = rightPanelState === "pins";
                 rightPanelState = null;
+                setState({ view: { rightPanel: null } });
+                document.body.classList.remove("has-right-panel");
                 $("right-panel").classList.remove("open");
                 $("right-panel").setAttribute("aria-hidden", "true");
                 $("right-panel-overlay").classList.remove("open");
                 _rpOpener?.focus();
                 _rpOpener = null;
+                // URL sync — restore the active chat's path (or /) when
+                // dismissing the pins panel.  Matches closeSettings'
+                // semantics: explicit-dismiss returns the URL to the
+                // underlying surface so the address bar doesn't strand
+                // at /pins after the panel is gone.
+                if (wasPins && !_applyingRoute && window.location.pathname === "/pins") {
+                    const target = activeId ? `/chat/${activeId}` : "/";
+                    if (window.history.length > 1) {
+                        history.back();
+                    } else if (window.location.pathname !== target) {
+                        history.replaceState({}, "", target);
+                    }
+                }
             }
             $("pins-btn")?.addEventListener("click", () => openRightPanel("pins"));
 
             // Chat settings: per-chat overrides state
-            let chatSettingsCache = {};
+            // Legacy alias: chatSettingsCache and state.chatSettings now
+            // point at the SAME object reference.  Direct mutation of
+            // chatSettingsCache.x bypasses setState's dispatch, but the read
+            // is consistent.  All NEW writes route through setState.  When
+            // every reader migrates to state.chatSettings, this alias goes
+            // away.
+            let chatSettingsCache = state.chatSettings;
             let chatSettingsDebounce = null;
             let chatSettingsPending = {};
+
+            // Wipe state.chatSettings keys directly then merge the new ones
+            // via setState — preserves the object identity (chatSettingsCache
+            // is aliased to state.chatSettings) and broadcasts one event.
+            function _commitChatSettings(next) {
+                for (const k of Object.keys(state.chatSettings)) delete state.chatSettings[k];
+                setState({ chatSettings: next || {} });
+            }
 
             async function loadChatSettings(chatId, { refreshPanel = true } = {}) {
                 const btn = $("chat-settings-btn");
                 if (!chatId) {
-                    chatSettingsCache = {};
+                    _commitChatSettings({});
                     if (btn) btn.classList.remove("has-overrides");
                     return;
                 }
@@ -4543,19 +5858,22 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     const r = await apiFetch(`/api/chats/${chatId}/settings`);
                     if (chatId !== activeId) return;  // navigated away while loading — discard
                     if (!r.ok) {
-                        chatSettingsCache = {};
+                        _commitChatSettings({});
                         if (btn) btn.classList.remove("has-overrides");
                         return;
                     }
-                    chatSettingsCache = await r.json();
-                    if (btn) btn.classList.toggle("has-overrides", Object.keys(chatSettingsCache).length > 0);
+                    const loaded = await r.json();
+                    _commitChatSettings(loaded);
+                    if (btn) btn.classList.toggle("has-overrides", Object.keys(loaded).length > 0);
                 } catch(e) {
                     if (chatId !== activeId) return;  // stale error — don't wipe current chat's cache
-                    chatSettingsCache = {};
+                    _commitChatSettings({});
                     if (btn) btn.classList.remove("has-overrides");
                 }
-                // Re-render panel if open and caller requested it (skipped after saves to preserve focus)
+                // Re-render panel if open and caller requested it (skipped after saves to preserve focus).
                 if (refreshPanel && rightPanelState === "settings") renderChatSettingsPanel();
+                // renderReasoningUI() runs automatically on the next RAF via
+                // its subscription to state.chatSettings — no manual call needed.
             }
 
             function renderChatSettingsPanel() {
@@ -4625,7 +5943,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         </div>
                         <div class="sg"><label>Reasoning</label>
                             <select id="cs-reasoning">
-                                <option value="" ${!s.reasoning?"selected":""}>Global (${$("s-reasoning")?.value || "off"})</option>
+                                <option value="" ${!s.reasoning?"selected":""}>Global (${state.serverInfo.defaultReasoning || "off"})</option>
                                 <option value="off" ${s.reasoning==="off"?"selected":""}>Off</option>
                                 <option value="medium" ${s.reasoning==="medium"?"selected":""}>Medium</option>
                                 <option value="high" ${s.reasoning==="high"?"selected":""}>High</option>
@@ -4646,6 +5964,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                                 <div class="cs-quality-hint">Fact-check via verification questions</div>
                             </div>
                             <label class="sw"><input type="checkbox" id="cs-cove" aria-label="Chain of Verification" ${coveOn?"checked":""}><span class="slider"></span></label>
+                        </div>
+                        <div class="toggle-row">
+                            <div>
+                                <span>Stateless turns</span>
+                                <div class="cs-quality-hint">Don't ask LM Studio to keep server-side response state (no <code>previous_response_id</code> chain)</div>
+                            </div>
+                            <label class="sw"><input type="checkbox" id="cs-stateless" aria-label="Stateless turns" ${s.store === false ? "checked" : ""}><span class="slider"></span></label>
                         </div>
                     </div>
                 `;
@@ -4696,6 +6021,10 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     ["cs-reasoning",    "reasoning",        (v) => v||null,                 "select"],
                     ["cs-sc",           "sc_enabled",       (v) => v,                       "checkbox"],
                     ["cs-cove",         "cove_enabled",     (v) => v,                       "checkbox"],
+                    // Stateless turns: persisted as ``store === false``
+                    // so the on-the-wire body matches LM Studio's
+                    // ``store`` param directly (no rename layer).
+                    ["cs-stateless",    "store",            (v) => v ? false : null,         "checkbox"],
                 ];
                 fields.forEach(([id, key, transform, type]) => {
                     const el = $(id);
@@ -4714,6 +6043,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
             function saveChatSetting(key, value) {
                 if (!activeId) return;
+                // Optimistic local update — setState dispatches and the
+                // aliased chatSettingsCache reflects the change for legacy
+                // readers in the same tick.  PATCH failure reverts to prev.
+                const prev = state.chatSettings[key];
+                setState({ chatSettings: { [key]: value } });
                 chatSettingsPending[key] = value;
                 if (chatSettingsDebounce) clearTimeout(chatSettingsDebounce);
                 chatSettingsDebounce = setTimeout(async () => {
@@ -4728,6 +6062,8 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         await loadChatSettings(activeId, { refreshPanel: false });
                     } catch(e) {
                         console.error("Failed to save chat setting:", e);
+                        toast.error(`Couldn't save "${key}" — reverted.`, { detail: e.message });
+                        setState({ chatSettings: { [key]: prev } });
                     }
                 }, 400);
             }
@@ -4736,12 +6072,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 if (!activeId) return;
                 try {
                     await apiFetch(`/api/chats/${activeId}/settings`, { method: "DELETE" });
-                    chatSettingsCache = {};
+                    _commitChatSettings({});
                     renderChatSettingsPanel();
                     const btn = $("chat-settings-btn");
                     if (btn) btn.classList.remove("has-overrides");
                 } catch(e) {
                     console.error("Failed to reset chat settings:", e);
+                    toast.error("Couldn't reset chat settings.", { detail: e.message });
                 }
             }
 
@@ -4908,7 +6245,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     const d = await r.json();
                     const raw = d.data || d.models || d || [];
                     // Normalize: LM Studio native API uses 'key' not 'id'
-                    cachedModels = [];
+                    // In-place wipe preserves the alias to state.models so
+                    // subscribers (Phase 2) fire on broadcastModels() below.
+                    cachedModels.length = 0;
                     raw.forEach((m) => {
                         const key = m.id || m.key || "";
                         if (!key || key.includes("embed") || key.includes("arena"))
@@ -4940,6 +6279,10 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             bl = (b.loaded_instances || []).length > 0 ? 0 : 1;
                         return al - bl;
                     });
+                    // Broadcast so Phase 2 subscribers (model list, chat
+                    // settings panel, reasoning button capability check)
+                    // pick up the fresh model set without an explicit call.
+                    broadcastModels();
                     renderModelList();
                     // Update topbar selector
                     const prev = modelSel.value;
@@ -5111,13 +6454,14 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 const isOpen = $("export-dd").classList.toggle("open");
                 $("export-btn").setAttribute("aria-expanded", isOpen ? "true" : "false");
             }
-            // Close export dropdown on outside click
-            document.addEventListener("click", (e) => {
-                if (!$("export-wrap").contains(e.target)) {
-                    $("export-dd").classList.remove("open");
-                    $("export-btn").setAttribute("aria-expanded", "false");
-                }
-            });
+            // Close export dropdown on outside press-and-release.
+            _globalTeardowns.push(onOutside(
+                () => $("export-wrap"),
+                () => {
+                    $("export-dd")?.classList.remove("open");
+                    $("export-btn")?.setAttribute("aria-expanded", "false");
+                },
+            ));
 
             function updateExportBtn() {
                 if (activeId) {
@@ -5744,29 +7088,116 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         modelLabelHtml(m)
                     :   esc(modelSel.value || "Select model");
             }
-            // Close dropdowns on outside click
-            document.addEventListener("click", (e) => {
-                const mp = $("model-pill"),
-                    md = $("model-dd"),
-                    mw = $("model-sel-wrap"),
-                    td = $("top-model-dd");
-                if (mp && md && !mp.contains(e.target)) {
-                    md.classList.remove("open");
-                    mp.setAttribute("aria-expanded", "false");
-                }
-                if (mw && td && !mw.contains(e.target)) {
-                    td.classList.remove("open");
-                    mw.setAttribute("aria-expanded", "false");
+            // Close model dropdowns on outside press-and-release.
+            _globalTeardowns.push(onOutside(
+                () => $("model-pill"),
+                () => {
+                    $("model-dd")?.classList.remove("open");
+                    $("model-pill")?.setAttribute("aria-expanded", "false");
+                },
+            ));
+            _globalTeardowns.push(onOutside(
+                () => $("model-sel-wrap"),
+                () => {
+                    $("top-model-dd")?.classList.remove("open");
+                    $("model-sel-wrap")?.setAttribute("aria-expanded", "false");
+                },
+            ));
+
+            // --- Init ---
+            // Connection-check interval handle — tracked so logout can stop
+            // it before re-entering boot (otherwise every logout+re-login
+            // session compounds another 30-second timer).
+            let _connInterval = null;
+
+            // Subscribe to state.boot so any phase failure is at least
+            // surfaced in the console until Phase 7 builds the visible
+            // banner.  Otherwise users + dev testers debug an empty shell
+            // with zero diagnostic signal.
+            subscribe(["boot"], () => {
+                if (state.boot.error) {
+                    console.warn(
+                        `[boot] phase "${state.boot.error.phase}" failed:`,
+                        state.boot.error.message,
+                    );
                 }
             });
 
-            // --- Init ---
-            async function initApp() {
-                // Fetch models FIRST so the select is populated before loadChat sets its value
-                await checkConnection();
+            // -----------------------------------------------------------------
+            // Phased boot.  Each phase advances state.boot.phase before its
+            // work starts and only completes when all of its async work has
+            // settled.  Phase failures are captured on state.boot.error so
+            // the SPA can render a banner with a retry, instead of silently
+            // showing an empty shell.  The previous initApp() was a serial
+            // pile of awaits that buried per-step failures in console.error
+            // calls.  Now each step is named and the user sees outcomes.
+            // -----------------------------------------------------------------
+            async function _bootPhaseProfile() {
+                // Models, server settings, connection status — all parallel
+                // because they're independent.  Promise.allSettled means one
+                // failure doesn't poison the others; we collect the bad ones
+                // and surface a banner.
+                const tasks = [
+                    { name: "connection", run: () => checkConnection() },
+                    { name: "settings",   run: () => loadSettings() },
+                    { name: "version",    run: async () => {
+                        try {
+                            const h = await apiFetch("/api/health");
+                            const j = await h.json();
+                            appVersion = j.version || "";
+                        } catch (e) {
+                            console.error("Failed to fetch app version:", e);
+                        }
+                    } },
+                ];
+                const results = await Promise.allSettled(tasks.map((t) => t.run()));
+                const failed = results
+                    .map((r, i) => r.status === "rejected" ? tasks[i].name : null)
+                    .filter(Boolean);
+                if (failed.length) {
+                    throw new Error(`Profile phase failed: ${failed.join(", ")}`);
+                }
+            }
+
+            async function _bootPhaseConversations() {
                 await loadChatList();
+                // Honour the URL on first paint.  A user landing on
+                // /chat/abc123 should see that chat, not a default
+                // "open the latest" override.  Falls back to latest-chat
+                // when the route is welcome AND the user has chats.
+                const initial = ROUTES.parse(window.location.pathname);
                 const ids = Object.keys(chatMeta);
-                if (ids.length > 0) {
+                if (initial.name === "chat" && initial.chatId && chatMeta[initial.chatId]) {
+                    await loadChat(initial.chatId);
+                } else if (initial.name === "chat" && initial.chatId && !chatMeta[initial.chatId]) {
+                    // Deep link to a chat that's been deleted (or never
+                    // belonged to this user).  Show welcome + a clear
+                    // toast so the user understands why the URL didn't
+                    // land them where they expected.
+                    renderWelcome();
+                    history.replaceState({}, "", "/");
+                    toast.error("That chat doesn't exist or has been deleted.");
+                } else if (initial.name === "settings") {
+                    if (ids.length > 0) {
+                        const latest = ids.sort(
+                            (a, b) =>
+                                (chatMeta[b].updated_at || 0) -
+                                (chatMeta[a].updated_at || 0),
+                        )[0];
+                        await loadChat(latest);
+                    }
+                    openSettings(initial.tab);
+                } else if (initial.name === "pins") {
+                    if (ids.length > 0) {
+                        const latest = ids.sort(
+                            (a, b) =>
+                                (chatMeta[b].updated_at || 0) -
+                                (chatMeta[a].updated_at || 0),
+                        )[0];
+                        await loadChat(latest);
+                    }
+                    openRightPanel("pins");
+                } else if (ids.length > 0) {
                     const latest = ids.sort(
                         (a, b) =>
                             (chatMeta[b].updated_at || 0) -
@@ -5776,14 +7207,24 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 } else {
                     renderWelcome();
                 }
-                await loadSettings(); // H4: load server-side API key status + remote MCP configs
+            }
+
+            async function initApp() {
                 try {
-                    const h = await apiFetch("/api/health");
-                    const j = await h.json();
-                    appVersion = j.version || "";
-                } catch (e) {
-                    console.error("Failed to fetch app version:", e);
+                    setState({ boot: { phase: "profile", error: null } });
+                    await _bootPhaseProfile();
+                    setState({ boot: { phase: "conversations" } });
+                    await _bootPhaseConversations();
+                } catch (err) {
+                    console.error("Boot phase failed:", err);
+                    setState({ boot: { error: { phase: state.boot.phase, message: err.message || String(err) } } });
+                    // Don't return — best-effort continue.  The user can
+                    // see the partial state and retry the failed phase via
+                    // the banner once Phase 7 (toast/error system) lands;
+                    // for now the console-error is the breadcrumb.
                 }
+                // Best-effort post-boot work — none of this is required for
+                // the SPA to be usable.
                 const draft = localStorage.getItem("lsc-draft");
                 if (draft) {
                     input.value = draft;
@@ -5793,12 +7234,25 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     updateSendBtn();
                 }
                 updateSidebarStats();
-                setInterval(checkConnection, 30000);
+                // Track the connection-check interval so logout can stop it.
+                // Without this, every logout+re-login session compounds an
+                // additional 30-second polling timer.
+                if (_connInterval) clearInterval(_connInterval);
+                _connInterval = setInterval(checkConnection, 30000);
+                // "ready" means async boot work has completed — NOT that
+                // the DOM is fully settled.  Some setState calls from the
+                // conversations phase (e.g. loadChat → renderList) may
+                // still have pending RAF subscribers when this flips.
+                // Don't gate flash-of-empty-shell UI on this; use the
+                // specific data keys (state.chats, state.models) instead.
+                setState({ boot: { phase: "ready" } });
             }
 
             (async function boot() {
+                setState({ boot: { phase: "auth" } });
                 const authed = await checkAuth();
                 if (authed) await initApp();
+                else setState({ boot: { phase: "ready" } });  // login screen owns the UI
             })();
             if ("serviceWorker" in navigator)
                 // SW registration failures (file 404, scope mismatch,
@@ -5823,6 +7277,11 @@ Object.assign(window, {
     triggerCompact, handleFiles, removeAttachment, unshareChat,
     closeRightPanel, openRightPanel, togglePinNavigator,
     pinMessage, unpinMessage, loadPinNavigator, scrollToMessage,
+    toast, navigate, withBusy, onOutside, openPopover,
+    // State primitives — exposed for E2E tests + console debugging.
+    // Production reads should still go through subscribe(); window
+    // access bypasses the dispatch contract.
+    state, setState, subscribe, effectiveReasoning,
 });
 
 function initEventHandlers() {
@@ -5865,9 +7324,15 @@ function initEventHandlers() {
     document.getElementById('chat-settings-btn')?.addEventListener('click', () => openRightPanel('settings'));
     document.getElementById('global-settings-btn')?.addEventListener('click', () => openSettings());
 
-    // User avatar/dropdown
+    // User avatar/dropdown.
+    // Only toggle when the click TARGET is the avatar itself — without
+    // this, clicks on the Settings/Sign Out buttons inside #user-dd
+    // (which is a child of #user-avatar) bubble up here and re-open
+    // the dropdown immediately after the inner button handler closed it.
     const userAvatar = document.getElementById('user-avatar');
-    userAvatar?.addEventListener('click', () => toggleUserDD());
+    userAvatar?.addEventListener('click', (e) => {
+        if (e.target === userAvatar) toggleUserDD();
+    });
     userAvatar?.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleUserDD(); }
     });
@@ -5910,7 +7375,11 @@ function initEventHandlers() {
     // Settings form
     document.getElementById('s-preset')?.addEventListener('change', () => applyPreset());
     document.getElementById('s-reasoning')?.addEventListener('change', function() {
+        // Global default — persisted to localStorage AND broadcast via
+        // setState so the in-chat cycle button + per-chat dropdown both
+        // update on the next animation frame.
         localStorage.setItem('lsc-reasoning', this.value);
+        setState({ serverInfo: { defaultReasoning: this.value } });
     });
     document.getElementById('s-followups')?.addEventListener('change', function() {
         localStorage.setItem('lsc-followups', this.checked ? 'on' : 'off');

@@ -40,7 +40,19 @@ CANNED_MODELS = {
             "loaded_instances":  [{"id": "test-model", "config": {"context_length": 8192}}],
             "max_context_length": 8192,
             "format":            "test",
-            "capabilities":      {"vision": False, "trained_for_tool_use": True},
+            # capabilities.reasoning is present so the proactive capability
+            # gate in server.py does NOT auto-blacklist the reasoning
+            # param.  The reactive-cache tests configure the mock to 400
+            # on reasoning anyway — they need the param to actually leave
+            # the server so the 400 → cache → retry loop runs.
+            "capabilities":      {
+                "vision":               False,
+                "trained_for_tool_use": True,
+                "reasoning": {
+                    "allowed_options": ["off", "on", "low", "medium", "high"],
+                    "default":         "off",
+                },
+            },
         }
     ]
 }

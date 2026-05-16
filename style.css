@@ -109,6 +109,125 @@
         /* Safe area */
         --sat: env(safe-area-inset-top, 0px);
         --sab: env(safe-area-inset-bottom, 0px);
+        /* Z-index scale — load-bearing surfaces only.  Internal
+         * stacking inside individual components (slash menu, model
+         * dropdown, etc.) keeps its small local numbers; the values
+         * below govern surfaces that compete with each other
+         * globally.  Order is fixed; do NOT introduce values between
+         * tokens.  When a new surface needs stacking, add the next
+         * token, don't pick an inline number.
+         * Background: 2026-05-16 the topbar (203) and right-panel
+         * (300) bled through the auth overlay (then 200) because no
+         * scale was in place.  Bumping one value just pushes the
+         * problem to the next surface — the scale ends that cycle. */
+        --z-sticky:   200;  /* topbar, sticky chrome           */
+        --z-drawer:   300;  /* right-panel, side drawers       */
+        --z-overlay:  500;  /* drawer backdrops, modal scrims  */
+        --z-modal:   1000;  /* dialogs, settings panels        */
+        --z-auth:    9000;  /* login overlay — covers all UI   */
+        --z-toast:  10000;  /* toasts must out-stack auth      */
+    }
+}
+
+/* -----------------------------------------------------------------
+ * Busy / loading indicator — applied to any region whose
+ * ``state.busy[key]`` flag is true via the busy subscriber in app.js.
+ * Renders a subtle progress bar at the top of the region without
+ * pushing existing content around.  Regions opt in by being listed
+ * in _BUSY_REGIONS in app.js.
+ * ----------------------------------------------------------------- */
+@layer components {
+    /* Toast container + variants — stacks top-right, above auth overlay.
+     * Each toast is an aria-live region; errors set role=alert. */
+    #toast-container {
+        position: fixed;
+        top: var(--sp-7);
+        right: var(--sp-7);
+        z-index: var(--z-toast);
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-3);
+        max-width: 24rem;
+        pointer-events: none;
+    }
+    #toast-container .toast {
+        background: var(--surface-raised);
+        border: 1px solid var(--border);
+        border-left-width: 3px;
+        border-radius: var(--r-md);
+        padding: var(--sp-5) 2.5rem var(--sp-5) var(--sp-6);
+        box-shadow: var(--shadow-md);
+        color: var(--text);
+        font-size: var(--text-sm);
+        pointer-events: auto;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        animation: toastIn 180ms var(--ease);
+    }
+    #toast-container .toast.toast-leaving {
+        animation: toastOut 180ms var(--ease) forwards;
+    }
+    #toast-container .toast-success { border-left-color: var(--green); }
+    #toast-container .toast-info    { border-left-color: var(--accent); }
+    #toast-container .toast-warn    { border-left-color: #fbbf24; }
+    #toast-container .toast-error   { border-left-color: #f87171; }
+    #toast-container .toast-text   { flex: 1; line-height: 1.4; }
+    #toast-container .toast-detail {
+        margin-top: var(--sp-2);
+        color: var(--faint);
+        font-size: var(--text-xs);
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+    #toast-container .toast-close {
+        position: absolute;
+        top: var(--sp-3);
+        right: var(--sp-3);
+        background: none;
+        border: none;
+        color: var(--dim);
+        cursor: pointer;
+        font-size: var(--text-lg);
+        line-height: 1;
+        padding: var(--sp-2);
+        flex-shrink: 0;
+    }
+    #toast-container .toast-close:hover { color: var(--text); }
+    @keyframes toastIn {
+        from { opacity: 0; transform: translateX(8px); }
+        to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes toastOut {
+        from { opacity: 1; transform: translateX(0); }
+        to   { opacity: 0; transform: translateX(8px); }
+    }
+    .busy {
+        position: relative;
+    }
+    .busy::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(
+            90deg,
+            transparent 0%,
+            var(--accent) 50%,
+            transparent 100%
+        );
+        background-size: 200% 100%;
+        animation: busyShimmer 1.2s linear infinite;
+        z-index: 1;
+        pointer-events: none;
+    }
+    @keyframes busyShimmer {
+        0%   { background-position: 100% 0; }
+        100% { background-position: -100% 0; }
     }
 }
 
@@ -437,7 +556,7 @@
         padding-top: max(var(--sp-5), var(--sat));
         border-bottom: 1px solid var(--border);
         position: relative;
-        z-index: 203;
+        z-index: var(--z-sticky);
     }
     #topbar > img {
         width: 1.5rem;
@@ -1560,6 +1679,44 @@
             color: var(--accent);
         }
     }
+    /* Reasoning-effort cycle button — universal, sits next to attach.
+     * State is encoded in [data-reasoning] so a single button conveys the
+     * current effort without a popover.  Disabled state fires only when
+     * the active model is on the unsupported_params=["reasoning"] list. */
+    #reasoning-btn {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        background: none;
+        border: 1px solid transparent;
+        color: var(--faint);
+        padding: var(--sp-2) var(--sp-3);
+        border-radius: var(--r-sm);
+        cursor: pointer;
+        transition: color 0.15s, background 0.15s, border-color 0.15s;
+        flex-shrink: 0;
+        font-size: var(--text-xs);
+        font-family: inherit;
+        line-height: 1;
+        &:hover {
+            color: var(--accent);
+            background: var(--accent-glow);
+        }
+        & .reasoning-label {
+            font-weight: 600;
+            letter-spacing: 0.04em;
+        }
+        &[data-reasoning="off"]    { color: var(--faint); }
+        &[data-reasoning="low"]    { color: var(--accent); }
+        &[data-reasoning="medium"] { color: var(--accent); border-color: var(--accent); }
+        &[data-reasoning="high"]   { color: var(--accent); background: var(--accent-glow); border-color: var(--accent); }
+        &[data-reasoning="on"]     { color: var(--accent); background: var(--accent-glow); border-color: var(--accent); }
+        &[disabled] {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+    }
     #main.drag-over {
         outline: 2px dashed var(--accent);
         outline-offset: -4px;
@@ -2063,7 +2220,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        z-index: 1000;
+        z-index: var(--z-modal);
     }
     .share-content {
         background: var(--surface-raised);
@@ -2673,13 +2830,18 @@
         }
     }
 
-    /* Auth screen */
+    /* Auth screen — must out-stack every other UI surface in the SPA
+     * (topbar z=203, right-panel z=300, modal dialogs up to z=500) so an
+     * unauthenticated user can't see or click through to app chrome.
+     * The login overlay is a closed surface — nothing else may rise above
+     * it while it's open.  Bumped from 200 -> 9000 after the topbar +
+     * right-panel were observed bleeding through. */
     #auth-screen {
         display: none;
         position: fixed;
         inset: 0;
         background: var(--bg);
-        z-index: 200;
+        z-index: var(--z-auth);
         align-items: center;
         justify-content: center;
         flex-direction: column;
@@ -3218,7 +3380,7 @@
         height: 100%;
         background: var(--sidebar);
         border-left: 1px solid var(--border);
-        z-index: 300;
+        z-index: var(--z-drawer);
         display: flex;
         flex-direction: column;
         transform: translateX(100%);
@@ -3228,6 +3390,20 @@
     }
     .right-panel.open {
         transform: translateX(0);
+    }
+
+    /* When the right-panel is open, narrow #main so chat content
+     * doesn't render under the panel and get clipped mid-word.
+     * Match the panel's width clamp.  app.js toggles
+     * ``body.has-right-panel`` via openRightPanel/closeRightPanel. */
+    body.has-right-panel main {
+        padding-right: clamp(16rem, 14rem + 2vw, 20rem);
+        transition: padding var(--dur) var(--ease);
+    }
+    @media (max-width: 768px) {
+        body.has-right-panel main {
+            padding-right: 0;  /* mobile: panel is full-width overlay */
+        }
     }
 
     @media (max-width: 768px) {
@@ -3274,7 +3450,7 @@
         position: fixed;
         inset: 0;
         background: rgba(0, 0, 0, 0.3);
-        z-index: 250;
+        z-index: calc(var(--z-drawer) - 50);  /* one tier below drawer */
     }
     #right-panel-overlay.open {
         display: block;
