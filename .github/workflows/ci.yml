@@ -55,7 +55,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          coverage run -m pytest tests/ --ignore=tests/test_e2e.py -x -v
+          coverage run -m pytest tests/ --ignore=tests/test_e2e.py --ignore=tests/test_e2e_refactor.py -x -v
         env:
           LM_CHAT_AUTH: "false"
 
@@ -91,7 +91,7 @@ jobs:
         run: playwright install chromium --with-deps
 
       - name: Run E2E tests
-        run: pytest tests/test_e2e.py -x -v
+        run: pytest tests/test_e2e.py tests/test_e2e_refactor.py -x -v
         env:
           LM_CHAT_AUTH: "false"
 
