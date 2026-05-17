@@ -8,8 +8,10 @@ services:
       - "3002:3001"
     volumes:
       - ./data-dev:/app/data
+      - ${HOME}/.lmstudio/mcp.json:/lmstudio/mcp.json:ro
     environment:
       - LMSTUDIO_URL=http://host.docker.internal:1234
+      - LMSTUDIO_MCP_JSON=/lmstudio/mcp.json
       - LM_CHAT_AUTH=true
     read_only: true
     tmpfs:

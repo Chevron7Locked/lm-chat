@@ -6,8 +6,14 @@ services:
       - "3001:3001"
     volumes:
       - ./data:/app/data
+      # Mount the host's LM Studio MCP config so plugin tools auto-discover.
+      # Same-host (macOS/Linux):  ${HOME}/.lmstudio/mcp.json  works out of the box.
+      # Remote LM Studio: point this at an SSHFS / rsync'd / copied mcp.json
+      # from the LM Studio host. See README "Connecting MCPs".
+      - ${HOME}/.lmstudio/mcp.json:/lmstudio/mcp.json:ro
     environment:
       - LMSTUDIO_URL=http://host.docker.internal:1234
+      - LMSTUDIO_MCP_JSON=/lmstudio/mcp.json
       - LM_CHAT_AUTH=true
       # - LM_CHAT_ADMIN_PASS=your-password  # optional: fixed admin password (random if unset)
       # - LM_CHAT_SECRET=your-secret-here    # optional: fixed signing key

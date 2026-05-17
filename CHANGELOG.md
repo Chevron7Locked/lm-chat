@@ -3,6 +3,24 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.5.2] — 2026-05-16
+
+Five field-discovered bugs from a follow-on audit pass against the 0.5.1
+working install.  All five surface in real-world deployments — most prominently
+the Docker / remote-LM-Studio case — but had silent failure modes that the
+prior tests never caught.
+
+### Fixed
+- **Docker installs never discovered MCP tools.** Container `$HOME` is `/app` (Dockerfile `useradd -d /app`), so `_list_mcp_servers` was reading `/app/.lmstudio/mcp.json` — a path that doesn't exist in the image and was never bind-mounted by the bundled compose files.  Dockerfile now defaults `LMSTUDIO_MCP_JSON=/lmstudio/mcp.json`; both `docker-compose.yml` and `docker-compose.dev.yml` bind-mount `${HOME}/.lmstudio/mcp.json:/lmstudio/mcp.json:ro` so same-host users get plugin auto-discovery out of the box.  Remote-LM-Studio deployments override the volume line to point at an SSHFS / rsync'd / copied path.
+- **Chain of Verification silently degraded to a single-call draft.** `_lmstudio_chat` was a thin urllib shim that bypassed the universal `_unsupported_params` cache (the strip lived only in `_build_lmstudio_payload`).  CoVe hardcodes `"reasoning": "off"` in its base payload, which qwen3.6 and other intrinsic-thinking models reject with HTTP 400 — the pipeline aborted after Step 1 (draft), the exception was caught at `_handle_chat_stream:2716-2718`, and the user got the bare draft.  Paid 4× tokens (per the README claim), got 1× output, no warning.  `_lmstudio_chat` now mirrors the existing strip-up-front + harvest-on-400 + retry-loop pattern from `_handle_chat_stream:2851-2925`.  All seven direct callers (CoVe ×4, title gen, `/compact`, distill, `_handle_chat` non-stream) get the same protection.
+- **Reasoning cycle button stayed clickable on models that reject the param.** The SPA's `PARAM_CONTROLS` map at `app.js:1800` listed the form-style dropdowns (`s-reasoning`, `cs-reasoning`) but not the input-area cycle button (`reasoning-btn`).  Comment at line 1864 claimed the server's proactive blacklist "governs whether the button is DISABLED entirely" — but nothing actually disabled it.  Added `reasoning-btn` to the list; `renderReasoningUI` was already wired to set the right tooltip when `btn.disabled`.
+- **Semantic search never indexed normal-completed chats.** The `_index_embeddings` thread spawn at `_handle_chat_stream:3011-3034` was nested inside the `elif chat_id and not is_incognito:` interrupted-stream cleanup branch — indentation drift from an earlier refactor.  Normal completions (the 99% case) never spawned the indexer, the embeddings table stayed empty in production, and `_search_messages` silently fell back to LIKE matching despite the README claiming "search by meaning across all messages."  Dedented the block and wrapped it in a sibling `if chat_id and not is_incognito:` guard so it fires for both completion paths.
+- **Semantic search fall-back was indistinguishable from text-mode-by-choice.** When `_search_messages` couldn't reach an embedding model, it called `_search_messages_like` which returned `{"mode": "text"}` — the same shape as a deliberate text-mode search.  The SPA had no way to know its semantic query had degraded.  Server now returns `{"mode": "text_fallback", "reason": "..."}` from the two semantic fallback paths, and `app.js:2582-2604` surfaces a one-time `toast.warn` so the user knows to load an embedding model in LM Studio.
+
+### Changed
+- VERSION constant (`server.py:14`) bumped 0.5.1 → 0.5.2.
+- Cloud-cost baseline updated from GPT-5.2 ($1.75/$14 per 1M tokens) to GPT-5.5 Pro ($30/$180 per 1M tokens, released 2026-04-24).  The sidebar "$ saved vs cloud" counter now compares local inference against the most expensive current cloud SKU.  Comment moved alongside the constants with a verified date.
+
 ## [0.5.1] — 2026-05-16
 
 Memory v3 + frontend polish + LM Studio robustness.  No schema breaks;

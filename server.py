@@ -3,7 +3,7 @@ lm-chat — lightweight web UI for LM Studio with MCP tool integration.
 Serves a PWA-ready single-page app, proxies to LM Studio, persists chats in SQLite.
 """
 
-import base64, binascii, gzip, hashlib, hmac, html as html_mod, json, logging, math, os, re, secrets, signal, sqlite3, struct, subprocess, sys, threading, time, uuid, urllib.request, urllib.error
+import base64, binascii, gzip, hashlib, hmac, html as html_mod, io, json, logging, math, os, re, secrets, signal, sqlite3, struct, subprocess, sys, threading, time, uuid, urllib.request, urllib.error
 import http.cookies
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 from qr import generate_qr_svg
 
-VERSION = "0.5.1"
+VERSION = "0.5.2"
 LMSTUDIO = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_TOKEN = os.environ.get("LMSTUDIO_TOKEN", "")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -3008,7 +3008,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 log.warning(f"failed to persist interrupted stream stub: {e}")
 
-            # Index embeddings in background thread (truly non-blocking)
+        # Index embeddings in background thread (truly non-blocking).  Fires
+        # for BOTH completion paths above — normal stream_complete AND
+        # interrupted — so semantic search has content to search regardless
+        # of how the turn ended.  Previously buried inside the `elif`
+        # interrupted branch, which meant normal completions never got
+        # indexed and semantic search silently degraded to LIKE.
+        if chat_id and not is_incognito:
             _embed_token = self._get_lmstudio_token(user["id"])
             def _index_embeddings(cid, tok2):
                 try:
@@ -3543,8 +3549,13 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         tok = self._get_lmstudio_token(user["id"])
         query_vec = get_embedding(query, tok)
         if not query_vec:
-            # Fallback to SQL LIKE search when embedding model is unavailable
-            return self._search_messages_like(user, query)
+            # Embedding endpoint returned nothing — could be no model loaded,
+            # wrong token, or LM Studio unreachable.  Surface the degradation
+            # so the SPA can warn instead of silently treating LIKE as semantic.
+            return self._search_messages_like(
+                user, query,
+                fallback_reason="embedding endpoint failed — verify an embedding model is loaded in LM Studio",
+            )
 
         db = get_db()
         where, params = self._user_filter(user)
@@ -3554,8 +3565,12 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         # are excluded until the user opts into /api/insights/reindex.
         current_model = self._current_embedding_model_id()
         if not current_model:
-            # No embedding model loaded — fall back to LIKE search.
-            return self._search_messages_like(user, query)
+            # /api/v1/models reports no embedding-type model — fall back to
+            # LIKE search and tell the SPA why.
+            return self._search_messages_like(
+                user, query,
+                fallback_reason="no embedding model loaded in LM Studio",
+            )
         rows = db.execute(f"""
             SELECT e.message_id, e.vector, m.content, m.role, m.chat_id, chats.title
             FROM embeddings e
@@ -3601,8 +3616,13 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
 
         self._json_response(200, {"results": results, "mode": "semantic"})
 
-    def _search_messages_like(self, user, query):
-        """Fallback text search using SQL LIKE when embedding model is unavailable."""
+    def _search_messages_like(self, user, query, fallback_reason=None):
+        """SQL LIKE search.  ``fallback_reason`` is set by the semantic-search
+        path when it's degrading to LIKE because the embedding pipeline is
+        unavailable — emitted as ``mode: "text_fallback"`` + a ``reason``
+        string so the SPA can show a toast instead of silently mis-labelling
+        results as text-mode-by-choice.  When unset (direct text-mode
+        invocation), behaviour is unchanged."""
         db = get_db()
         # Escape LIKE wildcards in user input
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -3621,7 +3641,10 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         results = []
         for mid, content, role, chat_id, title in rows:
             results.append({"message_id": mid, "score": 1.0, "content": (content or "")[:200], "role": role, "chat_id": chat_id, "chat_title": title})
-        self._json_response(200, {"results": results, "mode": "text"})
+        body = {"results": results, "mode": "text_fallback" if fallback_reason else "text"}
+        if fallback_reason:
+            body["reason"] = fallback_reason
+        self._json_response(200, body)
 
     def _user_filter(self, user, table="chats"):
         """Return (where_clause, params) for user-scoped queries.
@@ -3635,20 +3658,114 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
 
     # --- Helpers ---
 
-    def _lmstudio_chat(self, payload, user_id, timeout=60):
-        """Send a chat completion request to LM Studio. Returns parsed JSON."""
+    # Legacy phrase fallback for when LM Studio's 400 doesn't carry
+    # ``error.param``.  Mirrors the inline map at _handle_chat_stream:2828 —
+    # keep these two in sync.
+    _LEGACY_PARAM_PHRASES = {
+        "reasoning": ("does not support reasoning", "does not expose reasoning"),
+        "previous_response_id": ("could not find stored response", "previous_response_not_found"),
+    }
+
+    def _lmstudio_chat(self, payload, user_id, timeout=60, max_strip_iterations=2):
+        """Send a chat completion request to LM Studio.
+
+        Universal strip + harvest + retry-loop: every direct caller (CoVe,
+        title generation, ``/compact`` summary, memory distill, non-stream
+        ``_handle_chat``) gets the same param-cache protection that the
+        streaming chat path has at _handle_chat_stream:2851-2925.
+
+        Strip-up-front handles the warm-cache case.  Harvest-on-400 +
+        retry-once handles the cold-cache case so the first call after a
+        restart isn't broken (the bug that silently killed CoVe Step 2
+        for qwen3.6 — reasoning param rejected, cache empty, no retry,
+        pipeline aborted).
+
+        max_strip_iterations defaults to 2 — one strip pass is enough in
+        practice (LM Studio rejects at most one param at a time in our
+        observed surface).  The cap exists as a safety belt, not a
+        budget: wall-clock = iterations × timeout, so a high cap on a
+        300s-timeout caller is a foot-gun.
+        """
+        payload = dict(payload)  # isolate caller from our mutations
         headers = {"Content-Type": "application/json"}
         token = self._get_lmstudio_token(user_id)
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        req = urllib.request.Request(
-            f"{LMSTUDIO}/api/v1/chat",
-            data=json.dumps(payload).encode(),
-            headers=headers,
-            method="POST",
+
+        # Strip known-bad params up front.
+        model_id = payload.get("model") or ""
+        if model_id:
+            with Handler._unsupported_params_lock:
+                rejected = set(Handler._unsupported_params.get(model_id, ()))
+            for p in rejected:
+                payload.pop(p, None)
+
+        def _send():
+            req = urllib.request.Request(
+                f"{LMSTUDIO}/api/v1/chat",
+                data=json.dumps(payload).encode(),
+                headers=headers,
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read())
+
+        for _ in range(max_strip_iterations):
+            try:
+                return _send()
+            except urllib.error.HTTPError as exc:
+                if exc.code != 400:
+                    raise
+                # Read the body ONCE — urllib.HTTPError.read() consumes the
+                # underlying file.  Stash the bytes back as a fresh BytesIO
+                # so callers (e.g. _handle_chat's error envelope at line
+                # 2378) can still .read() the upstream JSON when we re-raise.
+                # Without this, every non-retryable 400 surfaced to the SPA
+                # as ``{"error": "LM Studio error: "}`` — empty msg.
+                err_bytes = exc.read()
+                exc.fp = io.BytesIO(err_bytes)
+                try:
+                    err = json.loads(err_bytes).get("error") or {}
+                except Exception:
+                    raise exc from None
+                bad_param = err.get("param")
+                err_msg = (err.get("message") or "").lower()
+                err_code = err.get("code")
+                if not bad_param:
+                    for p, markers in self._LEGACY_PARAM_PHRASES.items():
+                        if any(m in err_msg for m in markers):
+                            bad_param = p
+                            break
+                # Must be a param WE sent — guards against arbitrary user
+                # content being mis-interpreted as a param name.
+                if not bad_param or bad_param not in payload:
+                    raise exc from None
+                model_unsupports = (
+                    "does not support" in err_msg
+                    or "does not expose" in err_msg
+                    or "not configurable" in err_msg
+                )
+                ephemeral_evicted = (
+                    err_code == "previous_response_not_found"
+                    or "not found" in err_msg
+                    or "no longer available" in err_msg
+                )
+                if not (model_unsupports or ephemeral_evicted):
+                    raise exc from None
+                if model_unsupports and model_id:
+                    with Handler._unsupported_params_lock:
+                        Handler._unsupported_params.setdefault(model_id, set()).add(bad_param)
+                    _persist_param_blacklist(model_id, bad_param, "reactive_400")
+                    log.info(
+                        f"unsupported_params: cached ({model_id!r}, {bad_param!r}) via direct call"
+                    )
+                payload.pop(bad_param, None)
+                # Loop to retry without the bad param.  Sanity guard:
+                # ``bad_param in payload`` fails on the next iteration if
+                # the same param keeps coming back, so no infinite loop.
+        raise RuntimeError(
+            f"LM Studio: exhausted {max_strip_iterations} param-strip iterations"
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read())
 
     def _run_llm_distill(self, prompt, user_id, *, model="", temperature=0.3, timeout=60):
         """One-shot LLM call for distillation / refinement / compaction prompts.

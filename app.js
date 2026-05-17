@@ -1495,9 +1495,10 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
             let incognitoHistory = [];
 
             // --- Session stats (persisted in localStorage) ---
-            // Cloud baseline pricing (GPT-5.2): $1.75/1M input, $14/1M output (as of March 2026)
-            const GPT5_INPUT_PER_TOKEN = 1.75 / 1e6,
-                GPT5_OUTPUT_PER_TOKEN = 14 / 1e6;
+            // Cloud baseline pricing (GPT-5.5 Pro, the most expensive GPT-5.x SKU):
+            // $30/1M input, $180/1M output (released April 24 2026; verified May 2026).
+            const GPT5_INPUT_PER_TOKEN = 30 / 1e6,
+                GPT5_OUTPUT_PER_TOKEN = 180 / 1e6;
             function loadSessionStats() {
                 try {
                     return (
@@ -1790,15 +1791,19 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 // below: ``param-name → [element-id, ...]``.  Keep map keys
                 // matching the exact field name LM Studio reports back so
                 // the lookup is direct.
-                // The reasoning cycle button intentionally STAYS clickable
-                // even when capabilities.unsupported_params contains
-                // "reasoning" — a user-explicit click is a request to TRY
-                // the param on this model, and the server treats explicit
-                // user sets as a bypass of the blacklist for that turn.
-                // Only the form-style controls (panel dropdowns) honour
-                // the gate and disable themselves.
+                // ALL reasoning controls (form dropdowns AND the input-area
+                // cycle button) are disabled when capabilities.unsupported_params
+                // contains "reasoning".  Previous design left the cycle button
+                // clickable for "user-explicit override" — but on models with
+                // intrinsic always-on thinking (qwen3.6 etc), the param has no
+                // knob to turn at all, so clicking it just wastes a 400+retry
+                // round-trip with no user-visible effect.  Better UX: disable
+                // the control and let the model's intrinsic reasoning run.
+                // If we ever need a "try anyway" escape hatch for transient
+                // mis-cached params, give it its own button — don't conflate
+                // it with the normal effort-cycle UX.
                 const PARAM_CONTROLS = {
-                    reasoning: ["s-reasoning", "cs-reasoning"],
+                    reasoning: ["s-reasoning", "cs-reasoning", "reasoning-btn"],
                 };
                 const unsupported = new Set(caps.unsupported_params || []);
                 Object.entries(PARAM_CONTROLS).forEach(([param, ids]) => {
@@ -2583,6 +2588,23 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             searchMode = "text";
                             filterChats();
                             return;
+                        }
+                        if (d.mode === "text_fallback") {
+                            // Semantic degraded to LIKE because LM Studio
+                            // doesn't have an embedding model loaded (or
+                            // the embedding endpoint failed).  Tell the
+                            // user once so they don't think LIKE results
+                            // are semantic ones.
+                            if (!window._semanticDegradedToastShown) {
+                                window._semanticDegradedToastShown = true;
+                                if (typeof toast?.warn === "function") {
+                                    toast.warn("Semantic search unavailable", {
+                                        detail: d.reason || "load an embedding model in LM Studio (e.g. nomic-embed-text-v1.5)",
+                                    });
+                                } else {
+                                    console.warn("Semantic search degraded:", d.reason);
+                                }
+                            }
                         }
                         renderSearchResults(d.results || []);
                     } catch (e) {

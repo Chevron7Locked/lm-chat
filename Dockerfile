@@ -24,6 +24,7 @@ RUN mkdir -p /app/data /app/data/logs && chown -R lmchat:lmchat /app
 
 ENV PORT=3001 \
     LMSTUDIO_URL=http://host.docker.internal:1234 \
+    LMSTUDIO_MCP_JSON=/lmstudio/mcp.json \
     LM_CHAT_AUTH=true \
     LM_CHAT_DB=/app/data/chats.db \
     LM_CHAT_LOGS=/app/data/logs \
