@@ -2300,14 +2300,18 @@
 
 @layer utilities {
     @media (max-width: 768px) {
-        /* Sidebar — full page on mobile */
+        /* Sidebar — full page on mobile.  z-index lifted above #topbar
+         * (200) so the sidebar's New-chat / search / chats are clickable
+         * when the sidebar is open.  Previously sidebar was 95, topbar
+         * 200, so the topbar's buttons overlay-shadowed the sidebar and
+         * users had to refresh the tab to escape. */
         #sidebar {
             position: fixed;
             left: 0;
             top: 0;
             bottom: 0;
             right: 0;
-            z-index: 95;
+            z-index: 250;
             width: 100%;
             transition: transform var(--dur) var(--ease);
             margin-right: 0;
@@ -2413,10 +2417,15 @@
             opacity: 0.4;
         }
 
-        /* Input area — flush to bottom edge */
-        /* padding-bottom managed by JS in standalone PWA (env() doesn't update on keyboard show) */
+        /* Input area — flush to bottom edge.
+         * padding-bottom restores --sab (safe-area-inset-bottom) which
+         * the all-sides ``padding`` shorthand on mobile would otherwise
+         * drop, leaving the input under the iPhone home-indicator gesture
+         * area.  Standalone PWA keyboard-aware JS at app.js:7442 overrides
+         * this when the keyboard opens. */
         #input-area {
             padding: var(--sp-3) var(--sp-5);
+            padding-bottom: max(var(--sp-3), var(--sab));
             max-width: 100%;
             background: var(--bg);
         }
@@ -2446,6 +2455,12 @@
             height: 0.875rem;
         }
         #model-pill {
+            display: none;
+        }
+        /* Hide reasoning-effort cycle button on mobile — power-user knob,
+         * lives next to attach/send and crowds the rounded input pill.
+         * Mobile users set reasoning via chat-settings panel instead. */
+        #reasoning-btn {
             display: none;
         }
         #slash-btn {

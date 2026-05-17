@@ -3,6 +3,44 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.5.5] — 2026-05-17
+
+Mobile + PWA UX pass.  Five reproducible bugs on iPhone-class viewports.
+
+### Fixed
+- **Topbar overlaid the sidebar on mobile.**  `#topbar` had `z-index: 200`,
+  `#sidebar` had `z-index: 95`.  Opening the sidebar on a phone left the
+  topbar buttons (Export, Pin, Settings, User-avatar, model picker)
+  rendering ON TOP of the sidebar's New-chat button, search box, and
+  pinned-chats list.  Users had to refresh the tab to escape.  Sidebar
+  z-index bumped to 250 inside the `@media (max-width: 768px)` block so
+  it floats above the topbar when open.
+- **Sidebar opened by default on mobile.**  `app.js:1` only removed
+  `sb-closed` on desktop, never added it on mobile.  Initial `<body>`
+  had no class, so the full-viewport sidebar covered the chat from
+  first paint.  Combined with bug #1, users couldn't see or use the
+  chat at all on a cold mobile load.  Now `else document.body.classList.add("sb-closed")`
+  on mobile init.
+- **Input area lost the safe-area-inset on mobile.**  Desktop
+  `#input-area` set `padding-bottom: max(var(--sp-6), var(--sab))` so
+  the iPhone home-indicator gesture area was respected.  Mobile's
+  all-sides `padding: var(--sp-3) var(--sp-5)` shorthand dropped that.
+  Now explicit `padding-bottom: max(var(--sp-3), var(--sab))` restores
+  the inset on iOS standalone PWA.
+- **Reasoning-effort cycle button orphaned visually on mobile.**  Lived
+  inside `#input-box` but rendered as a separate visual element to the
+  left of the rounded input pill, making the input area feel
+  disjointed.  Hidden on mobile — users set reasoning effort via the
+  chat-settings panel.  Desktop unchanged.
+- **No close affordance reachable on mobile sidebar.**  The hamburger
+  toggle (`#open-sb`) lives in the topbar.  Before bug #1's fix, the
+  topbar overlay covered "New chat" AND there was no visible close
+  control — refresh was the only escape.  Now resolved by the z-index
+  fix above; the sidebar's own close X (`#close-sb`) is tappable.
+
+### Changed
+- VERSION constant (`server.py:14`) bumped 0.5.4 → 0.5.5.
+
 ## [0.5.4] — 2026-05-17
 
 Hot-fix for an indicator-regression introduced during the 0.5.1 polish

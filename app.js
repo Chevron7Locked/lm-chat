@@ -1,4 +1,5 @@
 if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
+else document.body.classList.add("sb-closed");
 
             // =================================================================
             // Type definitions (JSDoc).  ``// @ts-check`` is intentionally
