@@ -628,7 +628,7 @@ def client(app_server) -> _Client:
 # Shared test helpers (importable by all test modules)
 # ---------------------------------------------------------------------------
 
-def _create_chat(client: "_Client", title: str = "Test Chat") -> str:
+def _create_chat(client: _Client, title: str = "Test Chat") -> str:
     """Create a chat and return its ID."""
     resp = client.post("/api/chats", {"title": title})
     return json.loads(resp.read())["id"]
@@ -779,7 +779,7 @@ def _start_inproc_server(
     extra_env: dict | None = None,
     auth: bool = True,
     bootstrap_admin: bool = True,
-) -> "InProcServer":
+) -> InProcServer:
     """Spin up an in-process server with the given env.
 
     Returns an ``InProcServer`` handle.  The caller is responsible for
@@ -871,7 +871,7 @@ def make_inproc_server(mock_lmstudio, tmp_path):
         auth: bool = True,
         env: dict | None = None,
         bootstrap_admin: bool = True,
-    ) -> "InProcServer":
+    ) -> InProcServer:
         n = counter["n"]
         counter["n"] += 1
         handle = _start_inproc_server(
@@ -899,7 +899,7 @@ def make_inproc_server(mock_lmstudio, tmp_path):
 
 
 @pytest.fixture
-def inproc_client(inproc_server) -> "AuthedClient":
+def inproc_client(inproc_server) -> AuthedClient:
     """Pre-authenticated client pair (admin + regular user) over inproc_server."""
     return AuthedClient(inproc_server.url)
 

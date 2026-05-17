@@ -4430,8 +4430,8 @@ Distill insights (or respond "none" if nothing new):"""
         return a real 400 instead of silently defaulting to 0 (which was
         the v2 bug minimax flagged as N3+N5).
         """
-        truthy = {1, True}
-        falsy  = {0, False, None}
+        truthy = {1}
+        falsy  = {0, None}
         if value in truthy:
             return 1
         if value in falsy:
@@ -4484,18 +4484,22 @@ Distill insights (or respond "none" if nothing new):"""
                         "error":       "duplicate_content",
                         "existing_id": collision[0],
                     })
-                updates.append("content=?");      params.append(stripped)
-                updates.append("content_hash=?"); params.append(new_hash)
+                updates.append("content=?")
+                params.append(stripped)
+                updates.append("content_hash=?")
+                params.append(new_hash)
             elif key == "category":
                 cat = value if value in self.VALID_INSIGHT_CATEGORIES else "context"
-                updates.append("category=?");     params.append(cat)
+                updates.append("category=?")
+                params.append(cat)
             elif key == "pinned":
                 try:
                     coerced = self._coerce_bool_flag(value, "pinned")
                 except ValueError as e:
                     return self._error(400, str(e))
                 new_pinned_val = coerced
-                updates.append("pinned=?");       params.append(coerced)
+                updates.append("pinned=?")
+                params.append(coerced)
         if not updates:
             return self._error(400, "nothing to update")
         # Pin-limit gate: only check when actually pinning (not unpinning).
@@ -4965,7 +4969,7 @@ Curated list:"""
     # dict shape: ``{"code": int, "message": str}``.  Caller decides
     # whether to write the upstream bytes verbatim or parse them first.
     # ------------------------------------------------------------------
-    def _proxy_lmstudio(self, req: "urllib.request.Request", *, timeout: int = 10):
+    def _proxy_lmstudio(self, req: urllib.request.Request, *, timeout: int = 10):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.read(), None

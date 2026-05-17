@@ -78,10 +78,9 @@ class TestReasoningStateCollapse:
         """Empty-string chat override must NOT be treated as a real value
         — must fall through to global default."""
         page_at.wait_for_function("() => typeof window.state !== 'undefined'", timeout=5_000)
-        result = page_at.evaluate("""
+        page_at.evaluate("""
             window.setState({ chatSettings: { reasoning: "" } });
             window.setState({ serverInfo:   { defaultReasoning: "medium" } });
-            window.effectiveReasoning ? window.effectiveReasoning() : null;
         """)
         # effectiveReasoning is IIFE-scoped; check via the cycle button
         # which subscribes to the same state.
@@ -103,7 +102,7 @@ class TestOrphanStreamRecovery:
     def test_interrupted_row_renders_retry_button(self, page_at: Page, app_server: str, client, tmp_path):
         """Seed an interrupted assistant row directly into the test DB,
         navigate, verify the retry affordance appears."""
-        import sqlite3, os, json, urllib.request
+        import sqlite3, json, urllib.request
         # Create the chat through the API
         resp = urllib.request.urlopen(
             urllib.request.Request(
@@ -210,7 +209,7 @@ class TestRouting:
             ),
             timeout=5,
         )
-        chat_id = json.loads(resp.read())["id"]
+        json.loads(resp.read())  # ensure the chat creation succeeded
         # Reload so loadChatList picks up the new chat
         page_at.reload()
         page_at.wait_for_selector("#chat-list .ci", timeout=5_000)

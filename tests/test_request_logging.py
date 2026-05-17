@@ -70,7 +70,7 @@ def test_404_from_app_routes_includes_req_id(inproc_server):
     )
     try:
         urllib.request.urlopen(req, timeout=5)
-        assert False, "expected 4xx"
+        raise AssertionError("expected 4xx")
     except urllib.error.HTTPError as e:
         # Could be 401 (unauthenticated) or 404 (auth passes but no chat) —
         # either one goes through ``_error`` and must include req_id.
@@ -93,7 +93,7 @@ def test_unmatched_path_returns_404(inproc_server):
     )
     try:
         urllib.request.urlopen(req, timeout=5)
-        assert False, "expected 404"
+        raise AssertionError("expected 404")
     except urllib.error.HTTPError as e:
         assert e.code == 404
 

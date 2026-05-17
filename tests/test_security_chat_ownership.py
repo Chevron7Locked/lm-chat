@@ -185,7 +185,7 @@ def test_auth_disabled_request_filter_scopes_to_default_user(tmp_path, mock_lmst
             urllib.request.urlopen(
                 handle.url + "/api/chats/c_rogue_99/messages", timeout=5,
             )
-            assert False, "rogue chat is reachable by id under auth-disabled mode"
+            raise AssertionError("rogue chat is reachable by id under auth-disabled mode")
         except urllib.error.HTTPError as e:
             assert e.code == 404
     finally:
