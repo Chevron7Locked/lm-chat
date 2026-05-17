@@ -3,6 +3,32 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.5.3] — 2026-05-16
+
+Hot-fix for a 0.5.2 oversight discovered live: Self-Consistency and
+Chain of Verification both stripped `integrations: []` on their internal
+calls, including the candidate-generation step (SC) and the draft step
+(CoVe).  When a user enabled SC or CoVe with tools configured, the
+generation calls went out tool-less, the model produced hallucinated
+"I don't have access to that tool" responses, and CoVe then fact-checked
+the hallucinated draft.
+
+### Fixed
+- `_self_consistency` now generates each candidate with the user's
+  original `integrations` array; only the final synthesis call stays
+  tool-less (it's combining text outputs, not generating fresh ones).
+- `_chain_of_verification` Step 1 (draft) now uses the user's
+  integrations so tools actually fire on the user's question.  Steps 2-4
+  (verification question extraction, parallel VQ answers, synthesis)
+  remain tool-less by design — they fact-check the draft's claims from
+  the model's training knowledge, no tool calls needed.
+- Verified live with `filesystem` MCP + CoVe enabled: model returned
+  `ref: refs/heads/main` verbatim from reading `.git/HEAD`, a value
+  it could not have hallucinated.
+
+### Changed
+- VERSION constant (`server.py:14`) bumped 0.5.2 → 0.5.3.
+
 ## [0.5.2] — 2026-05-16
 
 Five field-discovered bugs from a follow-on audit pass against the 0.5.1

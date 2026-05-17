@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 from qr import generate_qr_svg
 
-VERSION = "0.5.2"
+VERSION = "0.5.3"
 LMSTUDIO = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_TOKEN = os.environ.get("LMSTUDIO_TOKEN", "")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -3967,6 +3967,14 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         if emit_status:
             emit_status(f"Generating response 1 of {n}...")
 
+        # ``base`` is the shared shape for BOTH candidates AND the synthesis
+        # call below.  Synthesis doesn't need tools (it's combining text
+        # outputs), so default ``integrations=[]``.  Candidates DO need
+        # tools — they're generating real responses to the user's question;
+        # stripping tools here was the bug that made "use the firecrawl
+        # tool to fetch X" with SC enabled produce N hallucinated answers
+        # which then synthesised into one hallucinated answer.
+        original_integrations = list(payload.get("integrations") or [])
         base = {
             **payload,
             "store": False,
@@ -3974,9 +3982,12 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
             "temperature": temperature,
             "stream": False,
         }
+        # Candidate payload: same as base but keeps the user's integrations
+        # so each parallel generation can actually call tools.
+        candidate_payload = {**base, "integrations": original_integrations}
 
         with ThreadPoolExecutor(max_workers=n) as ex:
-            futures = [ex.submit(self._lmstudio_chat, base, user_id, 60) for _ in range(n)]
+            futures = [ex.submit(self._lmstudio_chat, candidate_payload, user_id, 60) for _ in range(n)]
             candidates = []
             completed = 0
             for f in as_completed(futures):
@@ -4071,6 +4082,17 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         """
         original_reasoning = payload.get("reasoning")
 
+        # ``base_silent`` is the shared shape for Step 2 (VQ extraction —
+        # different system prompt, no tools needed), Step 3 (VQ answers —
+        # spawned independently with their own clean payload), and Step 4
+        # (synthesis — combines text outputs, no tools needed).  Default
+        # ``integrations=[]`` is correct for those.
+        # Step 1 (draft) is the user's actual answer and MUST keep their
+        # integrations or the whole pipeline fact-checks a hallucinated
+        # draft (the bug that made "use firecrawl to fetch X" with CoVe
+        # enabled produce "I don't have access to firecrawl" → VQ
+        # extraction on that → synthesis → user sees a non-answer).
+        original_integrations = list(payload.get("integrations") or [])
         base_silent = {
             **payload,
             "store": False,
@@ -4080,10 +4102,11 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
         }
 
         try:
-            # Step 1: Draft
+            # Step 1: Draft — uses the user's actual integrations so tools fire.
             if emit_status:
                 emit_status("Drafting response...")
-            draft_data = self._lmstudio_chat(base_silent, user_id, timeout=60)
+            draft_payload = {**base_silent, "integrations": original_integrations}
+            draft_data = self._lmstudio_chat(draft_payload, user_id, timeout=60)
             draft = self._extract_content(draft_data)
             if not draft.strip():
                 draft = None
