@@ -3,6 +3,25 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.5.4] — 2026-05-17
+
+Hot-fix for an indicator-regression introduced during the 0.5.1 polish
+pass.
+
+### Fixed
+- "Thinking..." indicator never appeared after the user visited Settings
+  once.  `openSettings` set `$("thinking").style.display = "none"` as an
+  inline style (added during the 0.5.1 scroll-bottom polish pass), and
+  `closeSettings` never restored it.  Inline `display: none` shadows the
+  `#thinking.on { display: flex }` CSS rule indefinitely — so subsequent
+  message sends would call `classList.add("on")` with no visible effect.
+  The chat just appeared to hang silently until the first stream token
+  arrived.  `closeSettings` now restores `style.display = ""` alongside
+  the other elements it un-hides.
+
+### Changed
+- VERSION constant (`server.py:14`) bumped 0.5.3 → 0.5.4.
+
 ## [0.5.3] — 2026-05-16
 
 Hot-fix for a 0.5.2 oversight discovered live: Self-Consistency and

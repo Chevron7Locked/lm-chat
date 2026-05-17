@@ -938,6 +938,12 @@ if (window.innerWidth > 768) document.body.classList.remove("sb-closed");
                 const _sb = document.getElementById("scroll-bottom");
                 if (_sb) _sb.style.display = "";
                 if ($("starters")) $("starters").style.display = "";
+                // Restore #thinking too — openSettings forced an inline
+                // ``display: none`` on it, which permanently shadows the
+                // ``#thinking.on { display: flex }`` rule until cleared.
+                // Without this restoration the send-message indicator
+                // silently never appears after a user visits Settings once.
+                if ($("thinking")) $("thinking").style.display = "";
                 // URL sync — when the user dismisses via the X button (not
                 // browser back), step the history back so the address bar
                 // matches the SPA state.  Uses history.back() when the
