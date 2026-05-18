@@ -32,6 +32,14 @@ jobs:
       - name: Ruff lint
         run: ruff check --output-format=github .
 
+      - name: Pyright type check
+        # Pyright config at ./pyrightconfig.json — see the comment in
+        # that file for the rule rationale.  Locks local + CI behaviour
+        # together so the type-check status can't drift.
+        uses: jakebailey/pyright-action@1.0.4
+        with:
+          version: 1.1.404
+
       - name: Codespell
         run: codespell server.py qr.py index.html style.css app.js
 
@@ -60,9 +68,12 @@ jobs:
           LM_CHAT_AUTH: "false"
 
       - name: Coverage report
+        # --fail-under here MUST match the pyproject.toml value so CI and
+        # local pytest enforce the same floor.  Drift previously let CI
+        # pass at 41% while local dev failed at 69%.
         run: |
           coverage combine || true
-          coverage report --fail-under=40
+          coverage report --fail-under=70
           coverage html
 
       - name: Upload coverage artifact

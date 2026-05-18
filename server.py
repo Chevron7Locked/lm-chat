@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 from qr import generate_qr_svg
 
-VERSION = "0.5.5"
+VERSION = "0.5.7"
 LMSTUDIO = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_TOKEN = os.environ.get("LMSTUDIO_TOKEN", "")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -61,11 +61,23 @@ MODEL_MAX_LENGTH = 200
 _SETUP_TOKEN = os.environ.get("LM_CHAT_SETUP_TOKEN", "").strip()
 
 # --- Session policy ---
-# Multi-device by default — a stolen cookie persists until SESSION_EXPIRY
-# without intervention.  Operators worried about cookie theft can flip this
-# to true to rotate the user's sessions on every fresh login, which kicks any
-# parallel device off the moment the legitimate user logs back in.
-_SINGLE_SESSION = os.environ.get("LM_CHAT_SINGLE_SESSION", "").strip().lower() in ("1", "true", "on", "yes")
+# **Single-session is the default** as of 0.5.7 (ASVS V3.3.3 — session re-id
+# on privilege elevation; OWASP-aligned).  Login rotates the user's other
+# sessions atomically, kicking any parallel device off the moment the
+# legitimate user logs back in.  Operators who want multi-device sessions
+# (e.g. logging in from phone + desktop simultaneously) opt out with
+# ``LM_CHAT_SINGLE_SESSION=false``.  Treats unset as the secure default.
+_SINGLE_SESSION = os.environ.get("LM_CHAT_SINGLE_SESSION", "true").strip().lower() in ("1", "true", "on", "yes")
+
+# --- Reverse-proxy trust ---
+# When set, the server trusts ``X-Forwarded-For`` / ``X-Real-IP`` /
+# ``X-Forwarded-Proto`` headers from the upstream proxy.  Leave UNSET (the
+# default) when lm-chat is exposed to the internet directly — otherwise any
+# client can spoof their IP to bypass per-IP rate limits or forge
+# ``X-Forwarded-Proto: https`` to harvest a ``Secure``-gated cookie over
+# plain HTTP.  Set this to ``true`` only when there is an actual trusted
+# reverse proxy (nginx, Caddy, Cloudflare, fly.io, etc.) in front.
+_TRUSTED_PROXY = os.environ.get("LM_CHAT_TRUSTED_PROXY", "").strip().lower() in ("1", "true", "on", "yes")
 
 # --- HSTS ---
 # Opt-in.  Empty / "false" / "off" → no header.  "true"/"1"/"on" → standard
@@ -1175,7 +1187,7 @@ class Handler(BaseHTTPRequestHandler):
         log.info(
             "req_id=%s ip=%s method=%s path=%s status=%s latency_ms=%d",
             getattr(self, "request_id", "?"),
-            self.client_address[0],
+            self._client_ip(),
             self.command,
             self.path,
             code,
@@ -1517,9 +1529,34 @@ class Handler(BaseHTTPRequestHandler):
             if key not in body or body[key] is None:
                 body[key] = value
 
+    def _client_ip(self):
+        """Return the originating client IP.
+
+        Trusts ``X-Forwarded-For`` (leftmost address) and ``X-Real-IP`` only
+        when ``LM_CHAT_TRUSTED_PROXY`` is set — otherwise the headers are
+        attacker-controlled and would let any client spoof their IP for the
+        per-IP rate limiter.  Falls back to the raw TCP peer address.
+        """
+        if _TRUSTED_PROXY:
+            xff = self.headers.get("X-Forwarded-For")
+            if xff:
+                return xff.split(",")[0].strip()
+            xri = self.headers.get("X-Real-IP")
+            if xri:
+                return xri.strip()
+        return self.client_address[0]
+
     def _secure_flag(self):
-        """Return '; Secure' if running behind HTTPS, else empty string."""
-        if os.environ.get("LM_CHAT_HTTPS") or self.headers.get("X-Forwarded-Proto") == "https":
+        """Return '; Secure' if running behind HTTPS, else empty string.
+
+        ``X-Forwarded-Proto`` is honored only when an explicit trusted-proxy
+        env is set; otherwise any client could send the header and trick the
+        server into emitting a ``Secure``-flagged cookie that never reaches
+        the browser over plain HTTP.
+        """
+        if os.environ.get("LM_CHAT_HTTPS"):
+            return "; Secure"
+        if _TRUSTED_PROXY and self.headers.get("X-Forwarded-Proto") == "https":
             return "; Secure"
         return ""
 
@@ -1807,7 +1844,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not AUTH_ENABLED:
             return self._error(400, "auth not enabled")
-        ip = self.client_address[0]
+        ip = self._client_ip()
         if not check_rate_limit(ip):
             return self._error(429, "too many attempts, try again later")
         # Operator-set setup token gates first-visitor-wins on public URLs.
@@ -1852,7 +1889,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not AUTH_ENABLED:
             return self._error(400, "auth not enabled")
-        ip = self.client_address[0]
+        ip = self._client_ip()
         if not check_rate_limit(ip):
             return self._error(429, "too many login attempts, try again in 15 minutes")
         username = (body.get("username") or "").strip().lower()
@@ -2048,7 +2085,14 @@ class Handler(BaseHTTPRequestHandler):
         # Consume the setup token and persist the secret
         consume_totp_setup(setup_token)
         db = get_db()
-        db.execute("UPDATE users SET totp_secret=?, totp_enabled=1, last_totp_counter=? WHERE id=?", (tok_secret, counter, user["id"]))
+        # TOTP shared secret is a long-lived credential — encrypt before write.
+        # ``decrypt_at_rest`` returns legacy plaintext unchanged, so any rows
+        # written by older releases continue to verify until the user
+        # re-enrolls (or runs through the rotate-on-read code path).
+        db.execute(
+            "UPDATE users SET totp_secret=?, totp_enabled=1, last_totp_counter=? WHERE id=?",
+            (encrypt_at_rest(tok_secret, "users.totp_secret"), counter, user["id"]),
+        )
         db.commit()
         self._json_response(200, {"ok": True})
 
@@ -2062,7 +2106,10 @@ class Handler(BaseHTTPRequestHandler):
         row = db.execute("SELECT totp_secret,totp_enabled FROM users WHERE id=?", (user["id"],)).fetchone()
         if not row or not row["totp_enabled"]:
             return self._error(400, "2FA not enabled")
-        counter = verify_totp(row["totp_secret"], code)
+        stored_secret = decrypt_at_rest(row["totp_secret"], "users.totp_secret")
+        if not stored_secret:
+            return self._error(400, "2FA not enabled")
+        counter = verify_totp(stored_secret, code)
         if counter is None:
             return self._error(400, "invalid code")
         db.execute("UPDATE users SET totp_enabled=0, totp_secret=NULL WHERE id=?", (user["id"],))
@@ -2073,7 +2120,7 @@ class Handler(BaseHTTPRequestHandler):
         """Complete 2FA login with partial token + TOTP code."""
         if not self._check_csrf():
             return
-        ip = self.client_address[0]
+        ip = self._client_ip()
         if not check_rate_limit(ip):
             return self._error(429, "too many attempts, try again later")
         partial = body.get("partial_token") or ""
@@ -2090,7 +2137,11 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 db.execute("ROLLBACK")
                 return self._error(401, "invalid or reused code")
-            counter = verify_totp(row["totp_secret"], code)
+            stored_secret = decrypt_at_rest(row["totp_secret"], "users.totp_secret")
+            if not stored_secret:
+                db.execute("ROLLBACK")
+                return self._error(401, "invalid or reused code")
+            counter = verify_totp(stored_secret, code)
             if counter is None or counter <= (row["last_totp_counter"] or 0):
                 db.execute("ROLLBACK")
                 return self._error(401, "invalid or reused code")
@@ -5142,6 +5193,11 @@ Curated list:"""
         body, err = self._proxy_lmstudio(req, timeout=10)
         if err:
             return self._error(err["code"], err["message"])
+        # Guard against `None` AND `b""` — both would land the SPA in
+        # ``JSON.parse("")`` territory.  Locks ``_proxy_lmstudio``'s
+        # success contract (non-empty bytes) at the call site.
+        if not body:
+            return self._error(502, "upstream returned empty response")
         self._json_response(200, body)
 
     def _get_models(self):
@@ -5168,6 +5224,8 @@ Curated list:"""
         body, err = self._proxy_lmstudio(req, timeout=10)
         if err:
             return self._error(err["code"], err["message"])
+        if not body:
+            return self._error(502, "upstream returned empty response")
         try:
             payload = json.loads(body)
         except (ValueError, TypeError) as e:

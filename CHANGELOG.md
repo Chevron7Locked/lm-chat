@@ -3,6 +3,106 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.5.7] — 2026-05-17
+
+Pre-rebuild perimeter hardening.  Four items lifted directly from the original
+strategic-acquisition reviews (Opus + Qwen first pass) that were real, small,
+and locally fixable without waiting on the 0.6.0+ canonical-spec rebuild.
+Two other strategic-review items (`/api/debug` admin gate; `_handle_chat_stream`
+rate limiter) turned out to already be implemented — false alarms on both
+reviewers, noted and verified before shipping.
+
+### Security
+- **TOTP shared secret is now encrypted at rest.** Previously stored in
+  plaintext at `users.totp_secret`; an attacker with read-only DB access
+  could clone every enrolled user's 2FA token generator.  Write site
+  (`server.py` TOTP-confirm) and the three read sites (disable, login,
+  re-enrollment) all go through `encrypt_at_rest` / `decrypt_at_rest`
+  with context `"users.totp_secret"`.  Legacy plaintext rows continue to
+  verify until the user re-enrolls — `decrypt_at_rest` returns input
+  unchanged when no `enc$v1$` prefix is present.
+- **`LM_CHAT_SINGLE_SESSION` now defaults ON.** Login rotates the user's
+  other sessions atomically (ASVS V3.3.3 — session re-id on privilege
+  elevation).  Operators who want multi-device simultaneous sessions opt
+  out with `LM_CHAT_SINGLE_SESSION=false`.  Treats unset as the secure
+  default.
+- **`X-Forwarded-Proto` is no longer blindly trusted.**  A client behind
+  plain HTTP could previously send `X-Forwarded-Proto: https` and trick
+  the server into emitting a `Secure`-flagged `__Host-` cookie that the
+  browser would never return — effectively a session-loss DoS or, worse,
+  a session-fixation primitive.  Now gated behind a new
+  `LM_CHAT_TRUSTED_PROXY` env, set to `true` only when an actual reverse
+  proxy is in front.
+- **Per-IP rate limiter no longer trusts spoofable headers by default.**
+  New `_client_ip()` helper centralizes client-IP resolution and honors
+  `X-Forwarded-For` / `X-Real-IP` only when `LM_CHAT_TRUSTED_PROXY` is
+  set.  Four call sites updated: login, setup, 2FA login, request log
+  line.
+
+### Docs
+- README architecture stats refreshed to match the current tree
+  (`server.py` ~5.4k, `index.html` ~685, `style.css` ~3.7k, `app.js`
+  ~7.5k) — previous values predated the 0.5.x feature waves.
+
+### Out of scope (deferred to canonical-spec rebuild)
+- Audit-log table + admin viewer.  Tracked in `ARCHITECTURE_SPEC_canonical.md`
+  Wave 0 security stream.
+- CSP nonce + secret-key rotation.  Same wave.
+- Async conversion of `_handle_chat_stream` — blocker for the streaming
+  refactor in Wave 1; not patchable in a point release.
+
+## [0.5.6] — 2026-05-17
+
+Pre-existings polish + CI alignment.  Eight-item plan reviewed adversarially
+by qwen 3.6 at full 262144 context — review caught four real bugs in
+my own plan, all incorporated below.
+
+### Fixed
+- `_proxy_get` and `_get_models` callers of `_proxy_lmstudio` now guard
+  against both `None` AND empty-bytes (`b""`) bodies.  Previously the
+  pyright-flagged "could be None" path was the obvious one; reviewer
+  caught that a 200 from upstream with an empty body would land the SPA
+  in `JSON.parse("")` territory.  Single guard `if not body:` covers
+  both at each call site.
+- CI coverage flag drift: `.github/workflows/ci.yml`'s "Coverage report"
+  step ran `coverage report --fail-under=40` while `pyproject.toml` set
+  `fail_under = 68`.  CLI flag wins, so CI passed at 41% while local
+  pytest failed at 69%.  Both now set to **70** with an explicit
+  "keep in sync" comment in both files.
+
+### Added
+- `pyrightconfig.json` — first project-level pyright config.  Sets
+  `typeCheckingMode: basic`, excludes `.playwright-mcp` + `.coverage*`
+  scratch dirs, silences `reportUnusedParameter` and
+  `reportUnusedLambdaParameter` (both are universally noisy in this
+  codebase: `log_request(code, size)` must keep `size` to override
+  `BaseHTTPRequestHandler`, and every route lambda has signature
+  `(s, m, b)` per the dispatcher contract regardless of which args
+  it reads).  Rationale comment lives inside the JSON.
+- CI pyright step (`.github/workflows/ci.yml`): `jakebailey/pyright-action`
+  runs after Ruff so type-check status can't drift between local dev and
+  CI.
+
+### Changed
+- `.gitignore`: added `.playwright-mcp/` so the browser-MCP scratch dir
+  (90+ session screenshots / console logs) stops cluttering `git status`.
+- `pyproject.toml` coverage `fail_under` 68 → 70 (matches actual measured
+  coverage of 73% with the documented 3-point jitter buffer).
+- VERSION constant (`server.py:14`) bumped 0.5.5 → 0.5.6.
+
+### Out of scope (tracked separately)
+- 5 Dependabot PRs (#10-#14): every action version they propose is
+  **already in main** (verified: upload-artifact@v7, hadolint@v3.3.0,
+  scorecard@v2.4.3, action-gh-release@v3, python:3.14-slim).  Stale
+  PRs are being closed with an "already applied" comment.
+- `_handle_chat_stream` (server.py:2643-5221, 2578 lines) split → 0.6.0.
+  Qwen's review surfaced a hidden hazard: the retry-with-strip block at
+  server.py:2850-2925 uses synchronous `_ready2.wait(timeout=300)` on
+  the stream writer thread.  Splitting helpers without converting to
+  asyncio or a bounded queue could deadlock under high-latency upstream
+  retries.  0.6.0 scope must include the async conversion as a
+  prerequisite.
+
 ## [0.5.5] — 2026-05-17
 
 Mobile + PWA UX pass.  Five reproducible bugs on iPhone-class viewports.

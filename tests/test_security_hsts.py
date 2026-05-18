@@ -14,9 +14,13 @@ A second env var ``LM_CHAT_HSTS_MAX_AGE`` overrides the default 2-year window.
 
 Detection of HTTPS comes from two sources, both pre-existing:
   * ``LM_CHAT_HTTPS`` env (set when the Python server itself terminates TLS),
-  * ``X-Forwarded-Proto: https`` header (when behind a TLS reverse proxy).
+  * ``X-Forwarded-Proto: https`` header — **only trusted when
+    ``LM_CHAT_TRUSTED_PROXY`` is set** (added 0.5.7 to stop arbitrary HTTP
+    clients from forging the proto and harvesting ``Secure`` cookies).
 
-Tests use the latter because the in-process fixture binds to plain HTTP.
+Tests use the forwarded-proto path because the in-process fixture binds to
+plain HTTP.  Every test that expects HSTS to fire therefore opts into both
+``LM_CHAT_HSTS`` AND ``LM_CHAT_TRUSTED_PROXY``.
 """
 
 from __future__ import annotations
@@ -63,7 +67,7 @@ def test_hsts_absent_on_http_even_when_env_set(make_inproc_server):
 # ---------------------------------------------------------------------------
 
 def test_hsts_standard_mode_emits_default_directive(make_inproc_server):
-    srv = make_inproc_server(env={"LM_CHAT_HSTS": "true"})
+    srv = make_inproc_server(env={"LM_CHAT_HSTS": "true", "LM_CHAT_TRUSTED_PROXY": "true"})
     headers = _headers_for(srv.url, forwarded="https")
     h = headers.get("strict-transport-security", "")
     assert "max-age=63072000" in h
@@ -73,14 +77,14 @@ def test_hsts_standard_mode_emits_default_directive(make_inproc_server):
 
 @pytest.mark.parametrize("value", ["true", "TRUE", "1", "on", "ON"])
 def test_hsts_accepts_common_truthy_strings(make_inproc_server, value):
-    srv = make_inproc_server(env={"LM_CHAT_HSTS": value})
+    srv = make_inproc_server(env={"LM_CHAT_HSTS": value, "LM_CHAT_TRUSTED_PROXY": "true"})
     headers = _headers_for(srv.url, forwarded="https")
     assert "strict-transport-security" in headers, f"value={value!r}"
 
 
 @pytest.mark.parametrize("value", ["", "false", "0", "off", "no", "yolo"])
 def test_hsts_rejects_falsy_or_unknown_values(make_inproc_server, value):
-    srv = make_inproc_server(env={"LM_CHAT_HSTS": value})
+    srv = make_inproc_server(env={"LM_CHAT_HSTS": value, "LM_CHAT_TRUSTED_PROXY": "true"})
     headers = _headers_for(srv.url, forwarded="https")
     assert "strict-transport-security" not in headers, f"value={value!r}"
 
@@ -90,7 +94,7 @@ def test_hsts_rejects_falsy_or_unknown_values(make_inproc_server, value):
 # ---------------------------------------------------------------------------
 
 def test_hsts_preload_mode_emits_preload_token(make_inproc_server):
-    srv = make_inproc_server(env={"LM_CHAT_HSTS": "preload"})
+    srv = make_inproc_server(env={"LM_CHAT_HSTS": "preload", "LM_CHAT_TRUSTED_PROXY": "true"})
     headers = _headers_for(srv.url, forwarded="https")
     h = headers.get("strict-transport-security", "")
     assert "preload" in h
@@ -104,8 +108,9 @@ def test_hsts_preload_mode_emits_preload_token(make_inproc_server):
 
 def test_hsts_max_age_can_be_overridden(make_inproc_server):
     srv = make_inproc_server(env={
-        "LM_CHAT_HSTS":         "true",
-        "LM_CHAT_HSTS_MAX_AGE": "300",  # 5 minutes, for testing-on-staging
+        "LM_CHAT_HSTS":          "true",
+        "LM_CHAT_HSTS_MAX_AGE":  "300",  # 5 minutes, for testing-on-staging
+        "LM_CHAT_TRUSTED_PROXY": "true",
     })
     headers = _headers_for(srv.url, forwarded="https")
     assert "max-age=300" in headers.get("strict-transport-security", "")
@@ -117,8 +122,9 @@ def test_hsts_max_age_rejects_negative_falls_back_to_default(make_inproc_server)
     sets ``-1`` we still emit ``max-age=0``, which is the documented unset
     behaviour and at least won't crash."""
     srv = make_inproc_server(env={
-        "LM_CHAT_HSTS":         "true",
-        "LM_CHAT_HSTS_MAX_AGE": "-1",
+        "LM_CHAT_HSTS":          "true",
+        "LM_CHAT_HSTS_MAX_AGE":  "-1",
+        "LM_CHAT_TRUSTED_PROXY": "true",
     })
     headers = _headers_for(srv.url, forwarded="https")
     h = headers.get("strict-transport-security", "")
@@ -129,8 +135,9 @@ def test_hsts_max_age_rejects_negative_falls_back_to_default(make_inproc_server)
 
 def test_hsts_max_age_garbage_falls_back_to_default(make_inproc_server):
     srv = make_inproc_server(env={
-        "LM_CHAT_HSTS":         "true",
-        "LM_CHAT_HSTS_MAX_AGE": "definitely-not-an-int",
+        "LM_CHAT_HSTS":          "true",
+        "LM_CHAT_HSTS_MAX_AGE":  "definitely-not-an-int",
+        "LM_CHAT_TRUSTED_PROXY": "true",
     })
     headers = _headers_for(srv.url, forwarded="https")
     h = headers.get("strict-transport-security", "")
@@ -143,8 +150,24 @@ def test_hsts_max_age_garbage_falls_back_to_default(make_inproc_server):
 
 def test_hsts_does_not_remove_other_security_headers(make_inproc_server):
     """HSTS should be additive — adding it must not drop CSP or X-Frame-Options."""
-    srv = make_inproc_server(env={"LM_CHAT_HSTS": "true"})
+    srv = make_inproc_server(env={"LM_CHAT_HSTS": "true", "LM_CHAT_TRUSTED_PROXY": "true"})
     headers = _headers_for(srv.url, forwarded="https")
     assert "content-security-policy" in headers
     assert "x-frame-options" in headers
     assert "referrer-policy" in headers
+
+
+# ---------------------------------------------------------------------------
+# Trusted-proxy gate (added 0.5.7)
+# ---------------------------------------------------------------------------
+
+def test_hsts_ignores_x_forwarded_proto_without_trusted_proxy(make_inproc_server):
+    """Bare X-Forwarded-Proto must NOT be honored when LM_CHAT_TRUSTED_PROXY
+    is unset — otherwise any plain-HTTP client can forge it and harvest
+    Secure-flagged cookies."""
+    srv = make_inproc_server(env={"LM_CHAT_HSTS": "true"})  # no TRUSTED_PROXY
+    headers = _headers_for(srv.url, forwarded="https")
+    assert "strict-transport-security" not in headers, (
+        "X-Forwarded-Proto was honored without LM_CHAT_TRUSTED_PROXY — "
+        "this is the regression 0.5.7 fixed"
+    )

@@ -1,0 +1,20 @@
+{
+  "include": [
+    "server.py",
+    "qr.py",
+    "tests"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/.git",
+    "**/.playwright-mcp",
+    "**/.coverage*"
+  ],
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "basic",
+
+  "//-rules": "lm-chat has two universal patterns that force unused parameters: (1) log_request(code,size) overrides BaseHTTPRequestHandler — `size` MUST be named `size` and is intentionally unused; (2) every route lambda has signature (s, m, b) per the dispatcher contract, even when a particular route doesn't read m or b. Both warnings would be permanent noise that mask real signals.",
+  "reportUnusedParameter": "none",
+  "reportUnusedLambdaParameter": "none",
+  "reportMissingTypeArgument": "none"
+}

@@ -2,16 +2,13 @@
 
 A stolen session cookie persists for ``SESSION_EXPIRY`` (30 days) regardless
 of subsequent logins by the legitimate user.  The ``LM_CHAT_SINGLE_SESSION``
-env flag changes that: every fresh login invalidates the user's other
+env flag enforces that every fresh login invalidates the user's other
 sessions atomically, so the legitimate user re-logging in kicks any
 attacker-held cookie off the system.
 
-The flag is opt-in to preserve the multi-device default — most lm-chat
-deployments run on a home network where a user has lm-chat open on their
-phone *and* laptop, and quietly invalidating the phone's cookie when the
-laptop logs in is hostile UX without a clear threat model.  When operators
-do care (public exposure, household with untrusted devices), the flag is
-one env variable away.
+**As of 0.5.7 this is the default** (ASVS V3.3.3, session re-id on privilege
+elevation).  Operators who want multi-device simultaneous sessions opt out
+with ``LM_CHAT_SINGLE_SESSION=false``.
 
 These tests assert both modes from end to end.
 """
@@ -70,22 +67,41 @@ def _whoami(base_url: str, cookie: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Default: concurrent sessions allowed
+# Default (0.5.7+): single-session ON — second login kills the first
 # ---------------------------------------------------------------------------
 
-def test_default_policy_allows_concurrent_sessions(make_inproc_server):
-    """Without LM_CHAT_SINGLE_SESSION, two logins both stay valid."""
-    srv = make_inproc_server()  # LM_CHAT_SINGLE_SESSION unset
+def test_default_policy_revokes_prior_cookie(make_inproc_server):
+    """Without LM_CHAT_SINGLE_SESSION set, the new (0.5.7+) default rotates."""
+    srv = make_inproc_server()  # LM_CHAT_SINGLE_SESSION unset → default ON
+    cookie_a = _login(srv.url, ADMIN_USER, ADMIN_PASS)
+    assert _whoami(srv.url, cookie_a) == 200, "first cookie should authorise"
+
+    cookie_b = _login(srv.url, ADMIN_USER, ADMIN_PASS)
+    assert cookie_a != cookie_b, "second login must produce a new token"
+
+    # Default policy invalidates the older cookie atomically.
+    assert _whoami(srv.url, cookie_a) == 401, (
+        "first cookie should be invalidated under the 0.5.7 default policy"
+    )
+    assert _whoami(srv.url, cookie_b) == 200
+
+
+# ---------------------------------------------------------------------------
+# Opt-out: LM_CHAT_SINGLE_SESSION=false → multi-device behaviour preserved
+# ---------------------------------------------------------------------------
+
+def test_opt_out_keeps_concurrent_sessions(make_inproc_server):
+    """LM_CHAT_SINGLE_SESSION=false: two logins both remain valid."""
+    srv = make_inproc_server(env={"LM_CHAT_SINGLE_SESSION": "false"})
     cookie_a = _login(srv.url, ADMIN_USER, ADMIN_PASS)
     cookie_b = _login(srv.url, ADMIN_USER, ADMIN_PASS)
     assert cookie_a != cookie_b, "second login must produce a new token"
-    # Both still authorise.
     assert _whoami(srv.url, cookie_a) == 200
     assert _whoami(srv.url, cookie_b) == 200
 
 
 # ---------------------------------------------------------------------------
-# Opt-in single-session: second login kills the first
+# Explicit single-session: second login kills the first
 # ---------------------------------------------------------------------------
 
 def test_single_session_mode_invalidates_prior_cookie(make_inproc_server):
@@ -162,8 +178,13 @@ def test_single_session_rotation_is_scoped_to_user(make_inproc_server):
 
 def test_password_change_always_invalidates_other_sessions(make_inproc_server):
     """Independent of LM_CHAT_SINGLE_SESSION, password change must revoke all
-    siblings — that's a hard security invariant, not a UX preference."""
-    srv = make_inproc_server()  # default policy: concurrent sessions
+    siblings — that's a hard security invariant, not a UX preference.
+
+    Opt out of single-session (the 0.5.7 default) so we can construct two
+    valid sibling cookies; the test is that change-password kills them
+    regardless of the rotation policy.
+    """
+    srv = make_inproc_server(env={"LM_CHAT_SINGLE_SESSION": "false"})
 
     cookie_a = _login(srv.url, ADMIN_USER, ADMIN_PASS)
     cookie_b = _login(srv.url, ADMIN_USER, ADMIN_PASS)

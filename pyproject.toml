@@ -69,6 +69,9 @@ skip_covered = false
 #   - server.py:2849-2904  — _chain_of_verification (CoVe E2E)
 #   - server.py:3284-3360  — _refine_insights (insight refinement)
 #
-# fail_under is set ~3 points below the current measure to absorb test ordering
-# jitter without going lower than honest coverage.
-fail_under = 68
+# fail_under is set ~3 points below the current measure to absorb test
+# ordering jitter without going lower than honest coverage.  Keep this
+# value in sync with the --fail-under flag in .github/workflows/ci.yml's
+# "Coverage report" step — drift between the two means CI and local can
+# disagree on pass/fail.
+fail_under = 70

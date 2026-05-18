@@ -42,4 +42,5 @@ Thumbs.db
 # AI tooling (never commit)
 .claude/
 .serena/
+.playwright-mcp/
 docs/superpowers/
