@@ -2466,6 +2466,14 @@
         #slash-btn {
             display: flex;
         }
+        /* Even on mobile, hide the slash-btn while a command is locked
+         * in — the badge IS the mode indicator now.  This rule has to
+         * live inside @layer utilities (where the base mobile flex
+         * rule above lives) to win the cascade against the components
+         * layer's same-selector override. */
+        #input-box:has(.cmd-badge.visible) #slash-btn {
+            display: none;
+        }
         #attach-btn {
             padding: var(--sp-4);
         }
@@ -2708,7 +2716,13 @@
         }
     }
 
-    /* Slash command indicator badge */
+    /* Slash command indicator badge.
+     *
+     * Click to exit the active mode (see app.js initEventHandlers).
+     * When visible it represents the locked-in command, so the dedicated
+     * #slash-btn beside the textarea is hidden to avoid the
+     * ``[Research] [paperclip] [/] /research`` redundant cluster.
+     */
     .cmd-badge {
         display: none;
         align-items: center;
@@ -2720,14 +2734,34 @@
         font-weight: 600;
         padding: var(--sp-2) var(--sp-5);
         border-radius: var(--r-md);
-        pointer-events: none;
+        cursor: pointer;
         font-family: inherit;
         letter-spacing: 0.3px;
         white-space: nowrap;
         flex-shrink: 0;
+        transition: background 0.15s, border-color 0.15s;
+        &:hover {
+            background: rgba(192, 132, 252, 0.14);
+            border-color: rgba(192, 132, 252, 0.28);
+        }
+        &::after {
+            content: "×";
+            margin-left: 0.4em;
+            opacity: 0.55;
+            font-weight: 400;
+        }
     }
     .cmd-badge.visible {
         display: flex;
+    }
+    /* When a command is locked in, hide the dedicated slash-button so
+     * the input cluster reads as: [Mode] [paperclip] <text>.  The
+     * trigger no longer makes sense once the mode is already active.
+     * (The mobile-visible rule for #slash-btn lives in @layer
+     * utilities — see the matching override inside that layer's
+     * @media (max-width: 768px) block.) */
+    #input-box:has(.cmd-badge.visible) #slash-btn {
+        display: none;
     }
     /* Sub-chat breakout room — full-width warm-tinted container */
     .subchat-frame {

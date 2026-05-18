@@ -3719,21 +3719,50 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 });
                 updateSendBtn();
                 updateSlashMenu();
-                localStorage.setItem("lsc-draft", input.value);
+                // Draft format: ``{preset, text}`` when a command is
+                // locked in, plain string otherwise.  Restore site
+                // accepts both shapes for backward compatibility with
+                // drafts saved before the lock-in pattern landed.
+                const draftBlob =
+                    pendingPreset ?
+                        JSON.stringify({ preset: pendingPreset, text: input.value })
+                    :   input.value;
+                localStorage.setItem("lsc-draft", draftBlob);
             });
             input.addEventListener("keydown", (e) => {
                 if (slashKeyNav(e)) return;
+                // Backspace at the start of the input "deletes into" the
+                // locked-in command badge — symmetric with how typing
+                // ``/research<space>`` locked it in.  Empty-input case is
+                // handled too so the user can clear without selecting.
+                if (
+                    e.key === "Backspace" &&
+                    pendingPreset &&
+                    input.selectionStart === 0 &&
+                    input.selectionEnd === 0
+                ) {
+                    e.preventDefault();
+                    pendingPreset = null;
+                    updateCmdBadge();
+                    return;
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     sendMsg();
                 }
             });
             input.addEventListener("blur", (e) => {
-                // Don't close slash menu if focus moved to the slash button or menu itself
+                // Don't close the slash menu if focus moved to the slash
+                // button, the menu itself, OR back to the input.  On mobile
+                // the dedicated #slash-btn click handler refocuses the
+                // input AFTER the button's mousedown blurred it; without
+                // re-allowing input as a valid focus target, this deferred
+                // close race-fired ~200ms later and hid the menu the user
+                // had just opened (the "menu flashes" bug).
                 setTimeout(() => {
                     const active = document.activeElement;
                     const menu = $("slash-menu");
-                    if (active && (active.id === "slash-btn" || menu.contains(active))) return;
+                    if (active && (active === input || active.id === "slash-btn" || menu.contains(active))) return;
                     menu.classList.remove("open");
                 }, 200);
             });
@@ -4104,8 +4133,20 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 sending = true;
                 setSendMode(true);
 
-                // Handle slash commands
-                const slashCmd = parseSlashCmd(text);
+                // Handle slash commands.  If a lock-in is active
+                // (``pendingPreset``), synthesize the prefixed form so
+                // the rest of the pipeline (parse, meta._activePreset
+                // sticky propagation, sub-chat label) works unchanged.
+                let effectiveText = text;
+                if (pendingPreset) {
+                    const lockMatch = SLASH_MENU_ITEMS.find(
+                        (s) => s.preset === pendingPreset,
+                    );
+                    if (lockMatch) {
+                        effectiveText = `${lockMatch.cmd} ${text}`.trimEnd();
+                    }
+                }
+                const slashCmd = parseSlashCmd(effectiveText);
                 if (slashCmd && slashCmd.type === "help") {
                     cancelSend(sentAttachments);
                     if (!activeId) await newChat();
@@ -4177,7 +4218,10 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
                 input.value = "";
                 input.style.height = "auto";
-                $("cmd-badge").classList.remove("visible");
+                // pendingPreset was a one-shot lock-in for compose-time;
+                // sticky-mode now propagates via ``meta._activePreset`` and
+                // the badge re-derives from that on the next render.
+                pendingPreset = null;
 
                 // Slash commands: sticky until user sends a plain message (no slash prefix)
                 if (slashCmd && PRESETS[slashCmd.preset]) {
@@ -4185,6 +4229,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 } else if (!slashCmd) {
                     delete meta._activePreset;
                 }
+                updateCmdBadge();
                 const presetKey = meta._activePreset;
 
                 // Sub-chat breakout room for command modes
@@ -6740,13 +6785,60 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
 
             // --- Slash Command Popup ---
+            //
+            // When the user picks ``/research`` (or types ``/research <space>``)
+            // we move the command out of ``input.value`` and into
+            // ``pendingPreset``.  The badge then represents the mode and the
+            // textarea only carries the user's actual text — the "[Research]
+            // /research my query" double-render that motivated this change.
+            //
+            // After a successful send, ``meta._activePreset`` on the active
+            // chat becomes the source of truth for sticky-mode display
+            // (continuing turns).  ``pendingPreset`` is one-shot — cleared
+            // after send so the next pick re-locks.
             let slashIdx = -1;
+            let pendingPreset = null;
+
+            function setPendingPreset(preset) {
+                pendingPreset = preset || null;
+                updateCmdBadge();
+            }
+
+            function clearActiveMode() {
+                pendingPreset = null;
+                if (activeId && chatMeta[activeId]) {
+                    delete chatMeta[activeId]._activePreset;
+                }
+                updateCmdBadge();
+            }
 
             function updateSlashMenu() {
                 const menu = $("slash-menu");
                 const val = input.value;
+                // Lock-in detection: if the input now starts with a real
+                // preset command followed by a space, hoist the preset
+                // into ``pendingPreset`` and strip the prefix from the
+                // textarea.  Non-preset commands (``/help``, ``/compact``,
+                // unknown) fall through to the legacy send-time parse.
+                if (val.startsWith("/") && val.includes(" ")) {
+                    const spaceIdx = val.indexOf(" ");
+                    const cmdName = val.slice(1, spaceIdx).toLowerCase();
+                    const matched = SLASH_MENU_ITEMS.find(
+                        (s) => s.preset && s.cmd.slice(1) === cmdName,
+                    );
+                    if (matched) {
+                        pendingPreset = matched.preset;
+                        input.value = val.slice(spaceIdx + 1);
+                        input.style.height = "auto";
+                        input.style.height = Math.min(input.scrollHeight, 160) + "px";
+                    }
+                    menu.classList.remove("open");
+                    slashIdx = -1;
+                    updateCmdBadge();
+                    return;
+                }
                 updateCmdBadge();
-                if (!val.startsWith("/") || val.includes(" ")) {
+                if (!val.startsWith("/")) {
                     menu.classList.remove("open");
                     slashIdx = -1;
                     return;
@@ -6767,7 +6859,19 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     if (i === slashIdx) btn.classList.add("sel");
                     btn.onmousedown = (e) => {
                         e.preventDefault();
-                        input.value = s.cmd + " ";
+                        if (s.preset) {
+                            // Preset commands lock-in immediately — the
+                            // badge represents the mode, the input is
+                            // cleared for the user's actual prompt.
+                            pendingPreset = s.preset;
+                            input.value = "";
+                        } else {
+                            // ``/help`` / ``/compact`` stay literal so a
+                            // single Enter triggers them via the existing
+                            // parse path in sendMsg.
+                            input.value = s.cmd + " ";
+                        }
+                        input.style.height = "auto";
                         menu.classList.remove("open");
                         slashIdx = -1;
                         input.focus();
@@ -6780,20 +6884,15 @@ You are the bridge between "what should we do" and "how exactly do we build it."
 
             function updateCmdBadge() {
                 const badge = $("cmd-badge");
-                const val = input.value;
-                if (!val.startsWith("/")) {
+                let preset = pendingPreset;
+                if (!preset && activeId && chatMeta[activeId]) {
+                    preset = chatMeta[activeId]._activePreset || null;
+                }
+                if (!preset) {
                     badge.classList.remove("visible");
                     return;
                 }
-                const spaceIdx = val.indexOf(" ");
-                if (spaceIdx < 0) {
-                    badge.classList.remove("visible");
-                    return;
-                }
-                const cmd = val.slice(1, spaceIdx).toLowerCase();
-                const match = SLASH_MENU_ITEMS.find(
-                    (s) => s.cmd.slice(1) === cmd,
-                );
+                const match = SLASH_MENU_ITEMS.find((s) => s.preset === preset);
                 if (!match) {
                     badge.classList.remove("visible");
                     return;
@@ -7256,7 +7355,25 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 // the SPA to be usable.
                 const draft = localStorage.getItem("lsc-draft");
                 if (draft) {
-                    input.value = draft;
+                    // Lock-in drafts are JSON-encoded ({preset, text}).
+                    // Plain strings remain backward-compatible.
+                    if (draft.startsWith("{")) {
+                        try {
+                            const parsed = JSON.parse(draft);
+                            if (parsed && typeof parsed === "object") {
+                                input.value = parsed.text || "";
+                                if (parsed.preset) {
+                                    setPendingPreset(parsed.preset);
+                                }
+                            } else {
+                                input.value = draft;
+                            }
+                        } catch {
+                            input.value = draft;
+                        }
+                    } else {
+                        input.value = draft;
+                    }
                     input.style.height = "auto";
                     input.style.height =
                         Math.min(input.scrollHeight, 160) + "px";
@@ -7307,6 +7424,9 @@ Object.assign(window, {
     closeRightPanel, openRightPanel, togglePinNavigator,
     pinMessage, unpinMessage, loadPinNavigator, scrollToMessage,
     toast, navigate, withBusy, onOutside, openPopover,
+    // Slash-command lock-in: the cmd-badge click handler in
+    // ``initEventHandlers`` calls this to exit the active mode.
+    clearActiveMode,
     // State primitives — exposed for E2E tests + console debugging.
     // Production reads should still go through subscribe(); window
     // access bypasses the dispatch contract.
@@ -7396,6 +7516,14 @@ function initEventHandlers() {
             inp.dispatchEvent(new Event('input', { bubbles: true }));
             inp.focus();
         }
+    });
+
+    // Command badge — clicking it exits the active mode (clears both the
+    // compose-time ``pendingPreset`` and the sticky ``_activePreset`` on
+    // the active chat).  A subsequent ``/cmd`` would re-enter the mode.
+    document.getElementById('cmd-badge')?.addEventListener('click', () => {
+        clearActiveMode();
+        document.getElementById('input')?.focus();
     });
 
     // KB modal
