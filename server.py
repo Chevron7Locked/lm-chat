@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 from qr import generate_qr_svg
 
-VERSION = "0.5.7"
+VERSION = "0.5.8"
 LMSTUDIO = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_TOKEN = os.environ.get("LMSTUDIO_TOKEN", "")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -3899,9 +3899,21 @@ a{{color:#C084FC;text-decoration:none}}a:hover{{text-decoration:underline}}
                 log.warning("input: dropping part with no 'type' field")
                 continue
             if t in ("text", "message"):
-                if not (item.get("text") or item.get("content")):
+                # LM Studio's native ``/api/v1/chat`` requires the body in
+                # the ``content`` field on text parts and rejects ``text``
+                # with ``Unrecognized key(s) in object: 'text'``.  Some
+                # older SPA builds / OpenAI-compat clients send ``text``;
+                # rewrite to the canonical key at the wire boundary so
+                # every upstream call sees the same shape (universal
+                # fix, not client-specific).
+                body_val = item.get("content")
+                if body_val is None:
+                    body_val = item.get("text")
+                if not body_val:
                     log.warning(f"input: dropping {t!r} part with empty body")
                     continue
+                item = {**item, "content": body_val}
+                item.pop("text", None)
             elif t == "image":
                 if not (item.get("data_url") or item.get("url")):
                     log.warning("input: dropping image part with no data_url/url")

@@ -3,6 +3,26 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.5.8] — 2026-05-18
+
+### Fixed
+- **Image attachments now reach the model.**  The SPA was building text
+  parts as ``{type: "text", text: "..."}`` (OpenAI-compat shape), but
+  LM Studio's native ``/api/v1/chat`` rejects that with
+  ``'input.0.content' is required, Unrecognized key(s) in object: 'text'``.
+  The user-visible symptom was: attach an image, ask a question, the
+  request 200s through lm-chat, then a red error banner appears with
+  the LM Studio 400.  Fix is in two layers — SPA emits the canonical
+  ``content`` field, and ``server.py:_normalize_input`` rewrites any
+  surviving ``text`` keys at the wire boundary so future regressions
+  on either side land safely.  Probed against live LM Studio to
+  confirm the accepted shape before committing.  14-test backend
+  regression suite in ``tests/test_normalize_input.py`` locks the
+  contract.
+- ``.github/workflows/ci.yml`` — pinned ``jakebailey/pyright-action``
+  to the existing tag ``v3.0.2`` (was ``1.0.4`` which doesn't exist;
+  CI failed at the action-resolution step on every push since 0.5.6).
+
 ## [0.5.7] — 2026-05-17
 
 Pre-rebuild perimeter hardening.  Four items lifted directly from the original

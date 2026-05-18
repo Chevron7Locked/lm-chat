@@ -3960,7 +3960,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     if (textParts.length)
                         inputArr.push({
                             type: "text",
-                            text: textParts.join(""),
+                            content: textParts.join(""),
                         });
                     attachments
                         .filter((a) => a.type === "image")
@@ -3988,7 +3988,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                         inputVal = prefix + inputVal;
                     } else if (Array.isArray(inputVal)) {
                         // Multimodal input array — prepend history as a text part
-                        inputVal.unshift({ type: "text", text: prefix });
+                        inputVal.unshift({ type: "text", content: prefix });
                     }
                 }
                 const body = { model, input: inputVal, integrations };
