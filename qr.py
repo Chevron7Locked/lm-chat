@@ -129,8 +129,12 @@ def generate_qr_svg(data, module_size=6):
                 final.append(be[i])
 
     # --- Module placement ---
-    # Initialize grid: None = unset, 0 = white, 1 = black
-    grid = [[None] * size for _ in range(size)]
+    # Initialize grid: None = unset, 0 = white, 1 = black.  The explicit
+    # ``int | None`` annotation tells pyright the matrix accepts both
+    # the sentinel (None) and the eventual int values; without it,
+    # pyright infers ``list[list[None]]`` and rejects every later
+    # ``grid[r][c] = 0`` / ``= 1`` write.
+    grid: list[list[int | None]] = [[None] * size for _ in range(size)]
     reserved = [[False] * size for _ in range(size)]
 
     def set_module(r, c, val, reserve=True):
@@ -290,7 +294,12 @@ def generate_qr_svg(data, module_size=6):
 
     best_mask = 0
     best_score = float('inf')
-    best_grid = None
+    # Initialize to a zero matrix rather than None: the for loop below
+    # always runs (MASK_FNS has 8 entries) and overwrites best_grid,
+    # but pyright can't infer that and would flag every later subscript.
+    # The annotation also keeps the int|None contract consistent with
+    # ``grid`` above.
+    best_grid: list[list[int | None]] = [[None] * size for _ in range(size)]
     for mi in range(8):
         mg = apply_mask(grid, MASK_FNS[mi])
         s = penalty_score(mg)

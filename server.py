@@ -1146,8 +1146,18 @@ def get_embedding(text: str, token: str | None = None) -> list[float] | None:
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-        return data["data"][0]["embedding"]
-    except Exception:
+        # Validate response shape — LM Studio occasionally returns a
+        # well-formed 200 with empty ``data`` if the embedding model
+        # crashed; surface that as a None return without an IndexError
+        # crash but log so the caller can correlate against the silent
+        # degradation symptom.
+        items = data.get("data") if isinstance(data, dict) else None
+        if not items or not isinstance(items, list) or not items[0].get("embedding"):
+            log.warning(f"get_embedding: empty/malformed response from {LMSTUDIO}/v1/embeddings")
+            return None
+        return items[0]["embedding"]
+    except Exception as e:
+        log.warning(f"get_embedding failed: {e}")
         return None
 
 
@@ -2317,7 +2327,10 @@ class Handler(BaseHTTPRequestHandler):
             with urllib.request.urlopen(req, timeout=3) as resp:
                 payload = json.loads(resp.read())
         except Exception as e:
-            log.debug(f"embedding model lookup failed: {e}")
+            # Promoted debug → warning in 0.5.9 sweep: this is a capability
+            # degradation (memory semantic-recall falls back to text grep
+            # without an embedding model), worth surfacing in default logs.
+            log.warning(f"embedding model lookup failed: {e}")
             # Preserve last known value on transient failure.
             return Handler._embed_model_cache[1]
         chosen = None

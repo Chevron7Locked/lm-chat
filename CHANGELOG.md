@@ -5,9 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.5.9] — 2026-05-18
 
-Auth ergonomics: reverses two 0.5.7 calls that landed defensible on
-paper but produced "I had to re-login again" and "Failed to load your
-settings — unauthorized" banners on the dominant personal-use path.
+Final 0.5.x patch before v1 rebuild. Auth ergonomics reversal, a
+production sweep that surfaced several pre-existing edge cases worth
+shipping clean, and a forensic logger for a still-open bug.
 
 ### Changed
 - **`LM_CHAT_SINGLE_SESSION` default flipped back to OFF.** The 0.5.7
@@ -31,6 +31,52 @@ settings — unauthorized" banners on the dominant personal-use path.
   request is HTTPS).  The `_parse_session_cookie` fallback still
   accepts the older `__Host-lm_session` so previously-issued cookies
   authenticate until expiry.
+
+### Fixed (production sweep — pre-existing edge cases)
+- **`FileReader.onerror` wired on both attach handlers.**  Previously
+  only `onload` was set; a failed file read (corrupted PDF, EXIF strip
+  error, OS-level read failure) silently swallowed the attach with no
+  user feedback.  Both image and text attach paths now surface "Failed
+  to read X" via the toast system.
+- **`updateCmdBadge()` called on chat switch.**  The cmd-badge derived
+  its visibility from `pendingPreset` (compose-time) plus
+  `meta._activePreset` (post-send sticky) on the active chat — but
+  nothing called the derivation on activeId transitions, so the
+  previous chat's mode chip bled into the new one's input cluster
+  until the user typed.  Both `newChat()` and `loadChat()` now call
+  `updateCmdBadge()` after the activeChatId setState.  Also unstucks
+  the `test_agent_mode_resets_badge_on_new_chat` E2E test, which was
+  failing because of this exact bug rather than the timing issue the
+  audit guessed at.
+- **`get_embedding()` validates response shape + logs on failure.**
+  Previously a malformed LM Studio embedding response (well-formed 200
+  with empty `data` — happens when the embedding model crashes mid-
+  request) would IndexError, get swallowed by the broad-Exception
+  catch, return `None`, and degrade semantic-recall to text grep with
+  no log trail.  Now validates `data["data"][0]["embedding"]`
+  presence and warns on either malformed response or transport
+  exception.  Same code path; just observable.
+- **Embedding-model-lookup log level promoted `debug` → `warning`.**
+  This is a capability degradation (memory falls back to text grep);
+  it should be visible in default logs.
+
+### Tests
+- **`test_slash_research_accepted_in_input` updated for the 0.5.8 lock-in
+  pattern.**  Was asserting `input.value == "/research "` after typing,
+  but the lock-in hoists the command into the badge and strips the
+  prefix.  Test now asserts the stripped state + badge text.
+
+### Added (diagnostics — not a feature)
+- **Forensic breadcrumb logger** at `localStorage["lsc-chat-breadcrumbs"]`
+  capped at 200 entries.  Captures popstate, applyRoute outcomes,
+  chatMeta mutations, loadChat / exitIncognito / deleteChat /
+  loadChatList entries — plus every 401 from `apiFetch` with the
+  visible cookie names + Set-Cookie header.  Run `window.dumpBreadcrumbs()`
+  in the browser console to retrieve.  Two open operator-reported
+  bugs (back/forward chat deletion; intermittent "unauthorized" on
+  refresh) lack a static-readable cause; this gives forensics on the
+  next occurrence.  Will be removed once root causes are identified —
+  not load-bearing for any feature.
 
 ## [0.5.8] — 2026-05-18
 

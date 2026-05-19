@@ -3264,6 +3264,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 };
                 activeId = id;
                 setState({ activeChatId: id });
+                // Fresh chat has no _activePreset; re-derive the cmd-badge
+                // visibility so the previous chat's mode chip doesn't bleed
+                // into the new one's input cluster.  (Test:
+                // test_agent_mode_resets_badge_on_new_chat.)
+                if (typeof updateCmdBadge === "function") updateCmdBadge();
                 broadcastChats();
                 renderList();
                 renderWelcome();
@@ -3290,6 +3295,10 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 if (activeId && activeId !== id) distillChat(activeId);
                 activeId = id;
                 setState({ activeChatId: id });
+                // Switching chats refreshes the cmd-badge from the new
+                // chat's meta._activePreset (or hides it).  Keeps the
+                // mode chip honest across loadChat transitions.
+                if (typeof updateCmdBadge === "function") updateCmdBadge();
                 const meta = chatMeta[id];
                 if (
                     meta?.model &&
@@ -3936,6 +3945,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             renderAttachments();
                             updateSendBtn();
                         };
+                        r.onerror = () => {
+                            addErr("Failed to read image: " + file.name);
+                        };
                         r.readAsDataURL(file);
                     } else if (
                         file.type.startsWith("text/") ||
@@ -3960,6 +3972,9 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                             });
                             renderAttachments();
                             updateSendBtn();
+                        };
+                        r.onerror = () => {
+                            addErr("Failed to read file: " + file.name);
                         };
                         r.readAsText(file);
                     } else {

@@ -830,18 +830,24 @@ class TestEditMessage:
 
 class TestAgentModes:
     def test_slash_research_accepted_in_input(self, page_at: Page):
-        # Type "/research " and verify the cmd-badge activates (the slash command
-        # is recognised). The input retains the text and the badge becomes visible.
+        # Lock-in pattern (0.5.8+): typing "/research " hoists the
+        # command into the badge and STRIPS the prefix from the
+        # textarea — the user's subsequent text composes against an
+        # empty input.  See app.js updateSlashMenu lock-in branch.
         page_at.locator("#input").fill("/research ")
         page_at.wait_for_timeout(300)
         val = page_at.locator("#input").input_value()
-        assert val == "/research ", \
-            f"Input value changed unexpectedly: expected '/research ', got '{val}'"
-        # The cmd-badge should gain .visible for a recognised slash command
+        assert val == "", \
+            f"Lock-in should strip the /research prefix; input is now: '{val}'"
         badge = page_at.locator("#cmd-badge")
         classes = badge.get_attribute("class") or ""
         assert "visible" in classes, \
-            "cmd-badge did not gain .visible after '/research ' — slash command not recognised"
+            "cmd-badge did not gain .visible after '/research ' lock-in"
+        # Badge text is the human-readable command name with a trailing
+        # × glyph (CSS ::after); just check the prefix.
+        text = badge.text_content() or ""
+        assert text.startswith("Research"), \
+            f"badge text expected to start with 'Research', got: {text!r}"
 
     def test_cmd_badge_appears_after_valid_slash_command(self, page_at: Page):
         # #cmd-badge gains .visible when user types a recognised /cmd followed by space
