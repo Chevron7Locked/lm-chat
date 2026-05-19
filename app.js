@@ -369,6 +369,19 @@ else document.body.classList.add("sb-closed");
                             },
                             body: JSON.stringify({ username, password }),
                         });
+                        if (typeof _crumb === "function") {
+                            _crumb("auth.login.response", {
+                                status: r.status,
+                                ok: r.ok,
+                                // ``Set-Cookie`` is filtered out of fetch().headers for
+                                // security but a "set-cookie" presence check still
+                                // returns the joined value in some browsers — useful
+                                // if it ever shows up.
+                                setCookieHint: r.headers.get("Set-Cookie") || null,
+                                visibleCookieNames: (document.cookie || "")
+                                    .split(";").map(s => s.split("=")[0].trim()).filter(Boolean),
+                            });
+                        }
                         const d = await r.json();
                         if (!r.ok) {
                             showErr(d.error || "Login failed");
@@ -640,6 +653,48 @@ else document.body.classList.add("sb-closed");
                 }
             });
 
+            // =================================================================
+            // Forensic breadcrumb logger.
+            //
+            // Operator-reported bug: hitting browser back then forward
+            // sometimes deletes a regular persistent chat from the
+            // sidebar.  Static code reading found no path that explains
+            // it, so this captures every event that COULD plausibly be
+            // involved — popstate transitions, applyRoute outcomes,
+            // chatMeta mutations, loadChat / exitIncognito / deleteChat
+            // entries.  Last 200 entries persist in localStorage so they
+            // survive the reload that follows the bug.  Operator runs
+            // ``window.dumpBreadcrumbs()`` in the console to dump.
+            //
+            // Added 0.5.10.  Remove once root cause is identified.
+            const _CRUMB_KEY = "lsc-chat-breadcrumbs";
+            const _CRUMB_CAP = 200;
+            function _crumb(kind, detail) {
+                try {
+                    const arr = JSON.parse(localStorage.getItem(_CRUMB_KEY) || "[]");
+                    arr.push({ t: Date.now(), kind, ...(detail || {}) });
+                    while (arr.length > _CRUMB_CAP) arr.shift();
+                    localStorage.setItem(_CRUMB_KEY, JSON.stringify(arr));
+                } catch (e) {
+                    // localStorage full / disabled / quota — drop silently.
+                }
+            }
+            window.dumpBreadcrumbs = function dumpBreadcrumbs() {
+                try {
+                    const arr = JSON.parse(localStorage.getItem(_CRUMB_KEY) || "[]");
+                    console.table(arr.map(e => ({
+                        // Use a short ISO suffix for human-readable time
+                        ts: new Date(e.t).toISOString().slice(11, 23),
+                        kind: e.kind,
+                        ...Object.fromEntries(Object.entries(e).filter(([k]) => k !== "t" && k !== "kind")),
+                    })));
+                    return arr;
+                } catch (e) { return []; }
+            };
+            window.clearBreadcrumbs = function clearBreadcrumbs() {
+                localStorage.removeItem(_CRUMB_KEY);
+            };
+
             // Network online/offline — show a persistent offline toast
             // while disconnected, dismiss when back.
             window.addEventListener("offline", () => {
@@ -701,10 +756,12 @@ else document.body.classList.add("sb-closed");
             let _applyingRoute = false;
             function applyRoute(route) {
                 _applyingRoute = true;
+                _crumb("applyRoute.enter", { routeName: route.name, chatId: route.chatId, activeId });
                 try {
                     if (route.name === "chat" && route.chatId) {
                         if (activeId !== route.chatId) {
                             if (chatMeta[route.chatId]) {
+                                _crumb("applyRoute.chat.hit", { chatId: route.chatId });
                                 loadChat(route.chatId);
                             } else {
                                 // Chat not in memory.  Two cases:
@@ -718,6 +775,11 @@ else document.body.classList.add("sb-closed");
                                 //      redirect so the user isn't left
                                 //      staring at the previous chat's
                                 //      content with the wrong URL.
+                                _crumb("applyRoute.chat.miss", {
+                                    chatId: route.chatId,
+                                    bootPhase: state.boot.phase,
+                                    chatMetaCount: Object.keys(chatMeta).length,
+                                });
                                 if (state.boot.phase === "ready") {
                                     console.warn(`[router] chat ${route.chatId} not found`);
                                     if (typeof toast !== "undefined") {
@@ -726,6 +788,7 @@ else document.body.classList.add("sb-closed");
                                     // Redirect to welcome.  replaceState
                                     // so the back button doesn't bring
                                     // us back to this dead route.
+                                    _crumb("applyRoute.chat.redirect_welcome", { lostChatId: route.chatId });
                                     activeId = null;
                                     setState({ activeChatId: null });
                                     renderWelcome();
@@ -764,6 +827,14 @@ else document.body.classList.add("sb-closed");
 
             // Browser back/forward — re-derive view from URL.
             window.addEventListener("popstate", () => {
+                _crumb("popstate", {
+                    to: window.location.pathname,
+                    activeId: activeId,
+                    chatMetaCount: Object.keys(chatMeta).length,
+                    activeIdInChatMeta: !!(activeId && chatMeta[activeId]),
+                    incognito: incognitoMode,
+                    sending: sending,
+                });
                 applyRoute(ROUTES.parse(window.location.pathname));
             });
 
@@ -1403,6 +1474,25 @@ else document.body.classList.add("sb-closed");
                     AUTH_STATE.enabled &&
                     !_suppressAuth
                 ) {
+                    // Forensic breadcrumb for the "Failed to load your
+                    // settings — unauthorized" intermittent reported by
+                    // operator.  document.cookie elides HttpOnly cookies
+                    // by spec; a stale `lm_session` from a previous build
+                    // CAN show up here if HttpOnly was ever missing,
+                    // which is itself a useful signal.  See _crumb()
+                    // for the underlying logger.
+                    if (typeof _crumb === "function") {
+                        _crumb("api.401", {
+                            url: typeof url === "string" ? url : String(url),
+                            method: opts.method || "GET",
+                            authUser: AUTH_STATE.user?.username || null,
+                            authEnabled: AUTH_STATE.enabled,
+                            visibleCookieNames: (document.cookie || "")
+                                .split(";").map(s => s.split("=")[0].trim()).filter(Boolean),
+                            setCookieResp: resp.headers.get("Set-Cookie") || null,
+                            bootPhase: state.boot?.phase || "?",
+                        });
+                    }
                     AUTH_STATE.user = null;
                     document.getElementById("user-avatar").classList.add("hidden");
                     const gear = document.getElementById("global-settings-btn");
@@ -2722,9 +2812,17 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             async function loadChatList() {
                 return withBusy("sidebar-chats", async () => {
                     try {
+                        const prevIds = Object.keys(chatMeta);
                         const resp = await apiFetch("/api/chats");
                         if (!resp.ok) throw new Error("Failed to load chats");
                         const chats = await resp.json();
+                        _crumb("chatMeta.reset", {
+                            reason: "loadChatList",
+                            prevCount: prevIds.length,
+                            newCount: chats.length,
+                            activeId,
+                            activeStillPresent: !!chats.find(c => c.id === activeId),
+                        });
                         chatMeta = {};
                         chats.forEach((c) => (chatMeta[c.id] = c));
                         broadcastChats();
@@ -3119,11 +3217,13 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             }
             function exitIncognito() {
                 const oldId = activeId;
+                _crumb("exitIncognito", { oldId, willDelete: !!(oldId && chatMeta[oldId] && chatMeta[oldId]._incognito) });
                 incognitoMode = false;
                 incognitoHistory = [];
                 document.body.classList.remove("incognito");
                 $("incognito-btn").classList.remove("active");
                 if (oldId && chatMeta[oldId] && chatMeta[oldId]._incognito) {
+                    _crumb("chatMeta.delete", { id: oldId, reason: "exitIncognito" });
                     delete chatMeta[oldId];
                     broadcastChats();
                 }
@@ -3176,6 +3276,11 @@ You are the bridge between "what should we do" and "how exactly do we build it."
             async function loadChat(id) {
                 const prevId = activeId;
                 const wasStreaming = sending;
+                _crumb("loadChat.enter", {
+                    id, prevId, wasStreaming,
+                    incognito: incognitoMode,
+                    inChatMeta: !!chatMeta[id],
+                });
                 if (sending) stopStream();
                 // Close settings if open
                 if (settingsOpen) closeSettings();
@@ -3266,12 +3371,14 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                 )
                     return;
                 try {
+                    _crumb("api.deleteChat", { id, fromActive: activeId === id });
                     const r = await apiFetch(`/api/chats/${id}`, { method: "DELETE" });
                     if (!r.ok) throw new Error(`${r.status}`);
                 } catch (e) {
                     addErr("Failed to delete chat.");
                     return;
                 }
+                _crumb("chatMeta.delete", { id, reason: "deleteChat" });
                 delete chatMeta[id];
                 if (activeId === id) {
                     activeId = null;
@@ -3307,6 +3414,7 @@ You are the bridge between "what should we do" and "how exactly do we build it."
                     addErr("Failed to delete chats.");
                     return;
                 }
+                _crumb("chatMeta.reset", { reason: "deleteAll", prevCount: Object.keys(chatMeta).length });
                 chatMeta = {};
                 activeId = null;
                 setState({ activeChatId: null });
