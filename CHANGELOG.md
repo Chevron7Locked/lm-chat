@@ -3,6 +3,35 @@
 All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.5.9] — 2026-05-18
+
+Auth ergonomics: reverses two 0.5.7 calls that landed defensible on
+paper but produced "I had to re-login again" and "Failed to load your
+settings — unauthorized" banners on the dominant personal-use path.
+
+### Changed
+- **`LM_CHAT_SINGLE_SESSION` default flipped back to OFF.** The 0.5.7
+  default-ON was an ASVS V3.3.3 alignment that shipped without an
+  operator opt-in.  In practice it meant every new browser tab or
+  resume-from-sleep triggered a fresh login, which rotated the user's
+  session and invalidated the older tab's cookie.  Operators with a
+  stricter threat model still get the policy via the env var; the
+  default now matches the personal-use scenario the project is built
+  for.  Test `test_default_policy_allows_concurrent_sessions` locks
+  the contract.
+- **Session cookie name unified to `lm_session` regardless of scheme.**
+  The 0.5.7 cookie split (`__Host-lm_session` over HTTPS,
+  `lm_session` otherwise) was a hardening that depended on the request
+  scheme the server *thought* it had.  Behind a reverse proxy with
+  trusted-proxy headers, the cookie was emitted as `__Host-` but the
+  browser's first request after Set-Cookie didn't always include it,
+  producing the spurious "Failed to load your settings — unauthorized"
+  banners that vanished on manual refresh.  Server now always emits
+  `lm_session` with `HttpOnly` + `SameSite=Strict` + (`Secure` when the
+  request is HTTPS).  The `_parse_session_cookie` fallback still
+  accepts the older `__Host-lm_session` so previously-issued cookies
+  authenticate until expiry.
+
 ## [0.5.8] — 2026-05-18
 
 ### Fixed

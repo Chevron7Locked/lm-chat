@@ -6,9 +6,10 @@ env flag enforces that every fresh login invalidates the user's other
 sessions atomically, so the legitimate user re-logging in kicks any
 attacker-held cookie off the system.
 
-**As of 0.5.7 this is the default** (ASVS V3.3.3, session re-id on privilege
-elevation).  Operators who want multi-device simultaneous sessions opt out
-with ``LM_CHAT_SINGLE_SESSION=false``.
+Default is multi-device (the 0.5.7 default-ON flip was reverted in 0.5.9
+after it surfaced as the dominant cause of "I had to re-login again"
+complaints on personal-use deployments).  Operators with a stricter
+threat model opt in with ``LM_CHAT_SINGLE_SESSION=true``.
 
 These tests assert both modes from end to end.
 """
@@ -67,30 +68,20 @@ def _whoami(base_url: str, cookie: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Default (0.5.7+): single-session ON — second login kills the first
+# Default (0.5.9+): multi-device — concurrent sessions remain valid
 # ---------------------------------------------------------------------------
 
-def test_default_policy_revokes_prior_cookie(make_inproc_server):
-    """Without LM_CHAT_SINGLE_SESSION set, the new (0.5.7+) default rotates."""
-    srv = make_inproc_server()  # LM_CHAT_SINGLE_SESSION unset → default ON
+def test_default_policy_allows_concurrent_sessions(make_inproc_server):
+    """Without LM_CHAT_SINGLE_SESSION set, two logins both stay valid."""
+    srv = make_inproc_server()  # LM_CHAT_SINGLE_SESSION unset → default OFF
     cookie_a = _login(srv.url, ADMIN_USER, ADMIN_PASS)
-    assert _whoami(srv.url, cookie_a) == 200, "first cookie should authorise"
-
     cookie_b = _login(srv.url, ADMIN_USER, ADMIN_PASS)
     assert cookie_a != cookie_b, "second login must produce a new token"
-
-    # Default policy invalidates the older cookie atomically.
-    assert _whoami(srv.url, cookie_a) == 401, (
-        "first cookie should be invalidated under the 0.5.7 default policy"
-    )
+    assert _whoami(srv.url, cookie_a) == 200
     assert _whoami(srv.url, cookie_b) == 200
 
 
-# ---------------------------------------------------------------------------
-# Opt-out: LM_CHAT_SINGLE_SESSION=false → multi-device behaviour preserved
-# ---------------------------------------------------------------------------
-
-def test_opt_out_keeps_concurrent_sessions(make_inproc_server):
+def test_explicit_false_keeps_concurrent_sessions(make_inproc_server):
     """LM_CHAT_SINGLE_SESSION=false: two logins both remain valid."""
     srv = make_inproc_server(env={"LM_CHAT_SINGLE_SESSION": "false"})
     cookie_a = _login(srv.url, ADMIN_USER, ADMIN_PASS)

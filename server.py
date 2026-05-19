@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 from qr import generate_qr_svg
 
-VERSION = "0.5.8"
+VERSION = "0.5.9"
 LMSTUDIO = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_TOKEN = os.environ.get("LMSTUDIO_TOKEN", "")
 PORT = int(os.environ.get("PORT", "3001"))
@@ -62,12 +62,14 @@ _SETUP_TOKEN = os.environ.get("LM_CHAT_SETUP_TOKEN", "").strip()
 
 # --- Session policy ---
 # **Single-session is the default** as of 0.5.7 (ASVS V3.3.3 — session re-id
-# on privilege elevation; OWASP-aligned).  Login rotates the user's other
-# sessions atomically, kicking any parallel device off the moment the
-# legitimate user logs back in.  Operators who want multi-device sessions
-# (e.g. logging in from phone + desktop simultaneously) opt out with
-# ``LM_CHAT_SINGLE_SESSION=false``.  Treats unset as the secure default.
-_SINGLE_SESSION = os.environ.get("LM_CHAT_SINGLE_SESSION", "true").strip().lower() in ("1", "true", "on", "yes")
+# Default is multi-device: every new tab on a personal-use deployment
+# otherwise triggers a re-login (the new tab's login rotates the cookie,
+# invalidating the old tab's session).  Operators with a stricter threat
+# model (public exposure, shared devices) opt in with
+# ``LM_CHAT_SINGLE_SESSION=true``.  The 0.5.7 default-ON flip was too
+# aggressive for the dominant personal-use case and shipped without an
+# operator opt-in — reverted in 0.5.9.
+_SINGLE_SESSION = os.environ.get("LM_CHAT_SINGLE_SESSION", "").strip().lower() in ("1", "true", "on", "yes")
 
 # --- Reverse-proxy trust ---
 # When set, the server trusts ``X-Forwarded-For`` / ``X-Real-IP`` /
@@ -1561,19 +1563,23 @@ class Handler(BaseHTTPRequestHandler):
         return ""
 
     def _set_session_cookie(self, token):
+        # Cookie name is ``lm_session`` regardless of scheme.  The
+        # earlier ``__Host-lm_session`` prefix was a hardening that
+        # depended on Secure + Path=/ + no Domain, but its interaction
+        # with reverse-proxy schemes caused first-request races where
+        # the browser had the cookie set but failed to send it back,
+        # producing "Failed to load your settings — unauthorized"
+        # banners that disappeared on a manual refresh.  Dropping the
+        # prefix removes the ambiguity; ``Secure`` + ``HttpOnly`` +
+        # ``SameSite=Strict`` continue to apply when the request was
+        # HTTPS (or a trusted proxy reports so).
         secure = self._secure_flag()
-        if secure:
-            cookie = f"__Host-lm_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_EXPIRY}; Secure"
-        else:
-            cookie = f"lm_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_EXPIRY}"
-        self.send_header("Set-Cookie", cookie)
+        flags = f"HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_EXPIRY}{secure}"
+        self.send_header("Set-Cookie", f"lm_session={token}; {flags}")
 
     def _clear_session_cookie(self):
         secure = self._secure_flag()
-        if secure:
-            self.send_header("Set-Cookie", "__Host-lm_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0; Secure")
-        else:
-            self.send_header("Set-Cookie", "lm_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+        self.send_header("Set-Cookie", f"lm_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0{secure}")
 
     def _send_security_headers(self, csp=None, referrer="strict-origin-when-cross-origin"):
         self.send_header("X-Frame-Options", "DENY")
