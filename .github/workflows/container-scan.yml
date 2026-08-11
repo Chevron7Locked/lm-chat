@@ -84,11 +84,14 @@ jobs:
           hadolint --version
 
       # ── Install Trivy 0.58.x ──────────────────────────────────────────
+      # Official action instead of `contrib/install.sh` from trivy@main — that
+      # script became unreliable and started failing at the download step
+      # (exit 1 right after resolving v0.58.0) on every run. Pinned to a SHA.
       - name: Install Trivy
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin v0.58.0
-          trivy --version
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.58.0
+          cache: true
 
       # ── Install Dockle v0.4.15 ────────────────────────────────────────
       - name: Install Dockle
