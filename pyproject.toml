@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 [project]
 name = "lmchat"
-version = "1.0.0"
+version = "1.0.1"
 description = "LM Chat — self-hosted browser-native client for LM Studio. FastAPI backend + React 19 SPA. Projects, sub-sessions, adaptive memory, RAG, per-model sampler profiles."
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
@@ -111,6 +111,7 @@ dev = [
 # floors below are the fixed lines. Pinned as constraints rather than direct
 # dependencies because nothing in src/ imports them.
 #   - aiohttp 3.13.5  → 3.14.1 (request smuggling / parser CVEs)
+#   - gitpython 3.1.57 → 3.1.58 (6× GHSA, HIGH/MOD; cosmic-ray's git tree)
 #   - langchain 1.3.2 → 1.3.9 (GHSA-gr75-jv2w-4656)
 #   - pip 26.1.1      → 26.1.2 (PYSEC-2026-196, the installer in the venv)
 #   - pillow 12.2.0    → 12.3.0 (8 PYSEC-2026 CVEs, garak's image-handling tree)
@@ -123,6 +124,7 @@ dev = [
 #     floor is cheap insurance against a future PR flipping it on.
 constraint-dependencies = [
     "aiohttp>=3.14.1",
+    "gitpython>=3.1.58",
     "h2>=4.4.1",
     "langchain>=1.3.9",
     "pip>=26.1.2",

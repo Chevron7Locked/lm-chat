@@ -18,11 +18,13 @@ peerDependencyRules:
 # keeps an API-compatible line.
 #   brace-expansion 2.1.3/5.0.8 → GHSA-rgw5-rvv9-x895 (ReDoS)
 #   fast-uri        3.1.4       → GHSA-7p8r-x3mc-p8w7
-#   js-yaml         4.2.0       → GHSA-52cp-r559-cp3m
+#   js-yaml         4.3.0       → GHSA-5p4m-2wfm-xmqj (HIGH)
+#   nanoid          3.3.16      → GHSA-2v37-7h3g-55p8 (HIGH)
 #   qs              6.15.1      → GHSA-q8mj-m7cp-5q26
 overrides:
   brace-expansion@2: 2.1.4
   brace-expansion@5: 5.0.9
   fast-uri: 3.1.5
-  js-yaml@4: 4.3.0
+  js-yaml@4: 4.3.1
+  nanoid@3: 3.3.17
   qs: 6.15.2
