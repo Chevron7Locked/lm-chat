@@ -1,0 +1,15 @@
+LM Chat
+Copyright 2024-2026 Kevin O'Neill
+
+This product is licensed under the Apache License, Version 2.0 (the "License").
+You may not use this product except in compliance with the License. A copy
+of the License is included as LICENSE in the project root, and may also be
+obtained at http://www.apache.org/licenses/LICENSE-2.0.
+
+Releases prior to LM Chat 0.6.0 (then distributed under the lm-chat name)
+were distributed under the GNU Affero General Public License v3.0
+(AGPL-3.0). Those releases remain available under their original AGPL-3.0
+terms. The license change to Apache-2.0 applies to LM Chat 0.6.0 and
+forward only. The relicensing was preceded by an audit confirming every
+contribution came from the sole author, with no third-party human
+authors or CLAs to reconcile.

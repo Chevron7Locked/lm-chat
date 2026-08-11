@@ -1,0 +1,1151 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Sidebar — warm-future-library material layer stylesheet.
+ *
+ * All spacing uses the semantic grammar:
+ *   glue (4px) → sibling (12px) → group (24px) → chapter (48px)
+ *
+ * Material layers compose via pseudo-elements + background-image stacking.
+ * No background-color overwrites — overlays only.
+ */
+
+/* ── Sidebar shell ─────────────────────────────────────────────────────────── */
+
+.lmchat-sidebar {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Vellum overlay — warm parchment haze on the sidebar surface.
+   Pseudo-element composited on top of --color-surface via soft-light blend.
+   material-breath class (globals.css) gives it a 14s ambient opacity cycle. */
+.lmchat-sidebar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--material-vellum);
+  mix-blend-mode: soft-light;
+  opacity: 0.85;
+  animation: material-breath var(--duration-ambient, 14s) var(--ease-soft)
+    infinite;
+}
+
+/* All sidebar content sits above the vellum overlay. */
+.lmchat-sidebar > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Sidebar header (brand + collapse) ─────────────────────────────────────── */
+/* CHAPTER block — has full breathing room above and below before content. */
+
+.lmchat-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-group) var(--space-sibling-relaxed);
+  border-bottom: 1px solid var(--color-border);
+  min-height: 64px;
+  flex-shrink: 0;
+  gap: var(--space-glue-relaxed);
+}
+
+/* ── Brand link ────────────────────────────────────────────────────────────── */
+
+.lmchat-brand-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed); /* icon ↔ wordmark: glue-relaxed (8px) */
+  text-decoration: none;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  /* 8px vertical padding expands the click area without visual change —
+     the header's min-height absorbs the extra space. */
+  padding: 8px 0;
+  transition: opacity var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-brand-link:hover {
+  opacity: 0.85;
+}
+
+.lmchat-brand-wordmark {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(
+    --fs-h3
+  ); /* 17px — sidebar surface; display scale only at login */
+  line-height: 1; /* collapse leading so box-center == cap-height center;
+                                       otherwise inherited 1.5 lh puts the letterforms
+                                       below the box center and the SVG looks too high */
+  color: var(--color-text);
+  letter-spacing: var(--ls-tight);
+  white-space: nowrap;
+}
+
+/* ── Collapse toggle ───────────────────────────────────────────────────────── */
+
+.lmchat-collapse-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  /* Inherits .lmchat-chevron font scale via the inner span — the
+     button itself just provides the hit area. */
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  margin-left: auto;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-collapse-toggle:hover {
+  color: var(--color-text);
+  background: color-mix(in oklch, var(--color-accent) 8%, transparent);
+}
+
+/* ── New Chat row ──────────────────────────────────────────────────────────── */
+/* GROUP distance below the header: group (24px) = brand→action gap */
+
+.lmchat-new-chat-row {
+  display: flex;
+  gap: var(
+    --space-glue-relaxed
+  ); /* button ↔ incognito toggle: glue-relaxed (8px) */
+  margin: var(--space-group) var(--space-sibling-relaxed) 0;
+  align-items: stretch;
+}
+
+/* Primary CTA — confident copper, not subdued */
+.lmchat-new-chat-btn {
+  flex: 1;
+  min-height: 38px;
+  padding: 0 var(--space-glue-relaxed);
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue); /* icon ↔ text: glue (4px) */
+  background: var(--color-accent-quiet);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--color-accent-text);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-new-chat-btn:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--color-accent) 18%, transparent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text-hover);
+}
+
+.lmchat-new-chat-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  filter: brightness(0.96);
+}
+
+.lmchat-new-chat-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Incognito toggle */
+.lmchat-incognito-toggle {
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-body);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-incognito-toggle--off {
+  background: transparent;
+  border: 1px solid var(--color-border-default);
+  color: var(--color-text-subtle);
+}
+
+.lmchat-incognito-toggle--off:hover {
+  color: var(--color-text-muted);
+  border-color: var(--color-border-strong);
+}
+
+.lmchat-incognito-toggle--on {
+  background: var(--color-accent-fill);
+  border: 1px solid var(--color-accent);
+  color: var(--color-text-on-accent);
+}
+
+/* ── Search / filter input ─────────────────────────────────────────────────── */
+/* GROUP distance from New Chat row: group (24px) */
+
+.lmchat-search-wrap {
+  padding: var(--space-group) var(--space-sibling-relaxed) 0;
+}
+
+/* Search input — "carved into the parchment" */
+.lmchat-search-input {
+  width: 100%;
+  padding: var(--space-glue-relaxed) var(--space-glue-relaxed);
+  background: color-mix(
+    in oklch,
+    var(--color-surface-elevated) 60%,
+    transparent
+  );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  color: var(--color-text);
+  outline: none;
+  box-sizing: border-box;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-search-input::placeholder {
+  color: var(--color-text-subtle);
+}
+
+.lmchat-search-input:focus {
+  border-color: var(--color-accent-border);
+  background: var(--color-surface-elevated);
+  /* emerge on copper — focus ring via global :focus-visible */
+}
+
+.lmchat-search-hint {
+  margin: var(--space-glue) 0 0;
+  padding: 0 var(--space-glue);
+  font-size: var(--fs-micro);
+  color: var(--color-text-subtle);
+  letter-spacing: 0.01em;
+}
+
+/* ── Chat list nav ─────────────────────────────────────────────────────────── */
+/* GROUP-RELAXED distance from search to first section header */
+
+.lmchat-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-group-relaxed) 0 0;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(
+      in oklch,
+      var(--color-border-default) 60%,
+      transparent
+    )
+    transparent;
+}
+
+.lmchat-hint {
+  margin: 0;
+  padding: var(--space-glue-relaxed) var(--space-group);
+  font-size: var(--fs-body);
+  color: var(--color-text-subtle);
+}
+
+/* ── Folder / group header (shelf label) ───────────────────────────────────── */
+/* CHAPTER above (48px), SIBLING-RELAXED (16px) below before first item. */
+
+.lmchat-folder-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: var(--space-chapter); /* chapter above section header */
+  padding-right: var(--space-glue-relaxed);
+}
+
+.lmchat-folder-header-row:first-child {
+  padding-top: 0; /* first group gets no chapter gap — nav already provides group-relaxed */
+}
+
+.lmchat-group-label {
+  margin: 0 0 var(--space-sibling-relaxed) var(--space-sibling-relaxed); /* 16px below → first item */
+  font-family: var(--font-display);
+  font-size: var(--fs-caption); /* 12px — chapter dividers */
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps); /* 0.06em */
+  color: var(--color-text-subtle);
+  line-height: 1;
+}
+
+/* ── Folder CRUD row ───────────────────────────────────────────────────────── */
+
+.lmchat-folder-crud-wrap {
+  padding: var(--space-sibling) var(--space-sibling-relaxed);
+}
+
+/* "+ New folder" button */
+.lmchat-add-folder-btn {
+  width: 100%;
+  min-height: 38px;
+  text-align: left;
+  background: none;
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-glue-relaxed);
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue); /* icon ↔ text: glue (4px) */
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-add-folder-btn:hover {
+  color: var(--color-text-muted);
+  border-color: var(--color-border-strong);
+}
+
+/* Inline folder create/rename forms */
+.lmchat-folder-form {
+  display: flex;
+  gap: var(--space-glue-relaxed);
+  align-items: center;
+}
+
+.lmchat-folder-input {
+  flex: 1;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  color: var(--color-text);
+  outline: none;
+  transition: border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-folder-input:focus {
+  border-color: var(--color-accent-border);
+}
+
+.lmchat-folder-submit {
+  background: var(--color-accent-fill);
+  color: var(--color-text-on-accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-folder-submit:hover {
+  background: var(--color-accent-fill-hover);
+}
+
+.lmchat-folder-submit:active {
+  transform: translateY(1px);
+  filter: brightness(0.96);
+}
+
+/* Folder rename form row */
+.lmchat-folder-rename-row {
+  display: flex;
+  gap: var(--space-glue-relaxed);
+  align-items: center;
+  padding: var(--space-glue-relaxed) var(--space-sibling-relaxed);
+}
+
+/* Folder delete confirm */
+.lmchat-folder-delete-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue-relaxed);
+  padding: var(--space-glue-relaxed) var(--space-sibling-relaxed);
+  background: var(--color-danger-quiet);
+  border-radius: var(--radius-sm);
+  margin: var(--space-glue-relaxed) var(--space-sibling-relaxed);
+}
+
+/* Confirmation prompt body inside the folder-delete row. */
+.lmchat-folder-delete-text {
+  font-size: var(--fs-caption);
+  color: var(--color-text-muted);
+}
+
+.lmchat-folder-delete-actions {
+  display: flex;
+  gap: var(--space-glue-relaxed);
+}
+
+.lmchat-folder-delete-confirm-btn {
+  background: var(--color-danger);
+  color: var(--color-text-on-accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lmchat-folder-delete-cancel-btn {
+  background: transparent;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+/* Folder 3-dot menu — 38×38 tap target */
+.lmchat-folder-menu-btn {
+  background: none;
+  border: none;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--color-text-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0;
+  font-size: var(--fs-body);
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-folder-menu-btn:hover {
+  color: var(--color-text-muted);
+}
+
+.lmchat-folder-menu-dropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 20;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-glue) 0;
+  box-shadow: var(--shadow-md);
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+}
+
+.lmchat-folder-menu-item {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-folder-menu-item:hover {
+  background: color-mix(in oklch, var(--color-accent) 8%, transparent);
+}
+
+/* ── Chat list row ─────────────────────────────────────────────────────────── */
+/* SIBLING spacing (12px) between consecutive rows — use gap on parent. */
+
+.lmchat-chat-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed); /* icon/incognito ↔ title: glue-relaxed */
+  padding: var(--space-sibling) var(--space-sibling) var(--space-sibling)
+    calc(var(--space-sibling-relaxed) + 16px);
+  margin: 0 var(--space-glue) var(--space-glue); /* glue between rows (compact) */
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label); /* 13px — library shelf labels */
+  font-weight: 500;
+  line-height: var(--lh-ui);
+  text-decoration: none;
+  cursor: pointer;
+  overflow: hidden;
+  position: relative;
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart);
+}
+
+/* Active state: copper tint + marginalia dot instead of side-stripe */
+.lmchat-chat-item--active {
+  color: var(--color-accent-text);
+  background: color-mix(in oklch, var(--color-accent) 13%, transparent);
+}
+
+/* Marginalia dot — active indicator in the gutter (no side-stripe).
+   left: 14px keeps it clear of the drag handle to the row's left; size
+   is 6px so it reads well at that position. The top: 50% +
+   translateY(-50%) keeps it geometrically centered against the
+   chat-item's bounding box. */
+.lmchat-chat-item--active::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent-fill);
+  opacity: 1;
+  transition: opacity var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-chat-item--inactive {
+  color: var(--color-text-muted);
+}
+
+/* Hover on inactive rows — use global .lmchat-sidebar-item class for the
+   warm wash (already defined in globals.css). */
+
+.lmchat-chat-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lmchat-chat-meta {
+  font-size: var(--fs-marginalia); /* 12px italic marginalia */
+  font-style: italic;
+  color: var(--color-text-subtle);
+  flex-shrink: 0;
+}
+
+/* Move-to-project kebab — hover-revealed at the right edge of each chat
+   row. Sits inside the row wrapper, opacity 0 by default, fades in on
+   row hover/focus. Width = 0 when hidden so it doesn't steal layout
+   space; pulls right via absolute positioning while visible. */
+.lmchat-chat-row-actions {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-out-quart);
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue, 4px);
+}
+
+/* Reveal on row hover or keyboard focus-within. */
+.lmchat-chat-row-actions:focus-within,
+[role="button"]:hover + .lmchat-chat-item + .lmchat-chat-row-actions,
+.lmchat-chat-item:hover + .lmchat-chat-row-actions,
+*:hover > .lmchat-chat-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Per-row delete button — small, visually quiet until hover.
+   Two-step confirm: first click sets --confirming; second click fires.
+   Reserved-space approach (the chat-item has padding-right ≥ 28px below)
+   means the delete icon never overlaps the title text. */
+.lmchat-chat-row-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  background: color-mix(in oklch, var(--color-surface) 92%, transparent);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-chat-row-delete-btn:hover {
+  color: var(--color-danger, oklch(0.55 0.18 25));
+  background: color-mix(
+    in oklch,
+    var(--color-danger, oklch(0.55 0.18 25)) 12%,
+    var(--color-surface)
+  );
+  border-color: color-mix(
+    in oklch,
+    var(--color-danger, oklch(0.55 0.18 25)) 40%,
+    transparent
+  );
+}
+
+/* Reserve room so the absolute-positioned delete button never sits ON
+   the title text. The chat-item is `flex` with the title at `flex:1` —
+   pad the right edge by 28px so the title's ellipsis terminates BEFORE
+   the icon area. */
+.lmchat-chat-item {
+  padding-right: 28px;
+}
+
+/* Incognito badge icon */
+.lmchat-incognito-badge {
+  font-size: var(--fs-body);
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+/* Drag handle — padding gives a ≥36px tap area on desktop; the ⠿ glyph
+   stays at caption size. */
+.lmchat-drag-handle {
+  position: absolute;
+  left: var(--space-glue-relaxed);
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: var(--fs-caption);
+  color: var(--color-text-subtle);
+  cursor: grab;
+  user-select: none;
+  z-index: 1;
+  /* 8px each side → ≥36px horizontal; 10px each side → ≥36px vertical */
+  padding: 10px 8px;
+}
+
+/* ── Projects entry link (chats-mode, above search bar) ──────────────────── */
+/* Single inline link that opens the Projects pane. Projects is its own
+   corner of the app, not a sidebar section that competes with the
+   chat list. */
+
+.lmchat-projects-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: var(--space-sibling-relaxed) var(--space-sibling) 0
+    var(--space-sibling);
+  min-height: 38px;
+  padding: 6px var(--space-sibling);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-display);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-projects-link:hover {
+  color: var(--color-accent-text);
+  background: color-mix(in oklch, var(--color-accent) 8%, transparent);
+}
+
+.lmchat-projects-link-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.lmchat-projects-link-label {
+  flex: 1;
+}
+
+/* Canonical chevron — every chevron in the app uses this scale
+   (font-size: 14px, opacity 0.6, tight line-height) so the sidebar
+   collapse arrow, Projects-link affordance, back arrows, dropdowns,
+   etc. all read at the same rhythm. */
+.lmchat-chevron {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+.lmchat-projects-link-chevron {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+/* Projects pane body replaces the chat-list nav in projects-mode.
+   Needs the same flex: 1 + overflow rules so the shell rows (library
+   nav strip / stats footer / user menu) stay bottom-anchored —
+   without flex: 1 the bottom items float up. */
+.lmchat-projects-pane-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-group-relaxed) 0 0;
+}
+
+/* ── Library nav — global page links ──────────────────────────────────────── */
+/* Settings + reading rooms; sits between chat list and stats footer. */
+
+.lmchat-library-nav-divider {
+  height: 1px;
+  margin: var(--space-sibling) var(--space-sibling-relaxed) 0;
+  /* Gradient-fade hairline — fades out at both ends */
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--color-border) 20%,
+    var(--color-border) 80%,
+    transparent
+  );
+  flex-shrink: 0;
+}
+
+.lmchat-library-nav {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-glue-relaxed) var(--space-glue);
+  flex-shrink: 0;
+}
+
+/* Horizontal icon-only strip variant. Labels live in title + aria-label
+   tooltips; icons are 16px and the strip sits in one ~32px row so the
+   chat list reclaims the vertical space. */
+.lmchat-library-nav--strip {
+  flex-direction: row;
+  justify-content: space-between;
+  gap: var(--space-glue);
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+}
+
+.lmchat-library-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px; /* icon ↔ label: 8px per spec */
+  min-height: 38px; /* standard button height; was 44px then 36px */
+  padding: 0 var(--space-sibling);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: var(--fs-label); /* 13px */
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-library-nav--strip .lmchat-library-nav-item {
+  /* Icon-only square hit area — same row height as the chat-row so the
+     bottom of the sidebar reads as a single rhythm line. */
+  flex: 1 1 0;
+  justify-content: center;
+  padding: 0;
+  min-height: 32px;
+  gap: 0;
+}
+
+.lmchat-library-nav-item:hover {
+  color: var(--color-accent-text);
+  background: color-mix(in oklch, var(--color-accent) 8%, transparent);
+}
+
+.lmchat-library-nav-item--active {
+  color: var(--color-accent-text);
+  background: color-mix(in oklch, var(--color-accent) 13%, transparent);
+}
+
+.lmchat-library-nav-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: inherit;
+}
+
+.lmchat-library-nav--strip .lmchat-library-nav-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Mobile: ensure 44px tap targets (already set via min-height; confirm here) */
+@media (max-width: 768px) {
+  .lmchat-library-nav-item {
+    min-height: 44px;
+  }
+  .lmchat-library-nav--strip .lmchat-library-nav-item {
+    min-height: 44px;
+  }
+
+  /* Projects link tap target — 38px desktop → 44px touch */
+  .lmchat-projects-link {
+    min-height: 44px;
+  }
+
+  /* New-folder button tap target — 38px desktop → 44px touch */
+  .lmchat-add-folder-btn {
+    min-height: 44px;
+  }
+}
+
+/* ── Stats footer ──────────────────────────────────────────────────────────── */
+/* CHAPTER-RELAXED above (64px implicit via section separator + leather layer).
+   The footer carries --material-leather for a warm bookbinding wash. */
+
+.lmchat-stats-footer {
+  position: relative;
+  padding: var(--space-sibling-relaxed) var(--space-sibling-relaxed);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sibling); /* metadata rows: sibling (12px) */
+  flex-shrink: 0;
+}
+
+/* Compact single-row variant. Inline microcopy, no leather wash, no
+   label uppercase — just a tight ops line. */
+.lmchat-stats-footer--compact {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: var(--space-sibling) var(--space-sibling-relaxed);
+  border-top: 1px solid var(--color-border);
+  font-family: var(--font-display);
+  font-size: var(--fs-micro);
+  color: var(--color-text-subtle);
+}
+
+.lmchat-stats-footer--compact::before {
+  display: none;
+}
+
+.lmchat-stats-token,
+.lmchat-stats-speed {
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.lmchat-stats-sep {
+  opacity: 0.5;
+}
+
+/* Leather layer — warm bookbinding wash distinguishes the ledger from the list. */
+.lmchat-stats-footer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--material-leather);
+  mix-blend-mode: soft-light;
+  border-radius: 0;
+}
+
+.lmchat-stats-footer > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── User menu / footer row ────────────────────────────────────────────────── */
+
+.lmchat-footer-row {
+  padding: var(--space-glue-relaxed) var(--space-sibling-relaxed);
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-glue-relaxed);
+  /* Pins the footer to the visible bottom of the mobile sidebar drawer
+     on short viewports (320×568). The sidebar shell is a flex column;
+     margin-top: auto pushes this row to the bottom even when content
+     is short. */
+  margin-top: auto;
+}
+
+/* Keyboard help `?` button — 38×38 tap target */
+/* pointer:coarse override below lifts to 44px on touch-capable wide viewports */
+.lmchat-help-btn {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  line-height: 1;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-help-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+}
+
+/* ── Collapsed sidebar — book spine ────────────────────────────────────────── */
+
+/* Collapsed header: stack mark + toggle vertically so they don't overlap
+   inside the 48px-wide rail. Padding shrinks to glue so both items fit. */
+.lmchat-sidebar--collapsed .lmchat-sidebar-header {
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: var(--space-glue-relaxed) var(--space-glue);
+  gap: var(--space-glue-relaxed);
+  min-height: 72px;
+}
+
+/* In collapsed state the toggle no longer needs margin-left: auto
+   because the column layout centres both items. */
+.lmchat-sidebar--collapsed .lmchat-collapse-toggle {
+  margin-left: 0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SIDEBAR MOBILE RESPONSIVE (≤768px)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* Sidebar on mobile renders as a fixed drawer. Ensure tap targets are met. */
+
+  /* Chat list items: ensure 44px minimum tap height on mobile. */
+  .lmchat-chat-item {
+    min-height: 44px;
+    padding-top: var(--space-sibling);
+    padding-bottom: var(--space-sibling);
+  }
+
+  /* New chat button: 44px minimum height. */
+  .lmchat-new-chat-btn {
+    min-height: 44px;
+  }
+
+  /* Search input: bump font to 16px to prevent iOS zoom on focus. */
+  .lmchat-search-input {
+    font-size: 1rem; /* 16px — iOS will not zoom if font ≥ 16px */
+    min-height: 44px;
+  }
+
+  /* Collapse toggle: 44×44 tap target. */
+  .lmchat-collapse-toggle {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* Folder menu button: bump to 44px tap target (HIG minimum). */
+  .lmchat-folder-menu-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* Footer help button: bump to 44px tap target (HIG minimum). */
+  .lmchat-help-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* Account avatar button in UserMenu is 36×36 inline; override to
+     44×44. UserMenu.tsx uses inline styles so we target the
+     data-testid attribute. */
+  [data-testid="user-menu-avatar"] {
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  /* Incognito toggle: match new-chat height. */
+  .lmchat-incognito-toggle {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  /* Stats footer: explicit padding-bottom so the footer content clears the
+     safe-area on notched devices and doesn't get clipped by the home indicator. */
+  .lmchat-stats-footer {
+    padding-bottom: max(
+      var(--space-sibling-relaxed),
+      env(safe-area-inset-bottom, 0px)
+    );
+  }
+}
+
+/* ── pointer: coarse — sidebar touch lifts ───────────────────────────────────
+   The 38px help button and 36px footer row buttons are below the HIG 44px
+   floor on touch-capable wide viewports (iPad + Magic Keyboard, Surface). */
+@media (pointer: coarse) {
+  .lmchat-help-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* New chat + Projects link: 38px desktop → 44px on touch */
+  .lmchat-new-chat-btn,
+  .lmchat-projects-link {
+    min-height: 44px;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MOBILE DRAWER (slide-in pattern)
+   The JS shell (mobileSidebarShellStyle) positions the outer fixed container;
+   these classes handle the INNER sidebar presentation specifics.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Mobile drawer header — brand wordmark + close button. 64px height,
+   group (24px) side padding, --fs-h2 wordmark. The desktop collapse
+   toggle is hidden; instead a full 44×44 close button sits at the
+   top-right of the drawer. */
+.lmchat-drawer-header-mobile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sibling) var(--space-group);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  min-height: 64px;
+}
+
+/* Brand logo + wordmark flex row inside the drawer header */
+.lmchat-drawer-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed); /* 8px between logo and wordmark */
+}
+
+/* Close button — 44×44 touch target, top-right of drawer */
+.lmchat-drawer-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-h2); /* 20px icon glyph — maps 1.25rem to nearest token */
+  line-height: 1;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-drawer-close-btn:hover {
+  color: var(--color-text);
+}
+
+/* ── Chat list skeleton — shown during initial useChatsDirect fetch ──────── */
+
+.lmchat-chat-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue-relaxed);
+  padding: var(--space-group-relaxed) var(--space-group);
+}
+
+.lmchat-chat-skeleton__row {
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--color-text) 7%, transparent);
+  animation: lmchat-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+/* Vary widths — avoids uniform-block look */
+.lmchat-chat-skeleton__row:nth-child(1) {
+  width: 82%;
+  animation-delay: 0s;
+}
+.lmchat-chat-skeleton__row:nth-child(2) {
+  width: 68%;
+  animation-delay: 0.1s;
+}
+.lmchat-chat-skeleton__row:nth-child(3) {
+  width: 75%;
+  animation-delay: 0.2s;
+}
+.lmchat-chat-skeleton__row:nth-child(4) {
+  width: 55%;
+  animation-delay: 0.3s;
+}
+.lmchat-chat-skeleton__row:nth-child(5) {
+  width: 88%;
+  animation-delay: 0.4s;
+}
+
+@keyframes lmchat-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-sidebar::before {
+    animation: none;
+  }
+  .lmchat-stats-footer::before {
+    opacity: 1;
+  }
+  .lmchat-chat-skeleton__row {
+    animation: none;
+    opacity: 0.5;
+  }
+  .lmchat-chat-item,
+  .lmchat-new-chat-btn,
+  .lmchat-collapse-toggle,
+  .lmchat-search-input,
+  .lmchat-brand-link,
+  .lmchat-folder-submit {
+    transition: none;
+    transform: none;
+    filter: none;
+  }
+}

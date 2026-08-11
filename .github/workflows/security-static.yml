@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: Apache-2.0
+# Security Static SAST + SCA — Semgrep + osv-scanner
+# PLAN v3 §1F extension to the existing .L3-passed pipeline.
+#
+# Runs on every push/PR to the main branch.
+# Pinned tool versions for reproducibility:
+#   - semgrep      1.96.x
+#   - osv-scanner  2.0.x
+#
+# Graceful-skip: if neither tool is on PATH locally, both are installed
+# in CI via the workflow bootstrap. This workflow only triggers on path
+# patterns relevant to SAST/SCA to avoid unnecessary runs.
+
+name: security-static
+
+on:
+  push:
+    branches: [v1, main]
+    paths:
+      - 'src/lmchat/**'
+      - 'web/src/**'
+      - 'web/pnpm-lock.yaml'
+      - 'uv.lock'
+      - 'security/semgrep/**'
+      - 'scripts/security-static.sh'
+      - '.github/workflows/security-static.yml'
+      - 'Makefile'
+      - 'tools/junit_from_semgrep.py'
+      - 'tools/junit_from_osv.py'
+      - 'tools/combine_l0_junit.py'
+      - '.pre-commit-config.yaml'
+  pull_request:
+    branches: [v1, main]
+    paths:
+      - 'src/lmchat/**'
+      - 'web/src/**'
+      - 'web/pnpm-lock.yaml'
+      - 'uv.lock'
+      - 'security/semgrep/**'
+      - 'scripts/security-static.sh'
+      - '.github/workflows/security-static.yml'
+      - 'Makefile'
+      - 'tools/junit_from_semgrep.py'
+      - 'tools/junit_from_osv.py'
+      - 'tools/combine_l0_junit.py'
+      - '.pre-commit-config.yaml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI: true
+
+jobs:
+  security-static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Python + uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13'
+          enable-cache: true
+          cache-suffix: security-static
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl
+
+      - name: Install semgrep (pinned 1.96.x)
+        run: |
+          pip install 'semgrep>=1.96,<1.97'
+          semgrep --version
+
+      - name: Install osv-scanner (pinned 2.0.x)
+        run: |
+          # osv-scanner binary install via GitHub releases.
+          # v2 release assets dropped the version from the filename
+          # (osv-scanner_linux_amd64, not osv-scanner_2.0.0_linux_amd64).
+          OSV_VERSION="2.0.0"
+          curl -sSL \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64" \
+            -o /usr/local/bin/osv-scanner
+          chmod +x /usr/local/bin/osv-scanner
+          osv-scanner --version
+
+      - name: Run security-static.sh (CI mode)
+        run: |
+          bash scripts/security-static.sh
+
+      - name: Upload Semgrep SARIF artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: semgrep-sarif
+          path: target/gates/semgrep-*.sarif
+          retention-days: 14
+
+      - name: Upload JUnit XML artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-static-junit
+          path: |-
+            target/gates/L*-semgrep-*.xml
+            target/gates/L*-osv-*.xml
+          retention-days: 14
+
+      - name: Upload OSV JSON artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: osv-scanner-json
+          path: target/gates/osv-scanner.json
+          retention-days: 14

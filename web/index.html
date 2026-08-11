@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>LM Chat</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- Preload the four most-used faces so first paint avoids FOUT.
+         crossorigin is required for font preloads even same-origin.
+         - HankenGrotesk-Regular: body/UI text (weight 400)
+         - HankenGrotesk-SemiBold: buttons, labels, active nav (weight 600)
+         - HubotSans-SemiBold: display headings (welcome, settings h1)
+         - CommitMono-Regular: code blocks + streaming caret (visible immediately) -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/HankenGrotesk-Regular.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/HankenGrotesk-SemiBold.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/HubotSans-SemiBold.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/CommitMono-Regular.woff2" />
+    <!-- Phase 21 audit P3: dual theme-color for dark/light OS preference. -->
+    <meta name="theme-color" content="#1b1814" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#fdf9f3" media="(prefers-color-scheme: light)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+    <!-- Description + Open Graph + Twitter card for repo social previews
+         (GitHub, Mastodon, Bluesky, Slack link unfurls, etc.). The
+         og:image is the canonical empty-state shot served from the v1
+         branch raw asset path so the preview tracks the public README. -->
+    <meta name="description" content="LM Chat — the browser-native client LM Studio should ship with. Projects, sub-sessions, adaptive memory, browser RAG. Apache-2.0, self-hosted." />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="LM Chat" />
+    <meta property="og:description" content="The browser-native client LM Studio should ship with. Projects, sub-sessions, adaptive memory, browser RAG. Apache-2.0, self-hosted." />
+    <meta property="og:image" content="https://raw.githubusercontent.com/Chevron7Locked/lm-chat/v1/screenshots/v1/01-empty-state-dark.png" />
+    <meta property="og:url" content="https://github.com/Chevron7Locked/lm-chat" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="LM Chat" />
+    <meta name="twitter:description" content="The browser-native client LM Studio should ship with. Apache-2.0, self-hosted." />
+    <meta name="twitter:image" content="https://raw.githubusercontent.com/Chevron7Locked/lm-chat/v1/screenshots/v1/01-empty-state-dark.png" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

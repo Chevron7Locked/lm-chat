@@ -1,0 +1,344 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Toast — Ambient Bleed
+ *
+ * The surface fades to nothing on the right — a warm atmospheric wash, not
+ * a box. Variant color is a directional radial haze behind the type. Type is
+ * the sole focal device: mono-uppercase category label, Hubot Sans display
+ * title, body below. The leading dot (6px colored circle) is the only variant
+ * mark. Action is plain text (no button chrome).
+ *
+ * Forbidden: backdrop-filter blur, hard right/bottom edges, colored border
+ * box, bouncy easing, layout-animated properties.
+ */
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   TOAST CONTAINER — fixed bottom-right stack
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.toast-container {
+  position: fixed;
+  /* Above the composer footer (60px) + group gap */
+  bottom: calc(var(--space-group, 24px) + 60px);
+  right: var(--space-group, 24px);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  /* toast → toast: SIBLING (12px) */
+  gap: var(--space-sibling);
+  pointer-events: none;
+}
+
+/* Pointer-event wrapper per toast */
+.toast-item-wrap {
+  pointer-events: auto;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   AMBIENT BLEED — base toast
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/*
+ * Minimal containment. Hard left/top edges, dissolves right and bottom.
+ * Variant color appears as a tinted atmospheric haze behind the text.
+ * No border-right. No border-bottom. No shadow box.
+ */
+.toast-item {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 32px 14px 16px;
+  /* Fades to nothing on the right — no hard right edge */
+  background:
+    /* Variant atmospheric wash from the left */
+    radial-gradient(
+      ellipse 80% 120% at -10% 50%,
+      var(--toast-haze),
+      transparent 65%
+    ),
+    /* Base surface: fades right */
+    linear-gradient(
+        to right,
+        color-mix(in oklch, var(--color-surface-elevated) 92%, transparent) 0%,
+        color-mix(in oklch, var(--color-surface-elevated) 60%, transparent) 55%,
+        transparent 100%
+      );
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  /* Subtle top + left hairline only — no right or bottom border */
+  border-top: 1px solid
+    color-mix(
+      in oklch,
+      var(--color-border, oklch(0.3 0.012 66)) 60%,
+      transparent
+    );
+  border-left: 1px solid
+    color-mix(
+      in oklch,
+      var(--color-border, oklch(0.3 0.012 66)) 40%,
+      transparent
+    );
+  border-right: none;
+  border-bottom: none;
+  overflow: visible;
+  min-width: 240px;
+  max-width: 360px;
+  /* Entrance: opacity 0→1 + translateY(4px)→0 */
+  animation: toast-in var(--duration-base, 200ms)
+    var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+
+/* Slide-out class applied by JS before removal */
+.toast-item--exiting {
+  animation: toast-out 150ms
+    var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1)) both;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+
+/* ── Variant haze tokens ─────────────────────────────────────────────────────── */
+
+.toast-item--info {
+  --toast-haze: color-mix(in oklch, var(--color-accent) 18%, transparent);
+}
+.toast-item--success {
+  --toast-haze: color-mix(in oklch, var(--color-success) 16%, transparent);
+}
+.toast-item--warning {
+  --toast-haze: color-mix(in oklch, var(--color-warning) 14%, transparent);
+}
+.toast-item--error {
+  --toast-haze: color-mix(in oklch, var(--color-danger) 16%, transparent);
+}
+
+/* ── Leading dot — variant indicator ────────────────────────────────────────── */
+
+.toast-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--toast-dot-color);
+  margin-top: 5px;
+  opacity: 0.85;
+}
+
+.toast-item--info .toast-dot {
+  --toast-dot-color: var(--color-accent);
+}
+.toast-item--success .toast-dot {
+  --toast-dot-color: var(--color-success);
+}
+.toast-item--warning .toast-dot {
+  --toast-dot-color: var(--color-warning);
+}
+.toast-item--error .toast-dot {
+  --toast-dot-color: var(--color-danger);
+}
+
+/* ── Body ────────────────────────────────────────────────────────────────────── */
+
+.toast-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Mono-uppercase category label — variant color, low opacity */
+.toast-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption, 0.75rem);
+  font-weight: 400;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--toast-dot-color);
+  line-height: 1.2;
+  opacity: 0.8;
+}
+
+/* ×N repeat badge — same variant color as the label, kept quiet. Appears
+   inline after the category label only when a toast coalesces (count > 1). */
+.toast-count {
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* Hubot Sans display title */
+.toast-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-h3, 1.0625rem);
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+/* Body text below title */
+.toast-message {
+  font-family: var(--font-sans);
+  font-size: var(--fs-label, 0.8125rem);
+  font-weight: 400;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+/* When there is no title, the message is the sole focal element */
+.toast-message--solo {
+  font-size: var(--fs-body, 0.875rem);
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+/* ── Action row ──────────────────────────────────────────────────────────────── */
+
+.toast-action-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+/* Plain text action — accent color, no bg/border */
+.toast-action {
+  font-family: var(--font-display);
+  font-size: var(--fs-label, 0.8125rem);
+  font-weight: 600;
+  color: var(--color-accent-text, var(--color-accent));
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  transition: color var(--duration-fast, 120ms)
+    var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1));
+}
+
+.toast-action:hover {
+  color: var(--color-accent);
+}
+
+/* ── Dismiss — plain text style ──────────────────────────────────────────────── */
+
+.toast-dismiss {
+  flex-shrink: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption, 0.75rem);
+  color: var(--color-text-subtle);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  /* WCAG 2.5.5 minimum touch target */
+  min-width: 32px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--duration-fast, 120ms)
+    var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1));
+}
+
+.toast-dismiss:hover {
+  color: var(--color-text-muted);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   REDUCED MOTION
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── pointer:coarse — touch lift for dismiss button ─────────────
+   Dismiss is 32px at desktop. Lift to 44px on any touch-input device. */
+@media (pointer: coarse) {
+  .toast-dismiss {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-item,
+  .toast-item--exiting {
+    animation: none;
+  }
+
+  .toast-action,
+  .toast-dismiss {
+    transition: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MOBILE (≤768px)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* Toasts span 16px from each edge, sit above dock + composer + safe-area.
+     The keyboard-inset-fallback var pushes them up further when the soft
+     keyboard is open.
+
+     Ambient Bleed is a desktop idiom — on a phone it has no corner to anchor
+     in and the column-width transparency lets page text read straight
+     through it. Mobile drops the bleed for a CONTAINED, fully-opaque card so
+     content never shows through. The dot + label + ×N + title + body type
+     treatment is unchanged; only the SURFACE differs from desktop. */
+  .toast-container {
+    right: var(--space-sibling-relaxed, 16px);
+    left: var(--space-sibling-relaxed, 16px);
+    bottom: max(
+      calc(160px + env(safe-area-inset-bottom, 0px)),
+      calc(160px + var(--keyboard-inset-fallback, 0px))
+    );
+  }
+
+  .toast-item {
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    /* Even right padding now that there's no rightward dissolve to clear. */
+    padding: 14px 16px;
+    /* SOLID surface — fully opaque, no fade, no see-through wash. Override
+       the desktop layered gradients outright. The opaque fill lives on
+       `background-color` (so it reads as a genuine alpha-1 color, not a
+       gradient layer), and the variant `--toast-haze` (a semi-transparent
+       tint, already set per-variant above) rides on top via
+       `background-image` as a quiet inset wash — brand color without
+       re-introducing any transparent area. */
+    background-color: var(--color-surface-elevated);
+    background-image: linear-gradient(var(--toast-haze), var(--toast-haze));
+    /* Contained card: full border + elevation shadow for clear separation
+       from whatever sits behind it. */
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+  }
+
+  /* Dismiss button: raise to 44px tap target on mobile (HIG minimum). */
+  .toast-dismiss {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

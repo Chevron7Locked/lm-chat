@@ -1,0 +1,19 @@
+node_modules/
+dist/
+# src/types/api.ts is generated (openapi-typescript from docs/api/openapi.yaml via
+# `pnpm codegen`) but is committed, not ignored, so a fresh clone type-checks without
+# regenerating it (regeneration needs the openapi.yaml spec, which lives in internal docs/).
+.vite/
+playwright-report/
+test-results/
+coverage/
+*.tsbuildinfo
+*.log
+
+# Stryker mutation-testing sandboxes
+.stryker-tmp/
+# Playwright runtime artifacts
+test-results/
+
+# Lighthouse CI run artifacts
+.lighthouseci/

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lmchat.local/schemas/sub-error-envelope",
+  "title": "sub.error envelope",
+  "description": "Canonical shape of the sub.error SSE event payload emitted by _sub_session_sse. Both BE pytest and FE vitest validate emitted payloads against this schema.",
+  "type": "object",
+  "required": ["code", "message"],
+  "additionalProperties": true,
+  "properties": {
+    "code": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Machine-readable error code. Must be non-empty."
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable error description. Must be non-empty."
+    },
+    "hint": {
+      "type": ["string", "null"],
+      "description": "Optional extra guidance for the user or operator."
+    },
+    "tally": {
+      "type": "object",
+      "description": "Optional per-event-type count map (string key, integer value).",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "accumulated_chars": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional count of content characters received before the error."
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "Optional flag: true when partial content was delivered before the error."
+    }
+  }
+}

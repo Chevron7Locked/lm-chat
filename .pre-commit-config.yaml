@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+# Pre-commit hooks for lm-chat.
+# PLAN v3 §1F: adds semgrep (SAST) to existing gitleaks (secrets).
+#
+# Install:
+#   pre-commit install
+#   pre-commit run --all-files   (first-time full run)
+#
+# See https://pre-commit.com for docs.
+
+repos:
+  # Secret scanning — gitleaks (existing repo convention)
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.27.2
+    hooks:
+      - id: gitleaks
+        args:
+          - --config=.gitleaks.toml
+          - --redact
+          - --staged
+
+  # SAST — semgrep OSS (PLAN v3 §1F)
+  - repo: https://github.com/semgrep/semgrep
+    rev: v1.96.1
+    hooks:
+      - id: semgrep
+        name: semgrep-python
+        description: "Semgrep SAST for Python (lmchat rules)"
+        args:
+          - --config=security/semgrep/lmchat.yml
+          - --skip-unknown-extensions
+        types: [python]
+        files: ^src/lmchat/
+      - id: semgrep
+        name: semgrep-javascript
+        description: "Semgrep SAST for JavaScript/TypeScript"
+        args:
+          - --config=p/javascript
+          - --config=p/typescript
+          - --config=p/react
+          - --config=p/owasp-top-ten
+          - --skip-unknown-extensions
+        types: [javascript, ts, tsx]
+        files: ^web/src/

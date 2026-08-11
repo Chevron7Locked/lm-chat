@@ -1,0 +1,41 @@
+{"draft_a": "The capital of France is Paris.", "draft_b": "Paris is the capital city of France.", "equivalent": true}
+{"draft_a": "12 multiplied by 8 equals 96.", "draft_b": "Twelve times eight is 96.", "equivalent": true}
+{"draft_a": "Water boils at 100 degrees Celsius at sea level.", "draft_b": "At sea level, water reaches its boiling point at 100°C.", "equivalent": true}
+{"draft_a": "Python is a high-level programming language.", "draft_b": "Python is a high-level, interpreted programming language.", "equivalent": true}
+{"draft_a": "The Sun is approximately 93 million miles from Earth.", "draft_b": "Earth is roughly 93 million miles away from the Sun on average.", "equivalent": true}
+{"draft_a": "Mount Everest is the tallest mountain on Earth.", "draft_b": "The highest mountain in the world is Mount Everest.", "equivalent": true}
+{"draft_a": "Photosynthesis converts sunlight into chemical energy in plants.", "draft_b": "Plants use photosynthesis to turn light from the sun into stored energy.", "equivalent": true}
+{"draft_a": "The Pacific Ocean is the largest ocean on Earth.", "draft_b": "Earth's biggest ocean is the Pacific.", "equivalent": true}
+{"draft_a": "Shakespeare wrote Hamlet around 1600.", "draft_b": "Hamlet was authored by William Shakespeare circa 1600.", "equivalent": true}
+{"draft_a": "Light travels at approximately 299,792 kilometers per second.", "draft_b": "The speed of light is about 299,792 km/s in a vacuum.", "equivalent": true}
+{"draft_a": "DNA stands for deoxyribonucleic acid.", "draft_b": "Deoxyribonucleic acid is what DNA stands for.", "equivalent": true}
+{"draft_a": "The Great Wall of China was built over many centuries.", "draft_b": "China's Great Wall was constructed over the course of several centuries.", "equivalent": true}
+{"draft_a": "An octopus has eight arms.", "draft_b": "Octopuses possess eight arms.", "equivalent": true}
+{"draft_a": "The square root of 144 is 12.", "draft_b": "12 is the square root of 144.", "equivalent": true}
+{"draft_a": "Albert Einstein developed the theory of relativity.", "draft_b": "The theory of relativity was developed by Einstein.", "equivalent": true}
+{"draft_a": "JavaScript runs in web browsers.", "draft_b": "Web browsers execute JavaScript code.", "equivalent": true}
+{"draft_a": "World War II ended in 1945.", "draft_b": "1945 marked the end of the Second World War.", "equivalent": true}
+{"draft_a": "A triangle has three sides.", "draft_b": "Triangles have exactly three sides.", "equivalent": true}
+{"draft_a": "Mercury is the closest planet to the Sun.", "draft_b": "The Sun's nearest planet is Mercury.", "equivalent": true}
+{"draft_a": "The mitochondrion is the powerhouse of the cell.", "draft_b": "Mitochondria are often called the cell's powerhouses.", "equivalent": true}
+{"draft_a": "Honey never spoils when stored properly.", "draft_b": "Properly stored honey has an indefinite shelf life.", "equivalent": true}
+{"draft_a": "The Mona Lisa was painted by Leonardo da Vinci.", "draft_b": "Leonardo da Vinci painted the Mona Lisa.", "equivalent": true}
+{"draft_a": "A year on Mars is about 687 Earth days.", "draft_b": "Mars takes approximately 687 Earth days to orbit the Sun.", "equivalent": true}
+{"draft_a": "Carbon has the atomic number 6.", "draft_b": "The atomic number of carbon is six.", "equivalent": true}
+{"draft_a": "The capital of France is Paris.", "draft_b": "I don't know.", "equivalent": false}
+{"draft_a": "12 multiplied by 8 equals 96.", "draft_b": "96", "equivalent": false}
+{"draft_a": "Water boils at 100 degrees Celsius at sea level.", "draft_b": "Ice melts at 0 degrees Celsius.", "equivalent": false}
+{"draft_a": "Python is a high-level programming language.", "draft_b": "Snakes are reptiles.", "equivalent": false}
+{"draft_a": "Mount Everest is the tallest mountain on Earth.", "draft_b": "The Mariana Trench is the deepest part of the ocean.", "equivalent": false}
+{"draft_a": "Shakespeare wrote Hamlet around 1600.", "draft_b": "Charles Dickens wrote A Tale of Two Cities.", "equivalent": false}
+{"draft_a": "The square root of 144 is 12.", "draft_b": "The cube root of 27 is 3.", "equivalent": false}
+{"draft_a": "Albert Einstein developed the theory of relativity.", "draft_b": "Isaac Newton formulated the laws of motion.", "equivalent": false}
+{"draft_a": "World War II ended in 1945.", "draft_b": "The American Civil War ended in 1865.", "equivalent": false}
+{"draft_a": "A triangle has three sides.", "draft_b": "A hexagon has six sides.", "equivalent": false}
+{"draft_a": "Mercury is the closest planet to the Sun.", "draft_b": "Neptune is the farthest planet from the Sun.", "equivalent": false}
+{"draft_a": "Honey never spoils when stored properly.", "draft_b": "Milk spoils within a few days if not refrigerated.", "equivalent": false}
+{"draft_a": "The Mona Lisa was painted by Leonardo da Vinci.", "draft_b": "Starry Night was painted by Vincent van Gogh.", "equivalent": false}
+{"draft_a": "An octopus has eight arms.", "draft_b": "A spider has eight legs.", "equivalent": false}
+{"draft_a": "DNA stands for deoxyribonucleic acid.", "draft_b": "RNA is single-stranded nucleic acid.", "equivalent": false}
+{"draft_a": "Light travels at approximately 299,792 kilometers per second.", "draft_b": "Sound travels at about 343 meters per second in air.", "equivalent": false}
+{"draft_a": "Carbon has the atomic number 6.", "draft_b": "Oxygen has the atomic number 8.", "equivalent": false}

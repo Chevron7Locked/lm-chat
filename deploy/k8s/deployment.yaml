@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lmchat
+  labels:
+    app: lmchat
+spec:
+  # Single replica — clustering deferred per ADR-009
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lmchat
+  template:
+    metadata:
+      labels:
+        app: lmchat
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 0
+      containers:
+        - name: lmchat
+          image: lmchat:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: DATABASE_URL
+              value: "sqlite+aiosqlite:////data/lmchat.db"
+            # LM Studio base URL — REQUIRED, no working default in
+            # cluster context.  Set this to your cluster's actual
+            # reachable LM Studio host:
+            #   - If LM Studio runs on a node: http://<node-ip>:1234
+            #     (or use a NodePort Service)
+            #   - If LM Studio runs in another pod/namespace:
+            #     http://lmstudio.<namespace>.svc.cluster.local:1234
+            #   - If LM Studio runs OUTSIDE the cluster: use the
+            #     reachable hostname or expose via ExternalName
+            # The placeholder below is INTENTIONALLY invalid. Note that
+            # /readyz no longer gates on LM Studio reachability (see
+            # readinessProbe note below), so leaving this unset will NOT
+            # fail readiness — it will just make chat/model features error
+            # until you set it to a reachable LM Studio host.
+            - name: LM_STUDIO_BASE_URL
+              value: "http://INVALID-SET-ME:1234"
+          envFrom:
+            - secretRef:
+                name: lmchat-secrets
+                optional: true
+          # livenessProbe on /healthz (always 200) — this is what triggers
+          # container restarts. Never point it at /readyz: readiness (DB +
+          # session-store reachability) is a Service-routing concern, not
+          # a process-liveness one — a transient DB hiccup shouldn't
+          # restart an otherwise-healthy process.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # readinessProbe on /readyz — gates Service traffic routing, not
+          # restarts. /readyz gates on DB + session-store reachability
+          # ONLY; LM Studio reachability is probed and reported in the
+          # response body (checks.lm_studio / degraded) for observability
+          # but never fails readiness. That means with replicas: 1 (see
+          # above), the pod is pulled from Service endpoints only on a
+          # real DB/session-store outage — an admin closing LM Studio
+          # (routine for this local-first, single-admin app) leaves the
+          # whole app reachable; only chat/model features degrade.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: lmchat-data

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lmchat-data
+  labels:
+    app: lmchat
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # Remove storageClassName to use the cluster default, or set explicitly:
+  # storageClassName: standard

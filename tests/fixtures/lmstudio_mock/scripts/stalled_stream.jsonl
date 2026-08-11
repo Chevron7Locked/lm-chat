@@ -1,0 +1,2 @@
+{"event": "chat.start", "data": {"type": "chat.start", "model_instance_id": "mock-instance", "response_id": "mock-resp-005"}, "delay": 0.01}
+{"event": "_infinite_sleep", "data": {}, "delay": 60, "_infinite_sleep": true}

@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: Apache-2.0
+# OpenSSF Scorecard — security best-practices scoring for the lm-chat repo.
+# Runs weekly on Monday + on every push to main.
+# Results publish to GitHub's security tab (SARIF upload).
+# Reference: https://github.com/ossf/scorecard-action
+name: OpenSSF Scorecard
+
+on:
+  schedule:
+    # Weekly on Monday at 06:15 UTC.
+    - cron: "15 6 * * 1"
+  push:
+    branches:
+      - main
+
+permissions:
+  # Required for reading the repository contents.
+  contents: read
+  # Required for SARIF upload to GitHub Security tab.
+  security-events: write
+  # Required by scorecard to read GitHub Actions results.
+  actions: read
+  # Required to read the repo's identity.
+  id-token: write
+
+jobs:
+  scorecard:
+    name: OpenSSF Scorecard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@v2.4.1
+        with:
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload Scorecard results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scorecard-results.sarif

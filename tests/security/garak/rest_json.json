@@ -1,0 +1,35 @@
+{
+  "_comment_1": "garak.generators.rest.RestGenerator config for the JSON (non-streaming) path.",
+  "_comment_2": "lm-chat does NOT expose a non-streaming /v1/chat/completions endpoint;",
+  "_comment_3": "the only LLM-input surface is the SSE endpoint at POST /api/chat/stream",
+  "_comment_4": "(see src/lmchat/routes/streaming.py). Since there's no non-streaming",
+  "_comment_5": "endpoint to point this generator at, the L7 Makefile recipe skips this",
+  "_comment_6": "config and emits a normalised JUnit <skipped> entry pointing at this",
+  "_comment_7": "file's notes instead.",
+  "_comment_8": "If/when an OpenAI-shape proxy endpoint is added,",
+  "_comment_9": "fill in 'uri' + 'req_template_json_object' below and remove the skip.",
+
+  "rest": {
+    "RestGenerator": {
+      "name": "lmchat-json",
+      "uri": "http://127.0.0.1:18001/api/chat/completions",
+      "method": "post",
+      "headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      "req_template_json_object": {
+        "model": "qwen3-8b",
+        "messages": [
+          {"role": "user", "content": "$INPUT"}
+        ],
+        "stream": false
+      },
+      "response_json": true,
+      "response_json_field": "$.choices[0].message.content",
+      "request_timeout": 60,
+
+      "_note": "Endpoint above does NOT exist on lm-chat. This config is kept as a placeholder for a future OpenAI-compat proxy. L7 Makefile recipe skips this path with a JUnit <skipped> entry."
+    }
+  }
+}

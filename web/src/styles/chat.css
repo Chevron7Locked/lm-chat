@@ -1,0 +1,3101 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Chat — warm-future-library material layer stylesheet.
+ *
+ * Covers: Chat shell, message area, top bar, follow-up chips,
+ * subchat divider, empty state, confirm dialog, mobile dock.
+ *
+ * All spacing uses a semantic grammar:
+ *   glue (4px) → sibling (12px) → group (24px) → chapter (48px)
+ *
+ * Material layers compose via pseudo-elements + background-image stacking.
+ * No backdrop-filter. No border-left/right ≥ 2px. No gradient text.
+ * No bouncy easing. No layout-animated properties.
+ */
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MESSAGE AREA — the reading room canvas
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Message area — transparent so the body atmospheric gradient shows through.
+   Gap grammar: GROUP (24px) between turns — enough breath to read turns as
+   distinct but not so wide they feel disconnected. */
+.lmchat-messages-area {
+  flex: 1;
+  overflow-y: auto;
+  /* Keep iOS rubber-band scroll inside the message list — without this the
+     overscroll bleeds to the page and the whole shell rubber-bands, making
+     the header/composer look like they move independently of the messages. */
+  overscroll-behavior: contain;
+  padding: var(--space-group) var(--space-group-relaxed);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-group); /* GROUP between every conversation turn */
+  width: 100%;
+  max-width: var(--max-chat);
+  margin-inline: auto;
+  /* Transparent: canvas warmth bleeds through */
+  background: transparent;
+  /* Brand-aligned scrollbar — thin track on Windows/Linux; auto-hidden on Mac */
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(
+      in oklch,
+      var(--color-border-default) 70%,
+      transparent
+    )
+    transparent;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MESSAGE ROW — positioning + entrance animation
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Message row — flex column, direction by role (handled inline for user/assistant).
+   Entrance: translateY(12px → 0) + opacity 0 → 1. NO layout-animate properties. */
+.lmchat-message-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(
+    --space-glue-relaxed
+  ); /* GLUE-RELAXED (8px) between parts of same turn */
+  padding: 0;
+  contain: layout style;
+}
+
+/* Role-specific alignment — user messages right, all others left */
+.lmchat-message-row[data-message-role="user"] {
+  align-items: flex-end;
+}
+.lmchat-message-row[data-message-role="assistant"],
+.lmchat-message-row[data-message-role="system"],
+.lmchat-message-row[data-message-role="tool"] {
+  align-items: flex-start;
+}
+
+/* Spacing grammar between message types:
+   user → assistant gap: GROUP-RELAXED (32px) — the answer needed to breathe.
+   assistant → user gap: GROUP (24px) — standard turn separation.
+   This uses adjacent sibling selectors on role attributes. */
+.lmchat-message-row[data-message-role="assistant"]
+  + .lmchat-message-row[data-message-role="user"] {
+  margin-top: var(
+    --space-group-relaxed
+  ); /* 32px: assistant answer breathes before next user msg */
+}
+
+/* ── Message arrival choreography ───────────────────────────────
+   Replace the flat opacity-only entrance with a translateY(12px → 0) fade.
+   Non-first messages: 600ms ease-out-expo. GPU-composited (transform+opacity).
+   First assistant message (CSS :first-of-type): 900ms,
+   slightly more present — "the room is now answering you." */
+.lmchat-message-row {
+  animation: msg-arrive 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+  position: relative; /* needed for marginalia dot ::before */
+}
+
+/* First assistant message in the area: more pronounced entrance. */
+.lmchat-messages-area
+  .lmchat-message-row[data-message-role="assistant"]:first-of-type {
+  animation: msg-arrive-first 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Suppress entrance + marginalia animations on the message that just finished
+   streaming — its streaming bubble transitions in-place to the persisted row
+   and replaying the entrance animation creates a visible flash. Applied via
+   data-skip-animate set by Chat.tsx when the persisted row matches the
+   recentlyStreamedId captured at stream-complete. */
+.lmchat-message-row[data-skip-animate] {
+  animation: none;
+}
+
+/* Copper marginalia arrival dot — overflow gutter to the left.
+   Only for assistant messages. Fade+scale decay over 800ms, not infinite.
+
+   The four magic numbers (-12, 10, 5, 5) are promoted to scoped tokens so
+   the relationship is documented and any future tuning happens in one
+   place. --dot-size: dot diameter; --dot-gutter: distance from message
+   edge into the marginalia gutter; --dot-cap-offset: vertical offset
+   aligning the dot with the first line's cap-height (eyeballed to serif
+   body cap; revisit if body type changes). */
+.lmchat-message-row[data-message-role="assistant"]::before {
+  --dot-size: 5px;
+  --dot-gutter: 12px;
+  --dot-cap-offset: 10px;
+  content: "";
+  position: absolute;
+  inset-inline-start: calc(var(--dot-gutter) * -1);
+  inset-block-start: var(--dot-cap-offset);
+  inline-size: var(--dot-size);
+  block-size: var(--dot-size);
+  border-radius: 50%;
+  background: var(--color-accent-fill);
+  pointer-events: none;
+  animation: marginalia-arrive 800ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MESSAGE BUBBLES — user vs assistant editorial treatment
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* USER BUBBLE — color-field tint, receding from canvas.
+   NOT a hard card — a wash of color that the text sits on.
+   Max 72% width, generous padding. */
+.lmchat-bubble-user {
+  max-width: 72%;
+  padding: var(--space-glue-relaxed) var(--space-sibling); /* 8px 12px */
+  /* Color-field discipline: 50% surface tint, not opaque */
+  background: color-mix(in oklch, var(--color-surface) 50%, transparent);
+  border: 1px solid color-mix(in oklch, var(--color-accent) 20%, transparent);
+  border-radius: var(--radius-md) var(--radius-md) var(--radius-sm)
+    var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body); /* 14px — smaller, more receding */
+  font-weight: 400;
+  line-height: var(
+    --lh-ui
+  ); /* 1.45 — comfortable but not as generous as prose */
+  color: var(--color-text-muted); /* slightly muted — the reader leaning in */
+  word-break: break-word;
+}
+
+/* ASSISTANT BUBBLE — editorial weight, text on canvas. No background.
+   The text IS the answer. */
+.lmchat-bubble-assistant {
+  max-width: 88%;
+  /* No background, no border — just text on canvas */
+  background: transparent;
+  border: none;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg); /* 15px — editorial, present */
+  font-weight: 400;
+  line-height: var(--lh-prose); /* 1.65 — breathing room for light-on-dark */
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   STREAMING CARET — copper pulse at the trailing position
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* .lmchat-stream-caret canonical definition lives in globals.css
+   (composite caret-pulse + caret-halo animations). */
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-stream-caret {
+    animation: none;
+    opacity: 0.6;
+  }
+  .lmchat-message-row {
+    animation: none;
+    will-change: auto;
+  }
+  .lmchat-message-row[data-message-role="assistant"]::before {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MESSAGE ACTIONS — hover affordances (copy / edit / regenerate)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Action row — hidden until parent row is hovered.
+   Emerges as quiet copper icons (McFetridge approach).
+   Gap: GLUE-RELAXED (8px) between action buttons. */
+.lmchat-message-row {
+  /* Needed as positioning ancestor for the absolute action overlay. */
+  position: relative;
+}
+.lmchat-message-actions {
+  /* In-flow hover action bar underneath the message: delete, resend,
+   * edit, copy live in a hoverable bar below the message rather than
+   * an overlay. Pattern matches ChatGPT / Claude.ai / Cursor.
+   *
+   * Space is reserved at all times via min-height equal to the action
+   * button size + gap, so the persisted-message swap on stream
+   * completion doesn't cause the ~32px downward jump that the old
+   * absolute overlay was avoiding. The row is invisible until the
+   * message-row is hovered or keyboard-focused.
+   *
+   * Right-aligned so the bar reads as belonging to the message bubble
+   * (whose primary content lives top-left). Sits with margin-top so it
+   * doesn't crowd the message body.
+   */
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-glue-relaxed);
+  /* Reserve space immediately so streaming → persisted doesn't shift
+   * content. 36px ≈ 32px action button + 4px breathing room. */
+  min-height: 36px;
+  margin-top: var(--space-glue);
+  opacity: 0;
+  transition: opacity 160ms var(--ease-out-quart);
+  pointer-events: none;
+}
+
+/* Reveal on parent row hover or keyboard focus-within. */
+.lmchat-message-row:hover .lmchat-message-actions,
+.lmchat-message-row:focus-within .lmchat-message-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Action button — 32×32 tap targets (icon stays 14px via flex centering) */
+.lmchat-message-action-btn {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-message-action-btn:hover {
+  color: var(--color-accent-text);
+  background: var(--color-accent-quiet);
+  border-color: color-mix(in oklch, var(--color-accent) 25%, transparent);
+}
+
+/* Delete button — danger-tinted only on hover; confirmation happens
+   via a toast prompt. */
+.lmchat-message-action-btn--danger:hover {
+  color: var(--color-danger, oklch(0.55 0.18 25));
+  background: color-mix(
+    in oklch,
+    var(--color-danger, oklch(0.55 0.18 25)) 12%,
+    transparent
+  );
+  border-color: color-mix(
+    in oklch,
+    var(--color-danger, oklch(0.55 0.18 25)) 40%,
+    transparent
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   EDIT MESSAGE FORM — copper hairline + brass glow
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue-relaxed); /* GLUE-RELAXED between form rows */
+  width: min(72%, 480px);
+  align-self: flex-end;
+}
+
+.lmchat-edit-textarea {
+  width: 100%;
+  min-height: 60px;
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  background: var(--color-surface-elevated);
+  /* Copper hairline border on edit entry */
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: var(--fs-body-lg);
+  color: var(--color-text);
+  resize: vertical;
+  outline: none;
+  /* Subtle brass glow inside the input area */
+  box-shadow:
+    0 0 0 3px var(--color-accent-quiet),
+    inset 0 1px 3px var(--material-brass);
+  transition: box-shadow var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-edit-textarea:focus {
+  box-shadow:
+    0 0 0 4px var(--color-accent-quiet),
+    inset 0 1px 4px var(--material-brass);
+}
+
+.lmchat-edit-actions {
+  display: flex;
+  gap: var(--space-glue-relaxed); /* GLUE-RELAXED between save / cancel */
+  justify-content: flex-end;
+}
+
+.lmchat-edit-save-btn {
+  padding: var(--space-glue) var(--space-sibling);
+  background: var(--color-accent-fill);
+  color: var(--color-text-on-accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-edit-save-btn:hover {
+  background: var(--color-accent-fill-hover);
+}
+
+.lmchat-edit-save-btn:active {
+  transform: translateY(1px);
+  filter: brightness(0.96);
+}
+
+.lmchat-edit-cancel-btn {
+  padding: var(--space-glue) var(--space-sibling);
+  background: transparent;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-edit-cancel-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+}
+
+.lmchat-edit-cancel-btn:active {
+  transform: translateY(1px);
+}
+
+.lmchat-edit-error {
+  margin: 0;
+  font-size: var(--fs-marginalia);
+  color: var(--color-danger);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   FOLLOW-UP CHIPS — pill-shaped, italic Hanken, foxing tint
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-followup-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-glue-relaxed); /* GLUE-RELAXED (8px) between chips */
+  margin-top: var(--space-glue-relaxed);
+  /* Height collapses to 0 when empty (JSX-gated, returns null).
+     max-height transition animates in when chips arrive. */
+  overflow: hidden;
+  max-height: 200px; /* generous cap — single row ≈32px, two rows ≈72px */
+  animation: lmchat-chips-appear 200ms var(--ease-out-quart) both;
+}
+
+@keyframes lmchat-chips-appear {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 200px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-followup-chips {
+    animation: none;
+  }
+}
+
+/* Individual chip — foxing background tint, italic, soft-rounded */
+.lmchat-followup-chip {
+  padding: var(--space-glue) var(--space-glue-relaxed); /* 4px 8px */
+  /* Foxing tint — aged-paper warmth, faint */
+  background: color-mix(
+    in oklch,
+    var(--color-surface-elevated) 80%,
+    var(--material-foxing)
+  );
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label); /* 13px */
+  font-style: italic; /* italic Hanken Grotesk per spec */
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  text-align: left;
+  line-height: var(--lh-ui);
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-followup-chip:hover {
+  color: var(--color-accent-text);
+  border-color: color-mix(in oklch, var(--color-accent) 35%, transparent);
+  background: var(--color-accent-quiet);
+}
+
+/* While a new assistant turn is streaming, the chips for the PREVIOUS turn
+   stay mounted (preserves layout — no jarring collapse + re-expand) but
+   read as inert: softened, no hover-glow, no pointer. Once the new turn
+   completes, the chip set replaces with the new turn's suggestions in
+   place — same row, no shift. */
+.lmchat-followup-chips[data-streaming="true"] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.lmchat-followup-chip:disabled {
+  cursor: default;
+}
+.lmchat-followup-chip:disabled:hover {
+  color: var(--color-text-subtle);
+  border-color: var(--color-border-default);
+  background: color-mix(
+    in oklch,
+    var(--color-surface-elevated) 80%,
+    var(--material-foxing)
+  );
+}
+
+/* Quiet auto-memory-saved indicator — deliberately understated (auto-memory
+   is a background feature, not an interruption). Same "quiet metadata" family
+   as .lmchat-stats-chip: small, subtle, low-opacity, no chrome/border. */
+.lmchat-memory-saved {
+  margin-top: var(--space-glue);
+  font-family: var(--font-sans);
+  font-size: var(--fs-micro); /* 11px */
+  font-style: italic;
+  color: var(--color-text-subtle);
+  opacity: 0.75;
+  user-select: none;
+  animation: lmchat-memory-saved-fade 300ms var(--ease-out-quart) both;
+}
+
+@keyframes lmchat-memory-saved-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.75;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-memory-saved {
+    animation: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   TOP BAR — masthead of the room
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Top bar — quiet surface, copper accent dot for active states.
+   Stays at color-surface (not transparent) so content doesn't bleed through
+   when scrolling messages past it. */
+/* Height 48px → 72px, padding updated to sibling-relaxed (16px) — desktop
+   had been left at 48px after an earlier pass only updated the mobile
+   topbar. */
+.lmchat-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed); /* GLUE-RELAXED (8px) between bar items */
+  padding: 0 var(--space-sibling-relaxed);
+  position: relative;
+  z-index: 70;
+  height: var(--topbar-height);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  background: var(--color-surface);
+  overflow: visible;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SUBCHAT DIVIDER — thin labeled rule marking preset session start
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-subchat-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+  margin-block: var(--space-glue);
+  user-select: none;
+}
+
+.lmchat-subchat-line {
+  flex: 1;
+  height: 1px;
+  background: var(--color-accent-border);
+}
+
+.lmchat-subchat-label {
+  font-family: var(--font-display);
+  font-size: var(--fs-micro); /* 11px */
+  font-weight: 600;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--color-accent-text);
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   TOOL CALL CARDS — collapsible inline tool cards
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-tool-card {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-glue);
+  font-size: var(--fs-label);
+  overflow: hidden;
+}
+
+.lmchat-tool-summary {
+  display: flex;
+  align-items: center;
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  cursor: pointer;
+  user-select: none;
+  color: var(--color-text-muted);
+  gap: var(--space-glue);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MESSAGE STATS CHIP — quiet mono, bottom of completed assistant turn
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-stats-chip {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro); /* 11px */
+  color: var(--color-text-subtle);
+  letter-spacing: 0.02em;
+  opacity: 0.75;
+  user-select: none;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   LAUNCH-MODE CHIPS — "Launch /research" row below an assistant turn
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-launch-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-glue-relaxed);
+  margin-top: var(--space-glue-relaxed);
+}
+
+.lmchat-launch-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-pill, 999px);
+  font-family: var(--font-sans);
+  font-size: var(--fs-micro); /* 11px */
+  font-weight: 500;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-launch-chip:hover {
+  color: var(--color-accent-text);
+  border-color: color-mix(in oklch, var(--color-accent) 35%, transparent);
+  background: var(--color-accent-quiet);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CHAT HEADER MENU — export + share dropdown (room's masthead action)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-header-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Trigger button — Hubot Sans, copper dot on open */
+.lmchat-header-menu__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed); /* GLUE-RELAXED (8px) label↔chevron */
+  white-space: nowrap;
+  min-height: 38px;
+  padding: var(--padding-btn-y) var(--space-glue-relaxed);
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-header-menu__trigger:hover,
+.lmchat-header-menu__trigger[aria-expanded="true"] {
+  color: var(--color-accent-text);
+  border-color: color-mix(in oklch, var(--color-accent) 40%, transparent);
+}
+
+/* Hidden-trigger mode — Chat.tsx mounts the menu with a visually-hidden
+   trigger (opened imperatively via openSignal from the overflow
+   "Share / Export" item or Cmd/Ctrl+Shift+E); the panel still renders in
+   normal flow so it is visible and clickable. Replaces the former 0×0
+   opacity-0 wrapper that clipped the panel. The 1px box is the canonical
+   sr-only pattern (a11y utility, not spacing grammar) — the trigger stays
+   reachable by assistive tech. */
+.lmchat-header-menu__trigger--hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  min-height: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Panel offset in hidden-trigger mode: the anchor wrapper is zero-height
+   (it sits mid-bar in the action row), so drop the panel a GROUP step to
+   clear the topbar chrome instead of the trigger-height-relative GLUE. */
+.lmchat-header-menu--hidden-trigger .lmchat-header-menu__panel {
+  top: calc(100% + var(--space-group));
+}
+
+/* Active copper dot — appears when menu is open */
+.lmchat-header-menu__dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-accent-fill);
+  flex-shrink: 0;
+}
+
+/* Dropdown panel — brass-edged, matches slash-menu language */
+.lmchat-header-menu__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-glue));
+  min-width: 220px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 0 12px var(--material-brass);
+  z-index: 200;
+  padding: var(--space-glue-relaxed);
+  display: flex;
+  flex-direction: column;
+  animation: slash-menu-in var(--duration-fast) var(--ease-out-expo) both;
+  overflow: hidden;
+}
+
+/* Section label — Hubot Sans MICRO caps */
+.lmchat-header-menu__section {
+  padding: var(--space-glue) var(--space-glue-relaxed) 2px;
+  font-family: var(--font-display);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-text-subtle);
+}
+
+/* Divider between sections */
+.lmchat-header-menu__divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: var(--space-glue) 0;
+}
+
+/* Menu item button */
+.lmchat-header-menu__item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: var(--space-glue-relaxed) var(--space-glue-relaxed);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-header-menu__item:hover:not(:disabled) {
+  background: color-mix(
+    in oklch,
+    var(--color-surface-3) 50%,
+    var(--material-brass)
+  );
+}
+
+.lmchat-header-menu__item:disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+/* Share URL code box */
+.lmchat-header-menu__url-box {
+  margin: var(--space-glue) var(--space-glue-relaxed);
+  padding: var(--space-glue-relaxed);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--color-text);
+  word-break: break-all;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-header-menu__panel {
+    animation: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   PINNED MESSAGES PANEL — quoted-passages folio
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Panel — floating folio with vellum background.
+   Width fixed at 340px on desktop; the mobile override below shrinks it
+   to viewport-aware sizing so it doesn't overflow a 393px iPhone. */
+.lmchat-pinned-panel {
+  position: absolute;
+  top: var(--topbar-height);
+  right: var(--space-sibling-relaxed);
+  width: 340px;
+  max-width: calc(100vw - 2 * var(--space-sibling-relaxed));
+  max-height: 60vh;
+  background: color-mix(
+    in oklch,
+    var(--color-surface-elevated) 90%,
+    var(--material-vellum)
+  );
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 0 12px var(--material-brass);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Header row */
+.lmchat-pinned-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Title — Hubot Sans display */
+.lmchat-pinned-panel__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--color-text);
+  letter-spacing: var(--ls-tight);
+}
+
+/* Close button */
+.lmchat-pinned-panel__close {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-caption);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-pinned-panel__close:hover {
+  color: var(--color-text);
+}
+
+/* Message list */
+.lmchat-pinned-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-glue-relaxed);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-group); /* GROUP (24px) between pinned messages */
+}
+
+/* Row — each pinned message entry, copper marginalia dot in left margin */
+.lmchat-pinned-panel__row {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  position: relative;
+}
+
+/* Copper marginalia dot in the left margin — NOT a side-stripe */
+.lmchat-pinned-panel__row::before {
+  content: "";
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-accent-fill);
+  opacity: 0.7;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: var(
+    --space-glue-relaxed
+  ); /* GLUE-RELAXED (8px) — pinned panel sits just below top bar */
+  margin-right: var(--space-glue-relaxed);
+}
+
+/* Inner button — click-to-scroll */
+.lmchat-pinned-panel__row-btn {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-glue-relaxed);
+  padding: var(--space-glue-relaxed) var(--space-glue-relaxed);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-pinned-panel__row-btn:hover {
+  background: color-mix(
+    in oklch,
+    var(--color-surface-3) 40%,
+    var(--material-brass)
+  );
+}
+
+/* Role badge */
+.lmchat-pinned-panel__role-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+}
+
+.lmchat-pinned-panel__role-badge--user {
+  background: var(--color-accent-quiet);
+  border: 1px solid var(--color-accent-border);
+  color: var(--color-accent-text);
+}
+
+.lmchat-pinned-panel__role-badge--assistant {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  color: var(--color-text-muted);
+}
+
+/* Preview text — Hanken italic, muted, 3-line clamp */
+.lmchat-pinned-panel__preview {
+  flex: 1;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg);
+  font-style: italic;
+  color: var(--color-text-subtle);
+  line-height: var(--lh-prose);
+}
+
+/* Unpin button — appears on row hover */
+.lmchat-pinned-panel__unpin {
+  width: 24px;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  font-size: var(--fs-micro);
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  opacity: 0;
+  flex-shrink: 0;
+  transition:
+    opacity var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-pinned-panel__row:hover .lmchat-pinned-panel__unpin {
+  opacity: 1;
+}
+
+.lmchat-pinned-panel__unpin:hover {
+  color: var(--color-danger);
+}
+
+/* Empty state */
+.lmchat-pinned-panel__empty {
+  margin: 0;
+  padding: var(--space-group) var(--space-sibling);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  color: var(--color-text-subtle);
+  text-align: center;
+  font-style: italic;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CHAT SETTINGS RAIL — librarian's index card
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Container — hairline left border, vertical scroll */
+.lmchat-settings-rail {
+  padding: var(--space-sibling);
+  overflow-y: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-chapter); /* CHAPTER (48px) between sections */
+}
+
+/* Drawer inner — same gaps as container.
+   Frame padding 12px → 16px; at 380px the rail content needs the lateral
+   breathing room (sibling-relaxed, not group — it is the panel's own
+   frame, not a section separation). */
+.lmchat-settings-rail--drawer {
+  padding: var(--space-sibling-relaxed);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-chapter);
+}
+
+/* Title row — saved pulse + space-between */
+.lmchat-settings-rail__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sibling);
+}
+
+/* Section wrapper */
+.lmchat-settings-rail__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(
+    --space-sibling-relaxed
+  ); /* SIBLING-RELAXED (16px) header→first row */
+}
+
+/* Section header — Hubot Sans caps.
+   Bumped --fs-micro (11px) → --fs-label (13px) + weight 600. Section
+   titles are the rail's structural anchors; 11px caps light-on-dark read
+   even smaller than the px suggest. */
+.lmchat-settings-rail__section-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-text-subtle);
+}
+
+/* Section children wrapper */
+.lmchat-settings-rail__section-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sibling-relaxed); /* SIBLING-RELAXED (16px) row↔row */
+}
+
+/* Field row — label + control side by side */
+.lmchat-settings-rail__field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sibling);
+}
+
+/* Field label */
+.lmchat-settings-rail__field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text-muted);
+}
+
+/* Info glyph ⓘ — 14×14 circle */
+.lmchat-settings-rail__info-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: var(--fs-caption);
+  color: var(--color-text-subtle);
+  cursor: help;
+  user-select: none;
+  border-radius: 50%;
+}
+
+/* Advanced details expander */
+.lmchat-settings-rail__advanced {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+}
+
+.lmchat-settings-rail__advanced-summary {
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.lmchat-settings-rail__advanced-body {
+  margin-top: var(--space-sibling-relaxed);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sibling-relaxed);
+}
+
+/* Hint text — bumped --fs-caption (12px) → --fs-label (13px) + explicit
+   UI line-height. The rail carries several multi-line hints; 12px
+   subtle-on-dark was below comfortable reading size at 380px rail width. */
+.lmchat-settings-rail__hint {
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: var(--lh-ui);
+  color: var(--color-text-subtle);
+}
+
+/* Label + control + hint as ONE thing — GLUE-RELAXED (8px) internal gap.
+   Without this wrapper the section-body's 16px sibling gap separated a
+   label from its own textarea (spacing-grammar violation: label↔input
+   are "one thing", 4-8px). */
+.lmchat-settings-rail__field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue-relaxed);
+}
+
+.lmchat-settings-rail__textarea-label {
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+/* Reasoning select + cycle-toggle cluster — GLUE-RELAXED (8px) */
+.lmchat-settings-rail__reasoning-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+}
+
+/* Input / select / textarea — shared field skin */
+.lmchat-settings-rail__input {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  width: 96px;
+  text-align: right;
+}
+
+.lmchat-settings-rail__select {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  min-height: 36px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-settings-rail__select:focus {
+  border-color: var(--color-accent);
+  outline: none;
+  box-shadow: 0 0 0 1.5px
+    color-mix(in oklch, var(--color-accent) 30%, transparent);
+}
+
+.lmchat-settings-rail__textarea {
+  width: 100%;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: var(--space-glue-relaxed);
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  resize: vertical;
+  min-height: 84px;
+  box-sizing: border-box;
+}
+
+.lmchat-settings-rail__textarea--preset {
+  border-color: var(--color-accent);
+}
+
+/* Saved pulse badge */
+.lmchat-settings-rail__saved {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue);
+  padding: 2px var(--space-glue-relaxed);
+  background: color-mix(in oklch, var(--color-success) 18%, transparent);
+  border: 1px solid color-mix(in oklch, var(--color-success) 40%, transparent);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  color: var(--color-success);
+  transition: opacity var(--duration-base) var(--ease-out-quart);
+  pointer-events: none;
+}
+
+/* Empty state */
+.lmchat-settings-rail__empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sibling);
+  padding: var(--space-group) var(--space-sibling);
+  text-align: center;
+  align-items: center;
+}
+
+.lmchat-settings-rail__empty-copy {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg);
+  color: var(--color-text-muted);
+  line-height: var(--lh-prose);
+  max-width: 32ch;
+}
+
+.lmchat-settings-rail__empty-hint {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  color: var(--color-text-subtle);
+}
+
+/* ── Resolved-prompt preview (system-prompt layers) ──
+   Converted from inline CSSProperties and bumped mono content 12px →
+   13px — Commit Mono's comfortable floor per the design lock
+   ("excellent at 13–14px"). */
+.lmchat-settings-rail__prompt-preview {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+}
+
+.lmchat-settings-rail__prompt-preview > summary {
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.lmchat-settings-rail__prompt-preview-body {
+  margin-top: var(--space-glue-relaxed);
+  font-size: var(--fs-label);
+  line-height: var(--lh-prose);
+}
+
+.lmchat-settings-rail__prompt-preview-empty {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.lmchat-settings-rail__prompt-layer {
+  margin-top: var(--space-sibling);
+}
+
+/* title ↔ detail ↔ content: GLUE (4-8px) — they are one thing */
+.lmchat-settings-rail__prompt-layer-title {
+  font-weight: 600;
+  font-size: var(--fs-label);
+  color: var(--color-text);
+  margin-bottom: var(--space-glue);
+}
+
+.lmchat-settings-rail__prompt-layer-detail {
+  color: var(--color-text-muted);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-ui);
+  margin-bottom: var(--space-glue-relaxed);
+}
+
+.lmchat-settings-rail__prompt-layer-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: color-mix(in oklch, var(--color-text) 5%, transparent);
+  color: var(--color-text);
+  padding: var(--space-glue-relaxed);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-ui);
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+}
+
+.lmchat-settings-rail__prompt-layer-pre--emphasis {
+  background: color-mix(in oklch, var(--color-accent) 10%, transparent);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   STATIC COMPONENT CLASSES — replaces CSSProperties objects in Chat.tsx
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Drawer slide-in animation ── */
+@keyframes drawer-slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes drawer-slide-in {
+    from {
+      transform: none;
+    }
+    to {
+      transform: none;
+    }
+  }
+}
+
+/* Drawer exit — the entrance keyframe reversed. Chat.tsx keeps the shell
+   mounted with the --closing modifier until animationend (with a timeout
+   fallback), then unmounts. Reduced-motion users skip the exit entirely
+   (Chat.tsx checks the media query and unmounts instantly); the keyframe
+   override below is belt-and-braces for that path. */
+@keyframes drawer-slide-out {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes drawer-slide-out {
+    from {
+      transform: none;
+    }
+    to {
+      transform: none;
+    }
+  }
+}
+
+/* Backdrop scrim exit — same controlled-mount pattern as the panel's
+   drawer-slide-out above. Without it the scrim vanished the instant the
+   conditional unmounted and the panel slid out floating alone. Chat.tsx
+   holds the scrim mounted with --closing until animationend (the panel's
+   320ms fallback covers it too); reduced-motion users skip the exit in
+   JS, and the keyframe neutralization below is belt-and-braces. */
+@keyframes drawer-scrim-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes drawer-scrim-fade-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+/* ── App shell — 100dvh for iOS Safari URL-bar collapse fix ── */
+/* 100vh fallback first, then 100dvh override. Browsers that don't support
+   dvh units will use 100vh; those that do get correct dynamic viewport. */
+.lmchat-app-shell {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* AppShell <main> wrapper (settings / docs / memory / etc.). Was inline
+   height:100vh — on iOS the static 100vh is taller than the dynamic visual
+   viewport, so the page scrolled behind the collapsing URL bar and the
+   sticky mobile bar lagged its content ("pieces move separately"). dvh
+   tracks the visual viewport, so the scroll container matches what's on
+   screen and the header stays pinned. 100vh fallback first for old browsers. */
+.lmchat-app-main {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Loading / fallback states */
+.lmchat-loading-wrap {
+  display: flex;
+  height: 100vh;
+  height: 100dvh;
+  align-items: center;
+  justify-content: center;
+}
+
+.lmchat-loading-text {
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg); /* 15px — 0.9375rem */
+}
+
+/* Error banner */
+.lmchat-error-banner {
+  padding: var(--space-glue-relaxed) var(--space-sibling-relaxed);
+  background: var(--color-danger-quiet);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body); /* 14px */
+  color: var(--color-danger);
+  margin-top: var(--space-glue-relaxed);
+}
+
+.lmchat-error-banner__title {
+  font-weight: 600;
+  margin-bottom: var(--spacing-2xs); /* 2px — micro gap */
+}
+
+.lmchat-error-banner__hint {
+  font-size: var(--fs-label); /* 13px */
+  opacity: 0.85;
+  margin-top: var(--space-glue);
+}
+
+.lmchat-error-actions {
+  display: flex;
+  gap: var(--space-glue);
+  margin-top: var(--space-glue-relaxed);
+}
+
+.lmchat-error-btn-primary {
+  padding: var(--space-glue) var(--space-sibling);
+  background: var(--color-danger);
+  color: var(--color-text-on-accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label); /* 13px — 0.8125rem */
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lmchat-error-btn-secondary {
+  padding: var(--space-glue) var(--space-sibling);
+  background: transparent;
+  color: var(--color-danger);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label); /* 13px */
+  cursor: pointer;
+}
+
+/* Confirm dialog overlay + card */
+.lmchat-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-scrim-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.lmchat-confirm-dialog {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--space-group-relaxed); /* 32px */
+  max-width: 380px;
+  width: 90%;
+  box-shadow: var(--shadow-lg);
+}
+
+/* Visually hidden — provides accessible name for aria-labelledby.
+   Screen readers announce it; sighted users see the message below. */
+.lmchat-confirm-dialog__title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.lmchat-confirm-dialog__message {
+  margin: 0 0 var(--space-group);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg); /* 15px */
+  color: var(--color-text);
+}
+
+.lmchat-confirm-dialog__actions {
+  display: flex;
+  gap: var(--space-glue-relaxed);
+  justify-content: flex-end;
+}
+
+.lmchat-confirm-cancel {
+  padding: var(--space-glue-relaxed) var(--space-sibling-relaxed);
+  background: none;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-confirm-cancel:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-muted);
+}
+
+.lmchat-confirm-cancel:active {
+  transform: translateY(1px);
+  filter: brightness(0.97);
+}
+
+.lmchat-confirm-btn {
+  padding: var(--space-glue-relaxed) var(--space-sibling-relaxed);
+  background: var(--color-danger-quiet);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--color-danger);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-confirm-btn:hover {
+  background: color-mix(in oklch, var(--color-danger) 12%, transparent);
+  border-color: var(--color-danger);
+}
+
+.lmchat-confirm-btn:active {
+  transform: translateY(1px);
+  filter: brightness(0.96);
+}
+
+/* Kbd chip (empty state shortcut display) */
+.lmchat-kbd-chip {
+  display: inline-block;
+  min-width: 1.4em;
+  text-align: center;
+  padding: var(--spacing-2xs) var(--space-glue); /* 2px 4px — micro chip */
+  margin: 0 var(--spacing-2xs);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-caption); /* 12px */
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+}
+
+/* Sub-session finish button */
+.lmchat-subsession-finish-btn {
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  background: var(--color-accent-fill);
+  color: var(--color-text-on-accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption); /* 12px */
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lmchat-subsession-finish-btn:active {
+  transform: translateY(1px);
+  filter: brightness(0.96);
+}
+
+/* Sub-session cancel button */
+.lmchat-subsession-cancel-btn {
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  background: none;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+/* Drawer fallback panel */
+.lmchat-drawer-fallback {
+  padding: var(--space-group);
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+}
+
+/* TopBar action row — right-aligned cluster; GLUE-RELAXED (8px) between sibling buttons */
+.lmchat-topbar-action-row {
+  display: flex;
+  gap: var(--space-glue-relaxed);
+  margin-left: auto;
+  align-items: center;
+  flex-shrink: 0; /* action row never compresses — model select gives way first */
+}
+
+/* Desktop topbar re-anchor: the model selector used to sit stranded in the
+   left-centre (free space collapsed onto the action-row's margin-left:auto),
+   reading as a control disconnected from everything. Move the auto onto the
+   model selector so the title anchors LEFT and the selector groups with the
+   action cluster on the RIGHT — two intentional poles instead of a scatter.
+   Scoped to the desktop shell; the mobile shell (--mobile) is a separate
+   class and keeps its own stacked layout. */
+.lmchat-topbar-shell > .lmchat-model-select-wrap {
+  margin-left: auto;
+}
+.lmchat-topbar-shell .lmchat-topbar-action-row {
+  margin-left: 0;
+}
+
+/* Sub-session empty state */
+.lmchat-subsession-empty {
+  padding: var(--space-group);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Sub-session mode intro copy */
+.lmchat-subsession-intro {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+}
+
+.lmchat-subsession-hint {
+  margin: var(--space-glue) 0 0;
+  color: var(--color-text-subtle);
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CHAT PAGE — semantic layout classes (Chat.tsx page-level)
+   Migrated from inline CSSProperties consts. Mobile variants live under
+   the @media (max-width: 768px) block at the bottom of this file.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* App shell: transparent canvas; sidebar + topbar opaque on top. */
+.lmchat-chat-shell {
+  display: flex;
+  height: 100vh;
+  /* dvh tracks the visual viewport (shrinks with iOS keyboard), so the
+     shell contracts when the keyboard opens and the sticky composer stays
+     pinned at the bottom. 100vh is the fallback for older browsers. */
+  height: 100dvh;
+  overflow: hidden;
+  background: transparent;
+  position: relative;
+}
+
+/* Mobile sidebar drawer wrapper — slide-in panel.
+   Narrowed from 100vw back to a real panel width — at full width the
+   backdrop scrim was structurally unreachable, so tap-outside-to-close
+   silently didn't exist. The strip right of min(86vw, 360px) is genuine
+   scrim territory. */
+.lmchat-mobile-sidebar-shell {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(86vw, 360px);
+  z-index: 90;
+  background: var(--color-surface);
+  border-right: none;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+  animation: drawer-slide-in var(--duration-slow, 320ms)
+    var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+  /* overflow:hidden keeps the shell as a fixed flex column. The inner
+     sidebar aside uses flex:1 so the drawer header + aside = exactly 100%.
+     The chat list nav (.lmchat-nav) handles scrolling internally. */
+  overflow: hidden;
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Exit state — runs the slide-out, inert to input. */
+.lmchat-mobile-sidebar-shell--closing {
+  animation: drawer-slide-out var(--duration-slow, 320ms)
+    var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+  pointer-events: none;
+}
+
+/* Mobile drawer backdrop scrim — tap-anywhere closes. */
+.lmchat-mobile-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--color-scrim-md);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  z-index: 80;
+}
+
+/* Scrim exit state — fades out alongside the panel's slide-out, inert to
+   input for the duration. */
+.lmchat-mobile-backdrop--closing {
+  animation: drawer-scrim-fade-out var(--duration-slow, 320ms)
+    var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+  pointer-events: none;
+}
+
+/* Center column — main scrollable column between sidebar and right rail. */
+.lmchat-main-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+/* Top bar — var(--topbar-height) desktop bar; raised from 48px. */
+.lmchat-topbar-shell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+  padding: 0 var(--space-sibling-relaxed);
+  position: relative;
+  z-index: 70;
+  height: var(--topbar-height);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  background: var(--color-surface);
+  overflow: visible;
+}
+
+/* Mobile top bar — 72px floor, sibling-relaxed padding 16px/20px. */
+.lmchat-topbar-shell--mobile {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  position: relative;
+  z-index: 70;
+  min-height: 72px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  background: var(--color-surface);
+  padding: 16px 20px;
+  gap: 12px;
+  overflow: visible;
+}
+
+/* Light theme: surface (L0.976) barely separates from the parchment canvas
+   (L0.95), so the bar floats. Ground it with a 3:1 border + a warm daylight
+   shadow so it reads as chrome above the content. */
+:root.light .lmchat-topbar-shell,
+[data-theme="light"] .lmchat-topbar-shell,
+:root.light .lmchat-topbar-shell--mobile,
+[data-theme="light"] .lmchat-topbar-shell--mobile {
+  border-bottom-color: var(--color-border-default);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Chat title (desktop) — Hubot Sans, --fs-h2 / 20px, ellipsis on overflow. */
+.lmchat-chat-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--fs-h2);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* Chat title (mobile) — full-width flex:1; same display weight. */
+.lmchat-chat-title--mobile {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--fs-h2);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+/* No-model composer hint — quiet italic line below the composer. */
+.lmchat-no-model-hint {
+  margin: 0 var(--space-sibling);
+  padding-bottom: var(--space-glue-relaxed);
+  font-family: var(--font-sans);
+  font-size: var(--fs-marginalia);
+  font-style: italic;
+  color: var(--color-text-subtle);
+  text-align: center;
+}
+
+/* Incognito badge chip — quiet status pill. */
+.lmchat-incognito-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  padding: var(--spacing-2xs) var(--space-glue);
+  background: var(--color-accent-quiet);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  color: var(--color-accent-text);
+  flex-shrink: 0;
+  letter-spacing: var(--ls-caps);
+}
+
+/* Sub-agent mode pill — the active sub-session's persona label as persistent
+   topbar chrome. Distinct from the incognito chip (accent border + display
+   caps + a leading fill dot) so it reads as "you're in a special mode", per the
+   persona-no-pill / sub-agent-is-the-pill model. */
+.lmchat-subagent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue);
+  padding: var(--spacing-2xs) var(--space-glue);
+  background: var(--color-accent-quiet);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--color-accent-text);
+  flex-shrink: 0;
+}
+
+.lmchat-subagent-chip::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-accent-fill);
+  flex-shrink: 0;
+}
+
+/* Mobile incognito chip variant — tighter padding so it tucks next to title. */
+.lmchat-incognito-chip--mobile {
+  padding: var(--spacing-2xs) var(--spacing-2xs);
+  flex-shrink: 0;
+}
+
+/* Mobile hamburger / menu button — 44×44 per Apple HIG. */
+.lmchat-mobile-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 1.375rem;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+/* Mobile brand wordmark — Hubot Sans 700 display weight. */
+.lmchat-brand-wordmark--display {
+  font-size: var(--fs-h2);
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+/* Mobile topbar title + pill stack — vertical column. */
+.lmchat-topbar-title-stack {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+  justify-content: center;
+}
+
+/* Mobile topbar title row — title + incognito chip horizontal. */
+.lmchat-topbar-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue);
+  min-width: 0;
+}
+
+/* Model select (desktop) — surface pill, --fs-body, 240–360px width.
+   Used inline in the chat header. The form-context override below
+   strips the 240–360 cap so settings forms get a full-width select
+   matching the surrounding inputs. */
+.lmchat-model-select {
+  /* Strip UA appearance so the <select> respects min-height/padding
+     (native chrome would otherwise impose its own vertical rhythm).
+     Custom chevron via SVG background so the dropdown affordance stays.
+     Aligned with .lmchat-topbar-btn so the chat-header row reads as ONE
+     rhythm line. */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: var(--color-surface-elevated);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%23999' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='1,1 6,6 11,1'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right var(--space-glue-relaxed) center;
+  background-size: 10px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  padding: var(--padding-btn-y) calc(var(--space-glue-relaxed) + 18px)
+    var(--padding-btn-y) var(--space-glue-relaxed);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  line-height: 1.2;
+  color: var(--color-text-muted);
+  /* Tightened from 240–360px to 200–300px so the closed pill reads as a
+     content-sized control instead of a big half-empty box (a native
+     <select> sizes to its WIDEST option, so the old 360px cap left the
+     short selected name floating with the chevron stranded at the far
+     right). The wrap is now ``flex: 0 1 auto`` so this cap is the
+     select's true visual width on the bar. Long names still truncate at
+     the cap. The 769–960px and form-context overrides below keep their
+     own widths. */
+  min-width: 200px;
+  max-width: 300px;
+  height: 38px;
+  min-height: 38px;
+  /* Allow the select to yield space to the action-row — flex-shrink:1 means
+     it compresses before the action-row does (which has flex-shrink:0). */
+  flex-shrink: 1;
+  align-self: center;
+  cursor: pointer;
+}
+
+/* ModelSelectControl wraps the select plus the capability icon row
+   (Eye/Wrench/Brain) in an inline-flex span — the WRAP is now the flex
+   child of the topbar rows, so the flex constraints that the bare select
+   used to carry live here. min-width: 0 lets the select inside compress
+   (it keeps its own flex-shrink + floor). */
+.lmchat-model-select-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue); /* GLUE (4px) select↔capability icons */
+  min-width: 0;
+  /* Was ``flex: 1 1 auto`` and grew to fill the whole middle of the bar
+     (measured 591px — a half-empty box with the model name floating in
+     dead space, chevron stranded at the far right). ``flex: 0 1 auto``
+     sizes it to content: it never grows past the select's own max-width
+     and shrinks only when the bar is tight. The action-row's
+     ``margin-left: auto`` then pushes the actions to the right edge,
+     leaving an intentional flexible gap. Mobile single-row variants
+     re-assert their own flex below (≤480px / landscape). */
+  flex: 0 1 auto;
+}
+
+/* Capability icon row — layout previously leaked from an inline style;
+   consolidated here now that the class carries its own CSS. */
+.lmchat-model-cap-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue); /* GLUE (4px) between sibling icons */
+  color: var(--color-text-subtle);
+  flex-shrink: 0;
+}
+
+.lmchat-model-select:hover {
+  border-color: var(--color-border-strong);
+}
+
+.lmchat-model-select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Loading skeleton — quiet opacity breath while model list is in-flight */
+@keyframes lmchat-model-loading-pulse {
+  from {
+    opacity: 0.6;
+  }
+  to {
+    opacity: 0.9;
+  }
+}
+.lmchat-model-select--loading {
+  animation: lmchat-model-loading-pulse 1.4s ease-in-out infinite alternate;
+  cursor: default;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-model-select--loading {
+    animation: none;
+  }
+}
+
+/* Form-context modifier — settings pages render the select inside a
+   .lmchat-field next to .lmchat-input rows. Strip UA appearance so
+   padding + height actually take effect (native <select> ignores
+   them otherwise), then paint a custom chevron via SVG background so
+   the dropdown affordance still reads. Geometry matches .lmchat-input
+   so the select sits flush with text inputs above and below. */
+.lmchat-model-select--form {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: auto;
+  min-height: 40px;
+  padding: var(--space-glue-relaxed) calc(var(--space-sibling) + 24px)
+    var(--space-glue-relaxed) var(--space-sibling);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  color: var(--color-text);
+  background-color: var(--color-surface-elevated);
+  /* Caret SVG — currentColor so it tracks light/dark theme without a
+     theme-specific URL swap. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%23999' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='1,1 6,6 11,1'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right var(--space-sibling) center;
+  background-size: 12px 8px;
+  align-self: stretch;
+}
+
+.lmchat-model-select--form:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1.5px
+    color-mix(in oklch, var(--color-accent) 30%, transparent);
+}
+
+/* Model select (mobile compact) — narrow pill, --fs-label.
+   The 160px / 180px caps clipped long Qwen labels like
+   "Qwen3.5 9B Polaris HighIQ Thinking I1" to "Qwen3.5 9B Polaris HighIC"
+   on iPhone at 393px width. Raised to 240px / 260px so the label
+   survives without overflowing the row. */
+.lmchat-model-select--mobile {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: var(--space-glue) var(--space-glue);
+  font-size: var(--fs-label);
+  color: var(--color-text-muted);
+  flex: 1;
+  min-width: 0;
+  max-width: 240px;
+  min-height: 36px;
+  align-self: center;
+}
+
+/* Model select (mobile wide pill) — italic marginalia pill style. */
+.lmchat-model-select--mobile-wide {
+  /* appearance:none strips iOS Safari native chrome that ignores max-width
+     and expands to fit the longest option label. Custom chevron SVG keeps
+     the dropdown affordance. */
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%23999' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='1,1 6,6 11,1'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 10px 6px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-pill);
+  padding: 6px 30px 6px 14px;
+  font-size: var(--fs-label);
+  font-style: italic;
+  color: var(--color-text-subtle);
+  max-width: 100%;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* TopBar button (TopBarBtn) — accent-quiet when active.
+   min-height bumped to 38px to match model select + LM Studio badge so
+   the chat-header row is symmetrical. */
+.lmchat-topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  padding: var(--padding-btn-y) var(--space-glue-relaxed);
+  min-height: 38px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-label);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.lmchat-topbar-btn[data-active="true"] {
+  background: var(--color-accent-quiet);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent-text);
+}
+
+.lmchat-topbar-btn[data-danger="true"] {
+  color: var(--color-danger);
+}
+
+.lmchat-topbar-btn[data-danger="true"][data-active="true"] {
+  color: var(--color-danger);
+}
+
+/* Active-state indicator dot inside a TopBarBtn — 6px circle. */
+.lmchat-topbar-btn__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.lmchat-topbar-btn[data-danger="true"] .lmchat-topbar-btn__dot {
+  background: var(--color-danger);
+}
+
+/* MobileDock — persistent panel toggles above the composer (mobile only). */
+.lmchat-mobile-dock {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-around;
+  gap: var(--space-glue);
+  padding: var(--space-glue) var(--space-sibling);
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  flex-shrink: 0;
+}
+
+/* Dock button (DockBtn) — compact icon+label stack, accent-quiet when active.
+   Kept ≥44px tap target via padding while trimming the band's vertical bulk
+   (the rail buttons read as oversized on mobile). */
+.lmchat-dock-btn {
+  flex: 1;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: var(--space-glue-tight, 4px) var(--space-glue);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.lmchat-dock-btn[data-active="true"] {
+  background: var(--color-accent-quiet);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent);
+}
+
+/* Dock button label — Hubot Sans 500 micro caps. */
+.lmchat-dock-btn-label {
+  font-family: var(--font-display);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+}
+
+/* Empty-state editorial hero (EmptyState component) — left-justified
+   editorial layout with copper motif bleeding off the right. */
+.lmchat-empty-hint {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: clamp(var(--space-group-relaxed), 6vw, var(--space-chapter-relaxed));
+}
+
+/* Empty-state motif — oversized LM Chat mark as watermark. */
+.lmchat-empty-motif {
+  position: absolute;
+  right: clamp(8px, 3vw, 72px);
+  top: 50%;
+  width: clamp(240px, 34vw, 440px);
+  transform: translateY(-50%) rotate(-8deg);
+  transform-origin: center;
+  opacity: 0.11;
+  pointer-events: none;
+  -webkit-mask-image: radial-gradient(
+    ellipse 72% 72% at 50% 50%,
+    #000 52%,
+    transparent 92%
+  );
+  mask-image: radial-gradient(
+    ellipse 72% 72% at 50% 50%,
+    #000 52%,
+    transparent 92%
+  );
+}
+
+/* Light theme: the deep-bronze brand fill reads on parchment, but the motif
+   wants a touch more presence to feel like a printed watermark rather than a
+   ghost. (Dark keeps 0.11 — bright copper on near-black needs no help.) */
+:root.light .lmchat-empty-motif,
+[data-theme="light"] .lmchat-empty-motif {
+  opacity: 0.14;
+}
+
+/* Motif inner brand mark — fill its sized container. */
+.lmchat-empty-motif__mark {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Empty-state content column — sits above the watermark via z-index.
+   Widened from min(560px, 92%) to min(820px, 90%) so the hero
+   "Good evening / morning / afternoon" line and the paragraph below
+   don't wrap into the tight column that read as "100 pixels" awkward
+   inside a 1100px+ chat pane. The hint paragraph still caps at 44ch via
+   its own rule lower in this file. */
+.lmchat-empty-content {
+  position: relative;
+  z-index: 1;
+  max-width: min(820px, 90%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+
+.lmchat-empty-kicker {
+  font-family: var(--font-display);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--color-accent-text);
+  margin-bottom: var(--space-sibling-relaxed);
+}
+
+.lmchat-empty-title {
+  margin: 0;
+  font-family: var(--font-display);
+  /* Desktop: --fs-display (2.5rem / 40px) min, scales up to 4.5rem.
+     The 6vw middle term doesn't shrink below the min, so on a 393px
+     iPhone the min governed and the title read at 40px — too big for
+     the viewport, forcing wrap to 3 lines on narrow screens.
+     Mobile override below uses 1.75rem (28px) min so the hero stays
+     readable in one breathing chunk. */
+  font-size: clamp(var(--fs-display), 6vw, 4.5rem);
+  font-weight: 700;
+  line-height: var(--lh-display);
+  color: var(--color-text);
+  letter-spacing: var(--ls-tight);
+}
+@media (max-width: 768px) {
+  .lmchat-empty-title {
+    font-size: clamp(1.75rem, 7vw, 2.25rem);
+    line-height: 1.15;
+  }
+}
+
+.lmchat-empty-marginalia {
+  margin: var(--space-glue) 0 0;
+  font-style: italic;
+  font-size: var(--fs-marginalia);
+  color: var(--color-text-subtle);
+  line-height: var(--lh-ui);
+}
+
+.lmchat-empty-copy {
+  margin: var(--space-sibling-relaxed) 0 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg);
+  line-height: var(--lh-prose);
+  max-width: 44ch;
+  color: var(--color-text-muted);
+}
+
+.lmchat-empty-hints-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sibling-relaxed);
+  margin-top: var(--space-group-relaxed);
+}
+
+.lmchat-empty-hint-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  font-size: var(--fs-label);
+  color: var(--color-text-subtle);
+}
+
+.lmchat-empty-hint-label {
+  margin-left: var(--spacing-2xs);
+}
+
+.lmchat-empty-hint-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--color-border-strong);
+}
+
+.lmchat-empty-cta {
+  margin-top: var(--space-chapter);
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-glue-relaxed) var(--space-group-relaxed);
+  background: var(--color-accent-fill);
+  border: none;
+  border-radius: var(--radius-pill, 999px);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg);
+  font-weight: 600;
+  color: var(--color-text-on-accent);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Trailing arrow glyph next to the CTA label. */
+.lmchat-empty-cta__arrow {
+  margin-left: var(--space-glue-relaxed);
+}
+
+/* First-message hint (in-chat empty state) — desktop card, mobile transparent. */
+.lmchat-first-msg-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-group-relaxed);
+  width: 100%;
+}
+
+.lmchat-first-msg-card {
+  max-width: 440px;
+  padding: var(--space-group) var(--space-group-relaxed);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.lmchat-first-msg-title {
+  margin: 0 0 var(--space-glue);
+  font-family: var(--font-display);
+  font-size: var(--fs-body-lg);
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.lmchat-first-msg-copy {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  color: var(--color-text-subtle);
+  line-height: var(--lh-prose);
+  font-style: normal;
+}
+
+/* Book-design asterism — textural pause beneath first-msg copy. */
+.lmchat-first-msg-asterism {
+  margin: var(--space-sibling) 0 0;
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-size: var(--fs-caption);
+  color: var(--color-text-subtle);
+  text-align: center;
+  letter-spacing: 0.25em;
+}
+
+/* Sub-session outer/messages container — flex column, scrollable.
+   Atmospheric treatment: ambient copper bleed at top-right + 1px-dot
+   grain overlay at 4% opacity. The surface feels different from the
+   main chat without layout shift. */
+/* Entrance keyframe — panel slides up 4px and fades in over 200ms.
+   Fires once when the element is first inserted into the DOM.
+   Reduced-motion: opacity-only via media query below. */
+@keyframes lmchat-subsession-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lmchat-subsession-outer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: lmchat-subsession-enter 200ms
+    var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1)) both;
+  /* Ambient copper bleed — radial from top-right corner */
+  background-image:
+    radial-gradient(
+      ellipse at top right,
+      color-mix(in oklch, var(--color-accent) 6%, transparent),
+      transparent 70%
+    ),
+    /* 1px-dot grain overlay at 4% opacity — surface tactility */
+    radial-gradient(
+        circle,
+        color-mix(in oklch, var(--color-text) 4%, transparent) 1px,
+        transparent 1px
+      );
+  background-size:
+    100% 100%,
+    var(--space-glue, 4px) var(--space-glue, 4px);
+  /* Mode-distinct border: copper-hinted hairline at the top */
+  border-top: 1px solid
+    color-mix(in oklch, var(--color-accent) 30%, var(--color-border));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-subsession-outer {
+    animation: none;
+  }
+}
+
+/* Mode eyebrow — ALL-CAPS italic monospace "RESEARCH" label.
+   Sits above the control bar; signals the panel is a distinct mode surface.
+   aria-hidden so it's decorative. */
+.lmchat-subsession-mode-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-accent-text);
+  padding: var(--space-glue) var(--space-sibling-relaxed) 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* Reasoning phase wrapper — display font italic, muted contrast.
+   Signals the model is still in "thinking" mode. */
+.lmchat-subsession-reasoning-phase {
+  font-family: var(--font-display);
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+/* Answer phase wrapper — back to full contrast sans typography. */
+.lmchat-subsession-answer-phase {
+  font-family: var(--font-sans);
+  font-style: normal;
+  color: var(--color-text);
+}
+
+/* Sub-session control bar — accent-tinted strip with controls. */
+.lmchat-subsession-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-glue) var(--space-sibling-relaxed);
+  background: color-mix(in oklch, var(--color-accent) 8%, var(--color-surface));
+  border-bottom: 1px solid var(--color-accent-border);
+  flex-shrink: 0;
+}
+
+/* Sub-session preset label — pill/chip signalling an active sub-agent.
+   Styled as a clear, unmistakable pill so "a sub-agent is active" reads
+   at a glance. This is the ONLY pill that appears inside the sub-session
+   control bar; the Composer no longer shows a badge. */
+.lmchat-subsession-label {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 12px;
+  background: color-mix(in oklch, var(--color-accent) 18%, transparent);
+  border: 1px solid color-mix(in oklch, var(--color-accent) 40%, transparent);
+  border-radius: var(--radius-pill, 999px);
+  font-family: var(--font-display);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-accent-text);
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* Sub-session bar right-cluster: button + caption + cancel. */
+.lmchat-subsession-bar__actions {
+  display: flex;
+  gap: var(--space-glue);
+  align-items: center;
+}
+
+/* Sub-session status caption — "Generating summary…" / "Thinking…" */
+.lmchat-subsession-status {
+  font-size: var(--fs-caption);
+  color: var(--color-text-subtle);
+}
+
+/* Sub-session intro emphasized phrase ("X mode" in copper). */
+.lmchat-subsession-intro__strong {
+  color: var(--color-accent);
+}
+
+/* Sub-session messages scrollable column. */
+.lmchat-subsession-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sibling-relaxed);
+  padding: var(--space-group);
+  max-width: var(--max-chat);
+  width: 100%;
+  margin-inline: auto;
+}
+
+/* Sub-session assistant summary bubble — copper-bordered preview card. */
+.lmchat-subsession-summary {
+  align-self: flex-start;
+  max-width: 88%;
+  padding: var(--space-glue-relaxed) var(--space-sibling-relaxed);
+  background: var(--color-surface);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg)
+    var(--radius-xs);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg);
+  line-height: var(--lh-prose);
+}
+
+/* "Summary ready" eyebrow inside the summary bubble. */
+.lmchat-subsession-summary__eyebrow {
+  margin: 0 0 var(--space-glue);
+  font-family: var(--font-display);
+  font-size: var(--fs-caption);
+  color: var(--color-accent-text);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+}
+
+/* Tool-call row — one per call, with live status. */
+.lmchat-subsession-tool {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-glue);
+  padding: var(--space-glue) var(--space-sibling);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  background: color-mix(in oklch, var(--color-text) 4%, transparent);
+  border-radius: var(--radius-sm);
+}
+.lmchat-subsession-tool__status {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  min-width: 4.5rem;
+}
+.lmchat-subsession-tool--pending .lmchat-subsession-tool__status {
+  color: var(--color-accent-text);
+}
+.lmchat-subsession-tool--success .lmchat-subsession-tool__status {
+  color: color-mix(in oklch, var(--color-text) 60%, transparent);
+}
+.lmchat-subsession-tool--failure .lmchat-subsession-tool__status {
+  color: var(--color-danger);
+}
+.lmchat-subsession-tool__name {
+  color: var(--color-text);
+  font-weight: 500;
+}
+.lmchat-subsession-tool__error {
+  color: color-mix(in oklch, var(--color-danger) 80%, var(--color-text));
+}
+
+/* Error banner — shown when the sub-session stream fails (validation,
+   auth, server error). Without this branch the user saw their message
+   render and nothing else — a silent failure with no error surfaced. */
+.lmchat-subsession-error {
+  margin: var(--space-group) 0;
+  padding: var(--space-sibling) var(--space-group);
+  background: color-mix(in oklch, var(--color-danger) 8%, var(--color-bg));
+  border: 1px solid color-mix(in oklch, var(--color-danger) 35%, transparent);
+  border-radius: var(--radius-sm);
+}
+.lmchat-subsession-error__title {
+  margin: 0 0 var(--space-glue);
+  font-family: var(--font-display);
+  font-size: var(--fs-caption);
+  color: var(--color-danger);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+}
+.lmchat-subsession-error__detail {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MOBILE RESPONSIVE SWEEP (≤768px)
+   All rules below are additive mobile-only overrides. Desktop (≥769px) is
+   untouched. Token references use the established spacing grammar.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* ── A/B Compare view — stack panes vertically on mobile ───
+     Desktop is two-column side-by-side; mobile flips to stacked rows so
+     each pane gets the full width.
+     ABCompareView.tsx hardcoded ``flexDirection: "row"`` with no
+     breakpoint, overflowing at 393px. */
+  .lmchat-ab-compare-view {
+    flex-direction: column !important;
+  }
+
+  /* ── Message area ─── */
+  /* Reduce lateral padding on narrow viewports — GROUP padding (24px) is too
+     wide at 390px; SIBLING-RELAXED (16px) gives comfortable reading margins. */
+  .lmchat-messages-area {
+    padding: var(--space-sibling-relaxed) var(--space-sibling);
+    gap: var(--space-sibling-relaxed); /* tighter between turns on mobile */
+  }
+
+  /* ── User bubble ─── */
+  /* At 390px a 72% max-width bubble can be ~280px — fine. But push max to
+     88% so short messages don't look orphaned. */
+  .lmchat-bubble-user {
+    max-width: 88%;
+  }
+
+  /* ── Message action buttons ─── */
+  /* 24×24 icon buttons are below the 44px HIG minimum. On mobile we raise to
+     44×44 per HIG tap-target requirement. */
+  .lmchat-message-action-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* B-copy-message (mobile): action row is always-visible on touch since
+     there's no hover. Desktop ≥769px keeps the hover-reveal grammar at
+     ``.lmchat-message-row:hover .lmchat-message-actions``. */
+  .lmchat-message-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* ── Confirm dialog ─── */
+  /* Ensure the confirm dialog never overflows on narrow screens. */
+  .lmchat-confirm-dialog {
+    max-width: calc(100vw - var(--space-group));
+    padding: var(--space-group);
+  }
+
+  /* ── Follow-up chips ─── */
+  /* Chips can still wrap but give them more breathing room on mobile. */
+  .lmchat-followup-chip {
+    padding: var(--space-glue-relaxed) var(--space-sibling);
+    font-size: var(--fs-body); /* 14px — up from 13px for readability */
+    min-height: 44px; /* tap-target floor */
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* ── Settings rail ─── */
+  /* On mobile the settings rail (right panel) should use full available width
+     with less lateral padding. */
+  .lmchat-settings-rail {
+    padding: var(--space-glue-relaxed);
+  }
+
+  /* ── Header menu ─── */
+  /* Dropdown panel: constrain width so it doesn't run off screen at 390px. */
+  .lmchat-header-menu__panel {
+    min-width: 180px;
+    right: 0;
+    left: auto;
+    max-width: calc(100vw - var(--space-group));
+  }
+
+  /* ── Subchat divider ─── */
+  .lmchat-subchat-label {
+    font-size: var(
+      --fs-caption
+    ); /* 12px — up from 11px for mobile readability */
+  }
+
+  /* ── Stats chip ─── */
+  /* stats chip is 11px (--fs-micro). On mobile bump to 12px. */
+  .lmchat-stats-chip {
+    font-size: var(--fs-caption);
+  }
+
+  /* ── Error banner ─── */
+  .lmchat-error-banner {
+    padding: var(--space-sibling);
+  }
+
+  /* ── FirstMessageHint (mobile) ─── */
+  /* Mobile drops the card chrome — the prompt sits on the canvas instead of
+     in a bordered surface, matching the editorial-not-boxed mobile language. */
+  .lmchat-first-msg-wrap {
+    padding: var(--space-group) var(--space-sibling);
+  }
+
+  .lmchat-first-msg-card {
+    max-width: 92vw;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+  }
+
+  /* Mobile title — --fs-h2 (20px) editorial presence; tighter bottom margin. */
+  .lmchat-first-msg-title {
+    margin: 0 0 var(--space-glue-relaxed);
+    font-size: var(--fs-h2);
+  }
+
+  /* Mobile copy — italic --fs-body-lg, muted not subtle. */
+  .lmchat-first-msg-copy {
+    font-size: var(--fs-body-lg);
+    color: var(--color-text-muted);
+    font-style: italic;
+  }
+
+  /* Home "Start your first chat" CTA — raise from ~39px to 44px touch target. */
+  .lmchat-empty-cta {
+    min-height: 44px;
+  }
+
+  /* ── Empty-state hero: center the whole composition on mobile ─────────────
+     Desktop is a left-anchored editorial column (the intended look). On a
+     390px phone that mix — centered-looking title/copy but flush-left chips
+     and CTA — reads as broken/off-center (CTA measured left 71px / right
+     101px). Center every layer so the column sits on the viewport midline:
+     left and right gaps of the CTA become equal (±4px). Caps are released
+     to 100% so a centered column doesn't anchor oddly inside a narrow width.
+     Desktop (>768px) is untouched. */
+  .lmchat-empty-hint {
+    justify-content: center;
+  }
+  .lmchat-empty-content {
+    align-items: center;
+    text-align: center;
+    max-width: 100%;
+  }
+  .lmchat-empty-copy {
+    max-width: 100%;
+  }
+  .lmchat-empty-hints-row {
+    justify-content: center;
+  }
+
+  /* "More chat actions" overflow trigger — raise to 44x44 tap target.
+     OverflowMenu uses inline styles (minHeight/minWidth 36px); override via
+     data-testid so it matches the hamburger 44x44 tap target on mobile. */
+  [data-testid="topbar-overflow-trigger"] {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+
+  /* Topbar model <select> — raise to 44px minimum on mobile.
+     Base .lmchat-model-select has height:38px which wins over min-height;
+     override with height:auto + min-height:44px. appearance:none already set. */
+  .lmchat-model-select--mobile,
+  .lmchat-model-select--mobile-wide {
+    height: auto;
+    min-height: 44px;
+  }
+
+  /* Dock button labels — hidden on mobile (≤768px). The four dock buttons
+     (Memory/Docs/RAG/Tune) carry icon+label on a 390px screen, which
+     makes each button taller than necessary and the bar visually heavy.
+     Labels are removed here; aria-label on each button preserves
+     screen-reader access. The 44px min-height on .lmchat-dock-btn (base
+     rule) ensures the tap target stays WCAG 2.5.5-compliant even with
+     the label gone. */
+  .lmchat-dock-btn-label {
+    display: none;
+  }
+
+  /* Topbar safe-area top padding for Face ID notch (iPhone X+). Mobile
+     sidebar shell already applies this; match it on the topbar shell so
+     content does not render behind the system status bar. */
+  .lmchat-topbar-shell--mobile {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+}
+
+/* ── FirstMessageHint editorial moment ─── */
+/* Copper marginalia dot to the left of the title on mobile — 5px circle. */
+.lmchat-first-msg-title--mobile {
+  position: relative;
+  padding-left: calc(var(--space-sibling) + 5px);
+}
+
+.lmchat-first-msg-title--mobile::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-accent-text);
+  opacity: 0.7;
+}
+
+/* ── Narrow desktop / large tablet (769–960px) ─── */
+/* The desktop layout fires at >768px but the model select (min-width:240px)
+   plus the full action-row (Memory+Docs+RAG+⋯+badge) overflows the 528px
+   content column when the sidebar is expanded at 768-960px widths.
+   Compress the select to 160px and clip the shell so no content escapes. */
+@media (min-width: 769px) and (max-width: 960px) {
+  .lmchat-topbar-shell {
+    overflow: hidden;
+  }
+  .lmchat-model-select {
+    min-width: 160px;
+    max-width: 200px;
+  }
+}
+
+/* ── Narrowest breakpoint (≤480px iPhone-size) ─── */
+@media (max-width: 480px) {
+  /* The empty-state hero is centered for all mobile widths in the
+     ≤768px block above (.lmchat-empty-content/.lmchat-empty-hint/etc.).
+     This narrowest-width rule reasserts the centering on the content
+     column directly via its test id as a belt-and-braces guard. */
+  [data-testid="chat-empty-state"] {
+    align-items: center !important;
+    text-align: center !important;
+  }
+
+  /* FirstMessageHint mobile — no card chrome (handled in JS); add spacing. */
+  [data-testid="chat-first-message-hint"] p {
+    margin-inline: auto;
+    max-width: 32ch;
+  }
+
+  /* Hide LM Studio status badge at ≤480px. Five chrome elements on 375px
+     is too crowded; the badge's status info is accessible via Settings
+     (already in OverflowMenu). */
+  .lmchat-topbar-badge-wrap {
+    display: none;
+  }
+
+  /* Single-row compact topbar at ≤480px. Collapses the two-row stack
+     (title + model pill) to one 56px row:
+     [hamburger | brand | model-select pill (max 138px) | overflow].
+     Chat title is dropped from the bar — already in sidebar + page <title>. */
+  .lmchat-topbar-shell--mobile {
+    min-height: 56px;
+    height: 56px;
+    padding: 0 12px;
+    align-items: center;
+  }
+
+  /* Flatten the vertical title+model stack so its children flow directly
+     into the topbar flex row — makes the select a sibling of the brand. */
+  .lmchat-topbar-title-stack {
+    display: contents;
+  }
+
+  /* Hide the title row — title lives in sidebar list + <title> tag. */
+  .lmchat-topbar-title-row {
+    display: none;
+  }
+
+  /* Model select promoted into the single row. The flex child is the
+     ModelSelectControl wrap (select + capability icons), not the bare
+     select — the single-row constraint moves to the wrap so it actually
+     binds. The select keeps the pill sizing. min-height raised to 44px
+     (HIG minimum) — was 36px.
+     The previous rule capped the wrap at ``max-width: 200px`` and pushed
+     the badge to the right with ``margin-inline-start: auto`` — but at
+     ≤480px the badge is ``display: none`` (above), so that margin did
+     nothing and ~66px of dead space sat at the right edge while the model
+     name truncated. Drop the cap so the wrap FILLS the available middle
+     (``flex: 1 1 auto``, no max-width); the overflow trigger then sits
+     flush at the right edge with no dead gap, and the model name gets the
+     full width. */
+  .lmchat-topbar-shell--mobile .lmchat-model-select-wrap {
+    flex: 1 1 auto;
+    max-width: none;
+    min-width: 0;
+  }
+
+  /* The pill select must be able to shrink to the wrap's width — its base
+     ``min-width: 240px`` would otherwise overflow the ~254px middle slot and
+     re-introduce the truncation. min-width:0 + width:100% lets it track the
+     wrap so the full model name shows. */
+  .lmchat-topbar-shell--mobile .lmchat-model-select {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .lmchat-model-select--mobile-wide {
+    height: auto;
+    min-height: 44px;
+    font-size: var(--fs-label);
+  }
+}
+
+/* ── Landscape phone (any width, ≤480px tall) ─── */
+/* Phone landscape leaves only 43px for messages (89%+ chrome). Topbar →
+   48px, dock hidden, composer padding reduced. Goal: ≤50% of 375px
+   (~187px) consumed by chrome. */
+@media (orientation: landscape) and (max-height: 480px) {
+  .lmchat-topbar-shell--mobile {
+    min-height: 48px;
+    height: 48px;
+    padding: 0 12px;
+    align-items: center;
+  }
+
+  /* Same flatten as ≤480px portrait. */
+  .lmchat-topbar-title-stack {
+    display: contents;
+  }
+
+  .lmchat-topbar-title-row {
+    display: none;
+  }
+
+  /* Same single-row wrap constraint as ≤480px portrait — once the stack
+     flattens, the ModelSelectControl wrap is the bar's direct flex child.
+     Landscape phones are WIDE (e.g. 844px), so the old 138px cap
+     truncated the model name while leaving most of the row empty. Let
+     the wrap fill the available width (capped at 360px so it doesn't run
+     edge-to-edge) and shrink the select to track it — the overflow
+     trigger pins to the right edge with no dead gap. */
+  .lmchat-topbar-shell--mobile .lmchat-model-select-wrap {
+    flex: 1 1 auto;
+    max-width: 360px;
+    min-width: 0;
+  }
+
+  .lmchat-topbar-shell--mobile .lmchat-model-select {
+    min-width: 0;
+    width: 100%;
+  }
+
+  /* Dock hidden in landscape — saves 64–67px. Panels reachable via ⋯ menu. */
+  .lmchat-mobile-dock {
+    display: none;
+  }
+
+  /* Composer wrapper — tighter vertical padding saves ~20px. */
+  .lmchat-composer-wrapper {
+    padding-top: var(--space-glue-relaxed);
+    padding-bottom: var(--space-glue-relaxed);
+  }
+
+  /* Disclosure panel collapsed in landscape. */
+  .lmchat-integrations-disclosure {
+    display: none;
+  }
+
+  /* Badge hidden in landscape. */
+  .lmchat-topbar-badge-wrap {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-error-banner,
+  .lmchat-confirm-cancel,
+  .lmchat-confirm-btn,
+  .lmchat-edit-save-btn,
+  .lmchat-edit-cancel-btn {
+    transition: none;
+    transform: none;
+    filter: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   FADE DIVIDER — hand-drawn feel dividers with fading alpha at ends
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Horizontal divider between conversational sections with fading alpha at ends.
+   Uses border-image with linear-gradient for hand-drawn feel. */
+.lmchat-fade-divider {
+  border: none;
+  border-top: 1px solid;
+  border-image: linear-gradient(
+      to right,
+      transparent,
+      var(--color-border-default) 20%,
+      var(--color-border-default) 80%,
+      transparent
+    )
+    1;
+  margin: var(--space-chapter) 0;
+}
+
+/* B-copy-message (iPhone-class widths): at ≤420px the absolute-positioned
+   action row overlaps wrapped bubble content (the new third Copy button
+   makes it wider). Convert to in-flow at that breakpoint so the row sits
+   below the bubble rather than over it. */
+@media (max-width: 420px) {
+  .lmchat-message-actions {
+    position: static;
+    margin-top: var(--space-glue);
+    justify-content: flex-end;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* ── pointer:coarse — touch lift for action buttons ─────────────
+   At ≥768px an iPad with Magic Keyboard or Surface in tablet mode is a wide
+   viewport with coarse (touch) input. The viewport breakpoints above do not
+   fire, so the desktop button sizes stay sub-threshold (WCAG 2.5.5 says
+   touch targets ≥44×44). This block lifts every action button that has a
+   smaller desktop size to the --tap-target-min token (44px) when the input
+   surface is coarse. Pinned-
+   panel close (32×32) + unpin (24×24) and the sidebar row delete (22×22)
+   were all caught here alongside the message action buttons (32×32). */
+@media (pointer: coarse) {
+  .lmchat-message-action-btn,
+  .lmchat-pinned-panel__close,
+  .lmchat-pinned-panel__unpin,
+  .lmchat-chat-row-delete-btn {
+    width: var(--tap-target-min);
+    height: var(--tap-target-min);
+    min-width: var(--tap-target-min);
+    min-height: var(--tap-target-min);
+  }
+
+  /* Message actions always-visible on touch (no hover) */
+  .lmchat-message-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* ── Tool-call cards — used by SubSessionPanel's tool list (the main-chat
+   turn now renders tool calls as quiet inline lines via ProcessStream). ─── */
+
+/* The tool's friendly name in the <summary> row. */
+.lmchat-tool-name {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  color: var(--color-text-subtle);
+}
+
+/* Status label (pending/success/failure) on the right of the summary row.
+   The status color itself is still applied inline because it's dynamic
+   (depends on toolCall.status); everything else is here. */
+.lmchat-tool-status {
+  margin-left: auto;
+  font-size: 0.75rem;
+  text-transform: capitalize;
+}
+
+/* Body of the open <details> — arguments and result pre blocks. */
+.lmchat-tool-card-body {
+  padding: var(--space-glue) var(--space-glue-relaxed);
+}
+
+/* The pre block holding the rendered result; matches toolPreStyle but adds
+   the muted color and top margin previously spread inline. */
+.lmchat-tool-result {
+  color: var(--color-text-muted);
+  margin-top: var(--space-glue);
+}

@@ -1,0 +1,16 @@
+# Line-ending normalization. Without this, a Windows contributor with
+# core.autocrlf=true checks out .sh/.py files with CRLF, which breaks
+# shebangs ($'\r': command not found) under git-bash/WSL. Force LF for all
+# text; never touch binaries.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+
+# GitHub language stats: keep the Python/TypeScript breakdown honest.
+web/src/types/api.ts linguist-generated=true
+guide/** linguist-documentation=true

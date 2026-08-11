@@ -1,0 +1,260 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * PromoteToProjectModal — "Turn this chat into a Project."
+ *
+ * Same backdrop + brass-edged card recipe as KeyboardHelp
+ * (keyboard-help.css), form-field recipe borrowed from settings.css's
+ * .lmchat-input / .lmchat-textarea, checkbox row borrowed from the
+ * MCP tools picker (.lmchat-mcp-tools__*). Kept as its own stylesheet
+ * (rather than importing settings.css) so the modal stays mountable
+ * from any page without a cross-page CSS dependency.
+ */
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   BACKDROP + CARD
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.ptp-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--color-scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-max);
+}
+
+.ptp-card {
+  width: 480px;
+  max-width: 92vw;
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: ptp-card-in var(--duration-base, 200ms)
+    var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+
+@keyframes ptp-card-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.ptp-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   HEADER
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.ptp-header {
+  padding: var(--space-sibling-relaxed) var(--space-group);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.ptp-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-h3);
+  font-weight: 600;
+  color: var(--color-text);
+  letter-spacing: var(--ls-tight);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   BODY — scrollable form fields
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.ptp-body {
+  padding: var(--space-group);
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sibling-relaxed);
+}
+
+.ptp-label {
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.ptp-label-optional {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--color-text-subtle);
+}
+
+.ptp-input {
+  width: 100%;
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  min-height: 36px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  outline: none;
+  box-sizing: border-box;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-quart),
+    box-shadow var(--duration-fast) var(--ease-out-quart);
+}
+
+.ptp-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1.5px
+    color-mix(in oklch, var(--color-accent) 30%, transparent);
+}
+
+.ptp-textarea {
+  resize: vertical;
+  min-height: 72px;
+  line-height: var(--lh-prose);
+}
+
+.ptp-empty {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  font-style: italic;
+  color: var(--color-text-subtle);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   DOCUMENT PICKER
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.ptp-doc-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-glue-relaxed);
+  max-height: 180px;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+.ptp-doc-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+  cursor: pointer;
+  min-height: 28px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  color: var(--color-text);
+  line-height: var(--lh-ui);
+}
+
+.ptp-doc-label:hover {
+  color: var(--color-accent-text);
+}
+
+.ptp-doc-checkbox {
+  flex-shrink: 0;
+  accent-color: var(--color-accent-fill);
+  cursor: pointer;
+}
+
+.ptp-doc-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   FOOTER
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.ptp-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sibling);
+  padding: var(--space-sibling-relaxed) var(--space-group);
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.ptp-cancel-btn {
+  padding: var(--space-glue-relaxed) var(--space-sibling-relaxed);
+  background: none;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.ptp-cancel-btn:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.ptp-submit-btn {
+  padding: var(--space-glue-relaxed) var(--space-sibling-relaxed);
+  background: var(--color-accent-quiet);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--color-accent-text);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-quart);
+}
+
+.ptp-submit-btn:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--color-accent) 16%, transparent);
+  border-color: var(--color-accent);
+}
+
+.ptp-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ptp-card {
+    animation: none;
+  }
+
+  .ptp-cancel-btn,
+  .ptp-submit-btn {
+    transition: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .ptp-card {
+    max-width: calc(100vw - var(--space-group));
+  }
+}

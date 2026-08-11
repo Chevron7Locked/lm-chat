@@ -1,0 +1,80 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Setup — in-shell onboarding page for SetupLmStudio.tsx.
+ *
+ * This page renders INSIDE the app shell (AppLayout + left sidebar),
+ * not as a standalone full-viewport auth surface. The outer wrapper
+ * therefore must NOT force min-height: 100dvh or cap itself at the
+ * 400px auth column width — those rules belong solely to auth.css
+ * (Login + Register).
+ *
+ * Layout intent:
+ *   - .lmchat-setup-page   — flex column that fills the content
+ *     area flex child, scrolls internally, and centers its panel
+ *     vertically when there is room.
+ *   - .lmchat-setup-panel  — the onboarding card, max-width 620px,
+ *     centered horizontally; collapses to full-width below 640px.
+ *
+ * Spacing grammar (semantic tokens):
+ *   glue (4px) → sibling (12px) → group (24px) → chapter (48px)
+ *
+ * Color tokens: Midnight Atelier copper accent, warm near-black surfaces.
+ * No border > 1px on sides. No gradient text. No glassmorphism.
+ */
+
+/* ── Content-area wrapper ─────────────────────────────────────────────── */
+/* Sits as a direct flex child of the app layout's main content column.
+ * Does NOT own the full viewport — the sidebar already takes its slice.
+ * Fills remaining width, allows vertical scroll, and uses safe centering
+ * so the brand header stays reachable on short viewports.               */
+
+.lmchat-setup-page {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  /* safe center: content stays reachable if it taller than the area */
+  align-items: center;
+  justify-content: safe center;
+  padding: var(--space-chapter) clamp(var(--space-group), 5vw, var(--space-chapter));
+  background: transparent;
+}
+
+/* ── Onboarding panel — the card that floats on the canvas ───────────── */
+/* max-width 620px gives comfortably wider fields than the 400px auth
+ * column while staying well short of full-width on desktop. At narrow
+ * viewports it collapses to the full available width (minus padding).  */
+
+.lmchat-setup-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 620px;
+}
+
+/* ── Responsive: narrow viewports ───────────────────────────────────────
+   Below 640px (single-column phone) the panel already fills the
+   available width via width: 100% above. We tighten vertical padding
+   so less air is wasted on small screens.                               */
+
+@media (max-width: 640px) {
+  .lmchat-setup-page {
+    padding: var(--space-group-relaxed) var(--space-group);
+    /* Align to the top on small screens — the brand header should be the
+       first thing visible, not hidden above the fold by centering.      */
+    justify-content: flex-start;
+  }
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────────────
+   The page itself carries no transitions, but guard any future
+   additions here so they honour the prefers-reduced-motion preference. */
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-setup-page,
+  .lmchat-setup-panel {
+    transition: none;
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "description": "Shrink-only allowlist for light-mode WCAG 2.1 AA violations. Tests MUST fail if this list grows (i.e. new violations appear). It may shrink as violations are fixed.",
+  "format_version": 1,
+  "created": "2026-06-14",
+  "allowlist": []
+}

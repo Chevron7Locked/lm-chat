@@ -1,0 +1,2145 @@
+@import "tailwindcss";
+
+/* ─── Self-hosted web fonts (Midnight Atelier) ─────────────────────────────
+   All three families are loaded from /fonts/ (served from web/public/fonts/
+   by the FastAPI static mount). latin subset only; font-display: swap so
+   system fallbacks render immediately and the real faces swap in.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Hanken Grotesk — body/sans — OFL 1.1 — latin subset via Google Fonts */
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/HankenGrotesk-Regular.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/HankenGrotesk-Medium.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/HankenGrotesk-SemiBold.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/HankenGrotesk-Bold.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+
+/* Hubot Sans — display — OFL 1.1 — static woff2 from github/hubot-sans v1.0.1 */
+@font-face {
+  font-family: "Hubot Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/HubotSans-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Hubot Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/HubotSans-SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Hubot Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/HubotSans-Bold.woff2") format("woff2");
+}
+
+/* Commit Mono — mono/code — free for personal & commercial use (custom license) —
+   latin subset via @fontsource/commit-mono v5.2.5 */
+@font-face {
+  font-family: "Commit Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/CommitMono-Regular.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Commit Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/CommitMono-Bold.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+
+/* Identity: extend the LM Studio brand.
+   LM Studio's marketing site uses the system font stack and an indigo
+   accent (#4338CA, hue ~274). We mirror those choices: native fonts on
+   each OS (SF Pro on Mac, Segoe UI on Win, system stack on Linux) and
+   an accent shifted from the previous generic blue (hue 245) to LM
+   Studio's indigo. No self-hosted webfonts. */
+
+/*
+ * Theme tokens via Tailwind 4 @theme.
+ *
+ * Fonts are referenced here but the actual font files were initially out
+ * of scope, falling back to system-ui / ui-monospace until font assets
+ * were wired in. No Google Fonts CDN — forbidden by the project CSP.
+ * Self-hosted font assets live under web/public/fonts/.
+ *
+ * OKLCH palette anchored on hue 240 (blue-tinted dark surfaces) per the
+ * original design brief: "dark + light + system-auto theme; refined premium
+ * tool; anchor LM Studio family; OKLCH blue-tinted palette."
+ */
+
+@theme {
+  /* ─── Midnight Atelier — warm/crafted/nocturnal (dark default) ─── */
+  /* Warm near-black anchored on hue ~62 (the copper family), very low
+     chroma so surfaces read as charcoal-with-warmth, not brown. Copper
+     is the hero accent (the equalizer-bars logo). Escapes the AI
+     cyan/indigo entirely; feels like a premium rig at 1am. */
+  --color-bg: oklch(0.175 0.008 62);
+  --color-surface: oklch(0.215 0.01 64);
+  --color-surface-elevated: oklch(0.255 0.012 66);
+  --color-surface-3: oklch(0.3 0.013 68);
+
+  /* ─── Border ─── */
+  --color-border: oklch(0.3 0.012 66);
+  --color-border-default: oklch(0.38 0.014 68);
+  --color-border-strong: oklch(0.48 0.016 70);
+
+  /* ─── Text (parchment/cream, warm) ─── */
+  --color-text: oklch(0.94 0.016 82);
+  --color-text-muted: oklch(0.82 0.02 78);
+  /* Raised from 0.730 to 0.780 to clear 4.5:1 on bg L=0.175. */
+  --color-text-subtle: oklch(0.78 0.018 76);
+  /* Changed from near-black (0.185) to cream (0.985) for
+     WCAG AA on --color-accent-fill (L=0.620 bronze). Old value was 2.14:1 (fail);
+     cream gives ~8.8:1 on bronze fill. */
+  --color-text-on-accent: oklch(0.985 0.01 86);
+
+  /* ─── Accent: COPPER (the logo, oklch ~0.75 0.13 75) ─── */
+  /* SPLIT TOKEN PATTERN (Material-style on-primary vs primary):
+   * --color-accent (L=0.760) is for FILLS — button backgrounds, active-nav
+   *   washes, BrandMark mark. Dark fill anchors the brand hue; text on it
+   *   uses --color-text-on-accent (warm near-black, contrast handled).
+   * --color-accent-text (L=0.835) is for SMALL COPPER TEXT against the
+   *   canvas — eyebrow labels, status chips, slash command names, link copy.
+   *   Brightened to clear WCAG AA (≥4.5:1) at 11–13px on --color-bg L=0.175.
+   * Splitting prevents the "neon button" problem when accent is also used
+   *   as a fill. */
+  --color-accent: oklch(0.76 0.13 72);
+  --color-accent-hover: oklch(0.81 0.14 74);
+  --color-accent-quiet: oklch(0.76 0.13 72 / 0.16);
+  --color-accent-text: oklch(0.835 0.135 72);
+  --color-accent-text-hover: oklch(0.875 0.14 74);
+  /* --color-accent-fill is the deeper bronze for OPAQUE BUTTON BACKGROUNDS.
+   * Darkened L=0.620→0.560 (canvas-sampled contrast 3.574:1→4.57:1).
+   * --color-text-on-accent moved from near-black (L=0.185) to cream
+   * (L=0.985), which silently broke AA at L=0.620. At L=0.560 cream text yields
+   * 4.57:1 — passes WCAG AA. Hover raised proportionally to 0.620.
+   * VERIFIED: oklch(0.560 0.115 70) bg + oklch(0.985 0.010 86) text = 4.57:1. */
+  --color-accent-fill: oklch(0.56 0.115 70);
+  --color-accent-fill-hover: oklch(0.62 0.12 70);
+
+  /* ─── Semantic status (warm-family, distinct from copper) ─── */
+  --color-success: oklch(0.8 0.15 162); /* mint — cost-saved/positive */
+  --color-warning: oklch(0.82 0.13 95); /* yellow, pulled off copper */
+  /* Raised from 0.640 to 0.700 for 4.5:1+ on bg L=0.175. */
+  --color-danger: oklch(0.7 0.19 28); /* warm red */
+
+  /* ─── Brand copper (theme-invariant) ─── */
+  --color-brand: oklch(0.76 0.13 72);
+
+  /* ─── Fonts: Midnight Atelier — warm crafted set (self-hosted woff2) ─── */
+  /* Display: Hubot Sans (characterful grotesque). Body: Hanken Grotesk
+     (warm humanist). Mono: Commit Mono. System fallbacks until the
+     woff2 load (so color lands instantly, type upgrades on swap). */
+  --font-sans:
+    "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-display:
+    "Hubot Sans", "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    "Commit Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* ─── Type scale (rem / 16px base, 1.2 minor-third ratio) ─── */
+  /* Named --fs-* to avoid Tailwind v4 @theme --text-* utility registration. */
+  --fs-hero: 2rem; /* 32px — empty-state heading only */
+  --fs-stat: 1.75rem; /* 28px — Analytics / stat card metric values */
+  --fs-h1: 1.5rem; /* 24px — reserved, page-level */
+  --fs-h2: 1.25rem; /* 20px — Settings h2, major headings */
+  --fs-h3: 1.0625rem; /* 17px — section sub-headings */
+  --fs-h4: 0.9375rem; /* 15px — form section headings */
+  --fs-body-lg: 0.9375rem; /* 15px — message prose */
+  --fs-body: 0.875rem; /* 14px — standard UI text */
+  --fs-label: 0.8125rem; /* 13px — tabs, buttons, metadata */
+  --fs-caption: 0.75rem; /* 12px — hints, helper text */
+  --fs-micro: 0.6875rem; /* 11px — passive metadata only: timestamps, stat values, table-row meta. Interactive elements (buttons, selects, links, comboboxes, tabs) must use --fs-label (13px) minimum. */
+  --fs-mono: 0.8125rem; /* 13px — code spans, pre blocks */
+
+  /* ─── Line heights ─── */
+  --lh-display: 1.2;
+  --lh-heading: 1.3;
+  --lh-prose: 1.65;
+  --lh-ui: 1.45;
+  --lh-compact: 1.35;
+  --lh-code: 1.6;
+
+  /* ─── Letter spacing ─── */
+  --ls-tight: -0.015em;
+  --ls-normal: 0;
+  --ls-caps: 0.06em;
+  --ls-wide: 0.04em;
+
+  /* ─── Spacing (4pt base scale) ─── */
+  --spacing-2xs: 2px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+  --spacing-3xl: 64px;
+
+  /* ─── Component semantic spacing ─── */
+  --padding-btn-y: 6px;
+  --padding-btn-x: var(--spacing-md);
+  --padding-btn-sm-y: 5px;
+  --padding-btn-sm-x: var(--spacing-sm);
+  --padding-input-y: 8px;
+  --padding-input-x: var(--spacing-sm);
+  --gap-field-label: var(--spacing-xs);
+  --gap-form-row: 12px; /* between consecutive form rows */
+  --gap-section: var(--spacing-lg);
+  --padding-sidebar-item-y: 8px; /* was 6px */
+  --gap-stat-row: var(--spacing-xs); /* was 2px hardcoded; doubles the gap */
+
+  /* ─── Density tier tokens ─── */
+  --tier-comfortable-body-size: var(--fs-body-lg);
+  --tier-comfortable-lh: var(--lh-prose);
+  --tier-comfortable-gap: var(--spacing-lg);
+  --tier-dense-body-size: var(--fs-body);
+  --tier-dense-lh: var(--lh-ui);
+  --tier-dense-gap: var(--spacing-sm);
+  --tier-compact-body-size: var(--fs-micro);
+  --tier-compact-lh: var(--lh-compact);
+  --tier-compact-gap: var(--spacing-2xs);
+
+  /* ─── Radii ─── */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 9999px;
+  --radius-full: 9999px; /* alias for radius-pill */
+
+  /* ─── Interaction targets ───
+     WCAG 2.5.5 — pointer/touch targets ≥ 44×44 CSS pixels. Lifts all
+     sub-threshold action buttons to this token under
+     @media (pointer: coarse) so desktop density survives but touch input
+     stays compliant. Used by chat.css's pointer:coarse block. */
+  --tap-target-min: 44px;
+
+  /* ─── Stacking order ───
+     Semantic z-index scale. Each tier sits 100
+     above the previous so future intermediate layers can interleave
+     without renumbering. Use these tokens — NOT raw numbers — when
+     a new positioned layer needs to choose its plane.
+       local   — within-card layering (siblings of a relatively-positioned parent)
+       elevated — sticky headers / sticky composers
+       popover  — dropdowns, hover cards, suggestion palettes
+       dialog   — modal backdrops + dialog bodies
+       toast    — notifications, MUST sit above dialogs so error toasts
+                  remain visible when a confirm modal is up
+       max      — keyboard-help shortcut overlay (the only thing that
+                  legitimately preempts toasts) */
+  --z-local: 1;
+  --z-elevated: 100;
+  --z-popover: 200;
+  --z-dialog: 1000;
+  --z-toast: 2000;
+  --z-max: 3000;
+
+  /* ─── Chat content column cap (messages + composer were previously full-width) ─── */
+  --max-chat: 820px;
+
+  /* ─── Standalone-page layout — Memory / Documents / PromptLibrary / Analytics ─── */
+  --max-page: 720px;
+  --padding-page-y: var(--spacing-xl); /* 32px */
+  --padding-page-x: var(--spacing-lg); /* 24px */
+
+  /* ─── Auth + admin page caps ─── */
+  --max-auth: 400px; /* auth wrapper: brand lockup + form card */
+  --max-admin: 960px; /* admin tables: 6-col (Models) / 5-col (Users) */
+
+  /* ─── Danger + accent semantic border/fill tokens ─── */
+  --color-danger-quiet: color-mix(
+    in oklch,
+    var(--color-danger) 15%,
+    transparent
+  );
+  --color-danger-border: color-mix(
+    in oklch,
+    var(--color-danger) 40%,
+    transparent
+  );
+  --color-accent-border: color-mix(
+    in oklch,
+    var(--color-accent) 35%,
+    transparent
+  );
+  /* RAG badge warning tint — amber-warm overlay, not transparent. */
+  --color-warning-quiet: color-mix(
+    in oklch,
+    var(--color-warning) 14%,
+    transparent
+  );
+  /* Continue-chip warning border, mirrors
+     --color-danger-border / --color-accent-border grammar. */
+  --color-warning-border: color-mix(
+    in oklch,
+    var(--color-warning) 35%,
+    transparent
+  );
+
+  /* ─── Motion ─── */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+
+  /* ─── Scrims / overlays (pure black at varying opacities — theme-invariant) ─── */
+  --color-scrim-sm: oklch(0 0 0 / 0.18); /* folder menu, light shadow */
+  --color-scrim: oklch(0 0 0 / 0.35); /* palette / keyboard-help backdrop */
+  --color-scrim-md: oklch(0 0 0 / 0.4); /* mobile sidebar backdrop */
+  --color-scrim-lg: oklch(0 0 0 / 0.5); /* dialog / confirm overlay */
+  --color-scrim-xl: oklch(0 0 0 / 0.55); /* drawer backdrop */
+
+  /* ─── Shadows ─── */
+  --shadow-sm: 0 1px 2px var(--color-scrim-sm, oklch(0 0 0 / 0.18));
+  --shadow-md: 0 4px 12px var(--color-scrim, oklch(0 0 0 / 0.35));
+  --shadow-lg: 0 16px 40px var(--color-scrim-lg, oklch(0 0 0 / 0.5));
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     WARM-FUTURE-LIBRARY TOKEN LAYER
+     Inspiration: Her (K.K. Barrett: "a little bit of red in every frame"),
+     The Creator (Gareth Edwards), ai_persona_kb operator console v8.
+     Vibe: knowledge-place / cozy organic sci-fi. NOT a port of those
+     systems — atmospheric cues only (warmth, materiality, ambient drift).
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  /* ─── Material layer vocabulary ─────────────────────────────────────────
+     NOT background colors. Translucent overlays that compose on top of
+     --color-surface* to give surfaces warmth, depth, and the feel of
+     vellum / leather / brass / aged paper.
+     Hue family: 72-86 (copper warmth). Chroma: natural-material territory
+     (intentional, not "just dim copper"). Apply via background on a
+     pseudo-element + mix-blend-mode: soft-light or overlay. */
+  --material-vellum: oklch(
+    0.96 0.018 84 / 0.055
+  ); /* parchment overlay — warm barely-there */
+  --material-leather: oklch(
+    0.3 0.028 52 / 0.13
+  ); /* warm bookbinding — deep amber-brown */
+  --material-brass: oklch(
+    0.62 0.076 76 / 0.17
+  ); /* hardware accents — aged brass shimmer */
+  --material-foxing: oklch(
+    0.52 0.055 58 / 0.065
+  ); /* aged paper warmth — faint rust bloom */
+  --material-shadow: oklch(
+    0.07 0.005 62 / 0.55
+  ); /* under-shelf depth — warm near-black well */
+  --material-ink-bleed: oklch(
+    0.18 0.01 66 / 0.28
+  ); /* edge softening — warm ink feather */
+
+  /* ─── Semantic spacing grammar ───────────────────────────────────────────
+     Pick by what the element MEANS, not by pixel size.
+     4 levels: glue → sibling → group → chapter (→ tome).
+     Cardinal failure corrected: every gap was 8-16px regardless of semantic
+     relationship — reads as undifferentiated mass. */
+
+  /* GLUE — "these are one thing" */
+  --space-glue: var(--spacing-xs); /* 4px  — label↔input, icon↔text */
+  --space-glue-relaxed: var(--spacing-sm); /* 8px  — slightly looser glue */
+
+  /* SIBLING — "these are siblings in a list" */
+  --space-sibling: 12px; /* 12px — list items, nav rows */
+  --space-sibling-relaxed: var(
+    --spacing-md
+  ); /* 16px — metadata rows, spaced siblings */
+
+  /* GROUP — "these are a group / form fields in a section" */
+  --space-group: var(--spacing-lg); /* 24px — form fields in section */
+  --space-group-relaxed: var(
+    --spacing-xl
+  ); /* 32px — section block separations */
+
+  /* CHAPTER — "these are different chapters / top-level sections" */
+  --space-chapter: var(--spacing-2xl); /* 48px — between top-level sections */
+  --space-chapter-relaxed: var(
+    --spacing-3xl
+  ); /* 64px — chapter separations on long pages */
+
+  /* TOME — "page-of-content separations" */
+  --space-tome: 96px; /* 96px — major page separations */
+
+  /* ─── Page-shell widths ─── */
+  /* 820px = "comfortable form column" for the settings page layout.
+     720-900px is the reading-friendly range; 820 sits mid-range with
+     breathing room either side. Tokenized so other
+     constrained-form surfaces can land at the same width without
+     drift. */
+  --settings-shell-max-width: 820px;
+
+  /* ─── Shell chrome heights ───────────────────────────────────────────────
+     Raised from 48px→72px. Tokenized so pinned panels,
+     sticky elements, and offset calculations all share one source of truth. */
+  --topbar-height: 72px;
+
+  /* Grammar aliases for existing component tokens (semantic re-expression) */
+  --gap-section: var(--space-group); /* 24px — was var(--spacing-lg) */
+  --gap-form-row: var(
+    --space-sibling
+  ); /* 12px — preserved value, named by meaning */
+  --gap-field-label: var(--space-glue); /* 4px  — was var(--spacing-xs) */
+
+  /* ─── Motion vocabulary (expanded) ──────────────────────────────────────
+     Existing --ease-out / --duration-fast/base/slow KEPT for backward compat.
+     Added: quart + expo + soft easing; glance + page + ambient + drift durations.
+     No bouncy / elastic easings — universe rule. */
+
+  /* Easing curve additions */
+  --ease-out-quart: cubic-bezier(
+    0.25,
+    1,
+    0.5,
+    1
+  ); /* smooth, refined — hover responses */
+  --ease-out-expo: cubic-bezier(
+    0.16,
+    1,
+    0.3,
+    1
+  ); /* confident, decisive — major state transitions */
+  --ease-soft: cubic-bezier(
+    0.4,
+    0,
+    0.2,
+    1
+  ); /* gentle in/out — ambient breath, material cycles */
+
+  /* Duration additions (existing fast/base/slow kept at original values) */
+  --duration-glance: 100ms; /* barely perceptible — instant feedback */
+  --duration-page: 900ms; /* route-level entrance choreography */
+  --duration-ambient: 14s; /* slow material breath cycle (opacity only, GPU) */
+  --duration-drift: 180s; /* canvas light-drift — background-position shift (GPU) */
+
+  /* ─── Type additions ─────────────────────────────────────────────────────
+     NO new font family. Hanken Grotesk + Hubot Sans + Commit Mono stay.
+     Library feel from scale + usage, not from adding a serif.
+     --fs-display: chapter-page moments (40px — between hero 32 and stat 28).
+     --fs-marginalia: sidebar captions/asides using existing Hanken Italic. */
+  --fs-display: 2.5rem; /* 40px — chapter-page moments: login wordmark, library headers */
+  --fs-marginalia: 0.75rem; /* 12px italic — sidebar captions, asides, marginalia */
+
+  /* Line-height refinements (light-on-dark ↔ dark-on-light difference) */
+  --lh-display: 1.15; /* tighter for large display moments (was 1.2) */
+  --lh-heading: 1.28; /* minor tightening for warmth (was 1.3) */
+  --lh-prose: 1.65; /* correct for light-on-dark; unchanged */
+}
+
+/* ─── Light theme override ─── */
+/* Applies when the <html> element carries class="light" or data-theme="light". */
+/* System preference auto-switching is also respected via prefers-color-scheme  */
+/* when no explicit class is set.                                                 */
+/*                                                                                */
+/* Light-theme text/accent/danger tokens tuned for WCAG 2.1 AA 4.5:1            */
+/* contrast on light surfaces (oklch(0.95 0.008 240) ≈ #eaeff3).                 */
+/* - text-subtle raised to 0.42 (was 0.55) — ≥4.5:1 on bg #eaeff3.              */
+/* - accent adjusted to hue 240 L=0.38 for AA on light surfaces.                 */
+/* - danger adjusted to L=0.38 for AA on light surfaces.                         */
+:root.light,
+[data-theme="light"] {
+  /* Midnight Atelier — warm "daylight" paper variant (hue ~84). */
+  /* Elevation = LIGHTER (mirrors the dark theme's logic, and lets panels
+     LIFT off the canvas instead of receding into it). The canvas is a warm
+     parchment; surfaces step toward paper-white and float on the daylight
+     shadows above. */
+  --color-bg: oklch(0.95 0.016 83);
+  --color-surface: oklch(0.976 0.011 85);
+  --color-surface-elevated: oklch(0.992 0.007 86);
+  --color-surface-3: oklch(0.998 0.004 88);
+  --color-border: oklch(0.83 0.016 79);
+  /* WCAG 1.4.11 non-text contrast: input/field edges use --color-border-default
+   * as the SOLE boundary signal (input fill L0.992 vs page L0.95 is ~1.05:1,
+   * invisible), so the border itself must clear 3:1. At L0.73 it was 2.07:1 on
+   * the parchment canvas — a real failure. L0.62 clears 3:1 against every
+   * neighbour (bg 3.15, surface 3.40, elevated 3.56). border-strong drops in
+   * step so the 3-level border scale stays legible. Decorative --color-border
+   * (0.83, hairline dividers) is exempt from 1.4.11 and stays soft. */
+  --color-border-default: oklch(0.62 0.018 76);
+  --color-border-strong: oklch(0.5 0.02 73);
+  --color-text: oklch(0.22 0.018 60);
+  --color-text-muted: oklch(0.42 0.024 64);
+  --color-text-subtle: oklch(0.46 0.022 66);
+  /* Copper deepened to bronze so it passes AA as text/links on paper.
+   * Split-token pattern: --color-accent is fills/buttons; --color-accent-text
+   * is the same value here because the bronze passes AA at small sizes on
+   * parchment (≥4.5:1). Naming parity with dark theme makes component CSS
+   * portable.
+   * Lowered L to 0.420 (was 0.520) — passes WCAG AA ≥4.5:1 on
+   * parchment bg L=0.985. --color-accent-hover proportionally L=0.380.
+   * --color-text-on-accent (L=0.985) on new accent (L=0.420) is ~7:1+. */
+  --color-accent: oklch(0.42 0.14 62);
+  --color-accent-hover: oklch(0.38 0.15 60);
+  /* Active-nav wash: the deep bronze at 0.12 on bright parchment was nearly
+   * indistinguishable from hover. 0.18 gives the active settings item a real
+   * signal without a banned side-stripe. */
+  --color-accent-quiet: oklch(0.42 0.14 62 / 0.18);
+  --color-accent-text: oklch(0.42 0.14 62);
+  --color-accent-text-hover: oklch(0.38 0.15 60);
+  /* Light theme: --color-accent-fill matches --color-accent (L=0.420
+   * passes AA on light bg). --color-text-on-accent (L=0.985) on
+   * accent-fill (L=0.420) is ~7:1+, safe for small text. */
+  --color-accent-fill: oklch(0.42 0.14 62);
+  --color-accent-fill-hover: oklch(0.38 0.15 60);
+  --color-text-on-accent: oklch(0.985 0.01 86);
+  /* Brand mark tracks the theme. The dark copper (L0.76) washes out on
+   * parchment at the watermark's low opacity, so light gets a deep bronze —
+   * the logo + empty-state motif read as intentional warmth on paper. */
+  --color-brand: oklch(0.5 0.14 66);
+  /* Deepened L 0.520→0.460 so small mint text (~13px) passes
+   * WCAG AA ≥4.5:1 on parchment bg (L=0.985).
+   * Mint hue retained — chroma 0.130, h 162. */
+  --color-success: oklch(0.46 0.13 162);
+  --color-warning: oklch(0.42 0.12 90);
+  --color-danger: oklch(0.48 0.19 28);
+  /* Danger + accent semantic tokens — re-resolved against light-theme base colors. */
+  --color-danger-quiet: color-mix(
+    in oklch,
+    var(--color-danger) 15%,
+    transparent
+  );
+  --color-danger-border: color-mix(
+    in oklch,
+    var(--color-danger) 40%,
+    transparent
+  );
+  --color-accent-border: color-mix(
+    in oklch,
+    var(--color-accent) 35%,
+    transparent
+  );
+  /* Warning-quiet on light parchment. */
+  --color-warning-quiet: color-mix(
+    in oklch,
+    var(--color-warning) 14%,
+    transparent
+  );
+  /* Continue-chip warning border on light parchment. */
+  --color-warning-border: color-mix(
+    in oklch,
+    var(--color-warning) 35%,
+    transparent
+  );
+
+  /* Material layer: light theme re-computation.
+     Same NAMES, different values that read as the same materials under daylight.
+     Composing on parchment base (oklch ~0.985 0.010 86) — overlays are
+     darker/warmer to read as material depth on bright paper. */
+  --material-vellum: oklch(
+    0.86 0.028 78 / 0.13
+  ); /* daylight parchment — deepened + raised so the sidebar reads a shade warmer than the canvas (book spine vs pages) */
+  --material-leather: oklch(
+    0.42 0.035 55 / 0.1
+  ); /* warm binding — lighter but still amber-brown */
+  --material-brass: oklch(
+    0.55 0.085 72 / 0.12
+  ); /* brass hardware — deepened for paper contrast */
+  --material-foxing: oklch(
+    0.45 0.065 60 / 0.07
+  ); /* foxing — slightly richer on bright paper */
+  --material-shadow: oklch(
+    0.25 0.012 62 / 0.18
+  ); /* shelf shadow — much lighter under daylight */
+  --material-ink-bleed: oklch(
+    0.3 0.018 64 / 0.15
+  ); /* ink feather — warm brown on paper */
+
+  /* Daylight shadows. The token layer never overrode --shadow-*, so light
+     mode inherited the DARK theme's black shadows — which read muddy/harsh
+     on parchment and gave every surface a flat, pasted-on feel. Tint toward
+     the warm brand hue (h~58), keep chroma + opacity low, and widen the
+     blur: cards should lift off the paper like objects in soft window light,
+     not sit under a hard drop shadow. This is the light theme's main source
+     of depth. */
+  --shadow-sm: 0 1px 2px oklch(0.46 0.03 58 / 0.09);
+  --shadow-md: 0 4px 16px oklch(0.45 0.035 58 / 0.11);
+  --shadow-lg: 0 18px 48px oklch(0.42 0.04 56 / 0.16);
+}
+
+/* Pre-hydration flash guard ONLY: applies before themeStore runs and sets an
+   explicit .light/.dark class (applyTheme always classes the root). Once a
+   class exists, :root.light above is the SINGLE source of truth — so this
+   block must NOT match when .light/.dark is already set, or it silently
+   overrides the real light tokens (it did, for light-OS users). */
+@media (prefers-color-scheme: light) {
+  :root:not(.dark):not(.light):not([data-theme="dark"]):not([data-theme="light"]) {
+    /* Midnight Atelier — warm "daylight" paper variant (hue ~84). */
+    /* Reconciled with the :root.light block above so the pre-hydration paint
+       matches the REAL theme. These were the old inverted-elevation values
+       (surface darker than bg) — a light-OS user got a sub-100ms flash of the
+       pre-rework muddy light theme before themeStore classed the root. */
+    --color-bg: oklch(0.95 0.016 83);
+    --color-surface: oklch(0.976 0.011 85);
+    --color-surface-elevated: oklch(0.992 0.007 86);
+    --color-surface-3: oklch(0.998 0.004 88);
+    --color-border: oklch(0.83 0.016 79);
+    --color-border-default: oklch(0.62 0.018 76);
+    --color-border-strong: oklch(0.5 0.02 73);
+    --color-text: oklch(0.22 0.018 60);
+    --color-text-muted: oklch(0.42 0.024 64);
+    --color-text-subtle: oklch(0.46 0.022 66);
+    --color-accent: oklch(0.42 0.14 62);
+    --color-accent-hover: oklch(0.38 0.15 60);
+    --color-accent-quiet: oklch(0.42 0.14 62 / 0.18);
+    --color-accent-text: oklch(0.42 0.14 62);
+    --color-accent-text-hover: oklch(0.38 0.15 60);
+    --color-accent-fill: oklch(0.42 0.14 62);
+    --color-accent-fill-hover: oklch(0.38 0.15 60);
+    --color-text-on-accent: oklch(0.985 0.01 86);
+    --color-brand: oklch(0.5 0.14 66);
+    --shadow-sm: 0 1px 2px oklch(0.46 0.03 58 / 0.09);
+    --shadow-md: 0 4px 16px oklch(0.45 0.035 58 / 0.11);
+    --shadow-lg: 0 18px 48px oklch(0.42 0.04 56 / 0.16);
+    /* Deepened L 0.520→0.460 — matches :root.light block, AA at small sizes. */
+    --color-success: oklch(0.46 0.13 162);
+    --color-warning: oklch(0.42 0.12 90);
+    --color-danger: oklch(0.48 0.19 28);
+    /* Danger + accent semantic tokens — re-resolved against light-theme base colors. */
+    --color-danger-quiet: color-mix(
+      in oklch,
+      var(--color-danger) 15%,
+      transparent
+    );
+    --color-danger-border: color-mix(
+      in oklch,
+      var(--color-danger) 40%,
+      transparent
+    );
+    --color-accent-border: color-mix(
+      in oklch,
+      var(--color-accent) 35%,
+      transparent
+    );
+    /* Warning-quiet on light parchment (media-query mirror). */
+    --color-warning-quiet: color-mix(
+      in oklch,
+      var(--color-warning) 14%,
+      transparent
+    );
+    /* Continue-chip closeout: warning border (media-query mirror). */
+    --color-warning-border: color-mix(
+      in oklch,
+      var(--color-warning) 35%,
+      transparent
+    );
+
+    /* Material layer: light theme (media-query mirror) */
+    --material-vellum: oklch(0.88 0.022 80 / 0.07);
+    --material-leather: oklch(0.42 0.035 55 / 0.1);
+    --material-brass: oklch(0.55 0.085 72 / 0.12);
+    --material-foxing: oklch(0.45 0.065 60 / 0.07);
+    --material-shadow: oklch(0.25 0.012 62 / 0.18);
+    --material-ink-bleed: oklch(0.3 0.018 64 / 0.15);
+  }
+}
+
+/* ─── Base resets ─── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background-color: var(--color-bg);
+  /* Atmospheric depth — two composited radial bleeds give the canvas warmth
+     and the Rothko-bottom-band feel from the Her production design reference.
+     Layer 1 (top): soft warm bloom from above-center — pulls toward surface-
+     elevated warmth; has been here since Midnight Atelier launch.
+     Layer 2 (lower-right): deeper warm bleed — Rothko bottom band, low
+     intensity; atmospheric not decorative. Hue 72 (copper family), very low
+     chroma so it reads as ambient warmth, not a spotlight.
+     background-position is animated by canvas-drift (180s, monotonic ease)
+     — only background-position shifts, no layout reflow. */
+  background-image:
+    radial-gradient(
+      135% 90% at 50% -8%,
+      color-mix(in oklch, var(--color-surface-elevated) 70%, transparent) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      110% 60% at 100% 105%,
+      oklch(0.28 0.022 72 / 0.35) 0%,
+      oklch(0.2 0.01 68 / 0.12) 40%,
+      transparent 70%
+    );
+  background-attachment: fixed;
+  background-size:
+    100% 100%,
+    100% 100%;
+  background-position:
+    0% 0%,
+    0% 0%;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Hover-warm: subtle inner-glow for interactive elements (buttons, selects, menu items).
+   Subtler than colored border; reads as a touch. */
+button:hover,
+select:hover,
+[role="combobox"]:hover,
+[role="tab"]:hover,
+.lmchat-btn-primary:hover,
+.lmchat-btn-secondary:hover,
+.lmchat-btn-ghost:hover,
+.lmsb-wrapper:hover {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklch, var(--color-accent) 18%, transparent);
+}
+/* ============================================================
+   OVERDRIVE — Mouse parallax custom properties
+   ============================================================
+   --parallax-x and --parallax-y are written by useMouseParallax hook
+   on <html>. Throttled to ~24fps. Values: -1 to 1 percentage.
+   body::before uses them via translate for a near-imperceptible
+   "the room notices you" shift. Default 0 = centered. */
+:root {
+  --parallax-x: 0;
+  --parallax-y: 0;
+}
+
+/* ============================================================
+   MOBILE INPUT — prevent iOS focus auto-zoom
+   ============================================================
+   iOS Safari auto-zooms the viewport when a form control with a
+   computed font-size < 16px receives focus. Several controls use
+   the body/label scale (13–15px), which triggers this on every
+   tap into the composer, auth fields, and search inputs. Floor
+   every focusable control to 16px at mobile widths so focus never
+   zooms. The viewport meta intentionally keeps user-scalable on —
+   this removes ACCIDENTAL zoom, not pinch-zoom accessibility.
+
+   The bare element selectors cover generic controls; the class
+   selectors raise specificity so this floor still wins over the
+   per-control class rules (.lmchat-composer-textarea / .lmchat-auth-input,
+   both 15px) that would otherwise out-specify an element selector. */
+@media (max-width: 768px) {
+  input,
+  textarea,
+  select,
+  input.lmchat-auth-input,
+  textarea.lmchat-composer-textarea {
+    font-size: 16px;
+  }
+}
+
+/* ============================================================
+   TOUCH — kill double-tap zoom + 300ms tap delay
+   ============================================================
+   `touch-action: manipulation` disables the legacy double-tap-to-
+   zoom gesture (and the 300ms click delay that came with it) while
+   leaving single-finger pan and pinch-zoom intact. Applied to the
+   app surface and every interactive control so taps register
+   immediately and stray double-taps don't zoom the page. */
+html,
+body {
+  touch-action: manipulation;
+}
+button,
+a,
+[role="button"],
+[role="tab"],
+.lmchat-composer-bar,
+.lmchat-composer-textarea {
+  touch-action: manipulation;
+}
+
+/* Warm bloom pseudo-element: carries the warm bloom gradients from
+   the body background and pulses opacity via canvas-drift. This keeps the
+   atmospheric visual while moving the animation to an opacity-only composited
+   layer (body background-position is NOT composited; opacity IS).
+   pointer-events: none so it never intercepts input.
+   z-index: -1 so it sits behind all content but above the body background. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* Three radial layers — top warm bloom + bottom-right copper corner
+     (Rothko bottom-band; 12% opacity so it reads as ambient warmth, not a spot).
+     Hue 72 throughout (copper family). */
+  background-image:
+    radial-gradient(
+      135% 90% at 50% -8%,
+      color-mix(in oklch, var(--color-surface-elevated) 70%, transparent) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      110% 60% at 100% 105%,
+      oklch(0.28 0.022 72 / 0.35) 0%,
+      oklch(0.2 0.01 68 / 0.12) 40%,
+      transparent 70%
+    ),
+    radial-gradient(
+      80% 60% at 100% 110%,
+      color-mix(in oklch, var(--color-accent) 12%, transparent) 0%,
+      transparent 65%
+    );
+  background-size:
+    100% 100%,
+    100% 100%,
+    100% 100%;
+  will-change: opacity, transform;
+  /* Mouse parallax: near-imperceptible 1.5% shift. The room notices you.
+     Translate driven by --parallax-x/Y set by useMouseParallax hook.
+     Composed on top of the bloom's opacity animation. */
+  transform: translate(
+    calc(var(--parallax-x) * 1.5%),
+    calc(var(--parallax-y) * 1.5%)
+  );
+  transition: transform 400ms var(--ease-soft);
+  animation: canvas-drift var(--duration-drift, 180s)
+    var(--ease-soft, cubic-bezier(0.4, 0, 0.2, 1)) infinite;
+}
+
+/* Light theme: bloom pseudo re-computed for parchment canvas — 3 layers match dark. */
+:root.light body::before,
+[data-theme="light"] body::before {
+  /* Softened for daylight: the dark theme's accent is light copper (a glow),
+     but the light accent is deep bronze — mixing it into a wash reads as a
+     muddy brown smear. Lower the tan + bronze opacities so the atmosphere is
+     a faint warm bloom, not visible streaks. */
+  background-image:
+    radial-gradient(
+      120% 80% at 50% -10%,
+      color-mix(in oklch, var(--color-surface-elevated) 70%, transparent) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      90% 50% at 100% 100%,
+      oklch(0.95 0.012 82 / 0.18) 0%,
+      transparent 62%
+    ),
+    radial-gradient(
+      80% 60% at 100% 110%,
+      color-mix(in oklch, var(--color-accent) 5%, transparent) 0%,
+      transparent 68%
+    ),
+    radial-gradient(
+      100% 30% at 50% 105%,
+      oklch(0.8 0.06 78 / 0.06) 0%,
+      transparent 72%
+    );
+  background-size:
+    100% 100%,
+    100% 100%,
+    100% 100%;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not(.dark):not([data-theme="dark"]) body::before {
+    background-image:
+      radial-gradient(
+        120% 80% at 50% -10%,
+        color-mix(in oklch, var(--color-surface-elevated) 50%, transparent) 0%,
+        transparent 55%
+      ),
+      radial-gradient(
+        90% 50% at 100% 100%,
+        oklch(0.92 0.015 82 / 0.25) 0%,
+        transparent 60%
+      ),
+      radial-gradient(
+        80% 60% at 100% 110%,
+        color-mix(in oklch, var(--color-accent) 8%, transparent) 0%,
+        transparent 65%
+      );
+    background-size:
+      100% 100%,
+      100% 100%,
+      100% 100%;
+  }
+}
+
+/* ─── Global keyframe animations ─────────────────────────────────────────── */
+/*                                                                              */
+/* All @keyframes live here rather than in component-level <style> blocks.      */
+/* Component inline <style> elements require `style-src 'unsafe-inline'` in    */
+/* the CSP; centralising them in globals.css eliminates that requirement.       */
+/*                                                                              */
+/* Components reference these names via `animation: <name> ...` in their       */
+/* inline style props (which are attribute-based, not governed by style-src).   */
+
+/* (thinking-fade + thinking-pulse keyframes removed — they powered the
+   ThinkingIndicator dot row and the ThinkingBlock PulsingDot, both retired in
+   the ProcessStream unification. The one calm streaming cursor uses
+   caret-pulse; the sub-session panel has its own lmchat-subsession-thinking-
+   pulse keyframe, which is unaffected.) */
+
+/* Toast — slide-in entrance animation. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* (blink keyframe removed — it powered the old BlinkingCursor. The streaming
+   caret uses the calm caret-pulse opacity animation, not a harsh blink.) */
+
+/* LmStudioStatusBadge — a gentle opacity "breath" when LM Studio is healthy.
+   Replaces an earlier expanding box-shadow glow ring (the cheap "glowing
+   pulse" tell). This reads as a live/connected heartbeat without the halo. */
+@keyframes lmstatus-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Composer caret breath — subtle pulse on composer focus.
+   7s cycle, matches lmstatus-pulse density. */
+@keyframes composer-caret-breathe {
+  0%,
+  100% {
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Wire the breath: a warm-bronze 1px halo around the composer that
+   appears on focus-within and pulses on the 7s breath. "The room knows
+   you're here." Pure opacity animation on a pseudo-ring (no layout
+   impact). Idle resting state is fully invisible — composers should never
+   compete with reading. Respects prefers-reduced-motion. */
+.lmchat-composer-wrapper {
+  position: relative;
+}
+.lmchat-composer-wrapper::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px
+    color-mix(in oklch, var(--color-accent) 22%, transparent);
+  opacity: 0;
+  transition: opacity 240ms var(--ease-out-quart);
+}
+.lmchat-composer-wrapper:focus-within::after {
+  opacity: 1;
+  animation: composer-caret-breathe 7s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-composer-wrapper:focus-within::after {
+    animation: none;
+  }
+}
+
+/* Global reduced-motion catch-all.
+   The per-animation guards above (and elsewhere in the stylesheets)
+   handle specific named effects; this catch-all is the safety net so
+   ANY new animation or transition added later automatically respects
+   `prefers-reduced-motion: reduce` without needing a per-rule guard.
+   The 0.01ms value collapses motion to effectively instant while
+   preserving the underlying transition / animation declarations
+   (useful for vitest / Playwright assertions on the computed style
+   "yes there's a transition, but it's flat"). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* canvas-drift: GPU-composited ambient bloom breath.
+   Was background-position shift (not composited → paint thrash).
+   Now: a body::before pseudo-element carries a copy of the warm bloom
+   radial gradients and pulses opacity 0.92 → 1.0 over 180s — same
+   atmospheric "light moving through the room" effect, fully GPU-composited
+   (opacity only; no layout, no paint). The body background stays static.
+   Reduced-motion: pseudo hidden entirely by the guard below. */
+@keyframes canvas-drift {
+  /* Raised minimum opacity 0.92→0.96 so warmth stays visible
+     on narrow mobile viewports where the viewport clips the gradient. */
+  0%,
+  100% {
+    opacity: 0.96;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* material-breath: slow ambient opacity cycle for material layer
+   overlays on surfaces. 14s, ease-soft, opacity only. */
+@keyframes material-breath {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   FOXING CORNERS — subtle aged paper warmth at corners of long-lived elevated surfaces
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Foxing radial-gradient corner-stain at bottom-left.
+   8-12% alpha, 24-32px radius. Easter-egg-level — never demand attention. */
+.lmchat-foxing-bottomleft {
+  position: relative;
+}
+.lmchat-foxing-bottomleft::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 32px;
+  height: 32px;
+  background: radial-gradient(
+    circle at top right,
+    var(--material-foxing) 0%,
+    transparent 70%
+  );
+  pointer-events: none;
+}
+/* ============================================================
+   OVERDRIVE — View Transitions theme wipe
+   ============================================================
+   When the theme toggle fires, themeStore.setTheme wraps the DOM
+   mutation in document.startViewTransition().  The browser snapshots
+   the old and new frames as pseudo-elements (::view-transition-old(root)
+   and ::view-transition-new(root)) which we animate with a circular
+   clip-path expanding from the click origin.
+   - Origin coordinates are written to --theme-wipe-x / --theme-wipe-y
+     in screen-space pixels by setTheme; default to viewport center.
+   - Duration: 520ms with ease-out-quart (restraint principle —
+     no bounce, no overshoot).
+   - prefers-reduced-motion: setTheme bails out before triggering the
+     transition, so the swap is instant (no extra CSS guard needed).
+   - Firefox: View Transitions unsupported as of 2026-05; setTheme
+     falls back to an instant swap.
+*/
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) {
+  z-index: 1;
+}
+::view-transition-new(root) {
+  z-index: 2;
+  animation: theme-wipe-reveal 520ms cubic-bezier(0.165, 0.84, 0.44, 1) forwards;
+  clip-path: circle(0% at var(--theme-wipe-x, 50%) var(--theme-wipe-y, 50%));
+}
+@keyframes theme-wipe-reveal {
+  to {
+    clip-path: circle(
+      150% at var(--theme-wipe-x, 50%) var(--theme-wipe-y, 50%)
+    );
+  }
+}
+
+/* ============================================================
+   OVERDRIVE — Streaming message caret + bottom-fade mask
+   ============================================================
+   Applied to the in-flight assistant message bubble while
+   message.streaming === true.  Two effects compose:
+   1. .lmchat-streaming-bubble — a mask-image gradient fades the
+      bottom ~24px of the bubble to transparent.  As new content
+      grows the bubble taller, fresh lines emerge from below
+      instead of popping in at full opacity.
+   2. .lmchat-stream-caret — a thin 2px-wide accent-coloured bar
+      that pulses at the stream tip via the existing @keyframes
+      blink.  Marked aria-hidden because the streaming state is
+      already announced by the parent's role="status".
+   Both honour prefers-reduced-motion via the guard at the bottom.
+*/
+.lmchat-streaming-bubble {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black 0,
+    black calc(100% - 24px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    black 0,
+    black calc(100% - 24px),
+    transparent 100%
+  );
+  /* mask-image is non-composited; remove transition to avoid layout overhead */
+}
+.lmchat-stream-caret {
+  display: inline-block;
+  vertical-align: text-bottom;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  background: var(--color-accent-fill);
+  border-radius: 1px;
+  /* Copper halo ring breathes 0.4→1.0 via ::after scale+opacity
+     (compositor-safe). Two separate animations compose the pulse effect.
+     will-change changed from opacity,box-shadow to opacity,transform —
+     box-shadow is NOT compositor-compositable; the hint was wasted/misleading. */
+  animation:
+    caret-pulse 1.2s var(--ease-soft) infinite,
+    caret-halo 2.4s var(--ease-soft) infinite;
+  will-change: opacity, transform;
+  position: relative;
+}
+
+/* Halo ring via ::after — GPU-composited transform+opacity; no box-shadow on parent. */
+.lmchat-stream-caret::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 1px solid var(--color-accent);
+  border-radius: 3px;
+  animation: caret-halo-ring 2.4s var(--ease-soft) infinite;
+  pointer-events: none;
+}
+
+/* caret-pulse: copper streaming caret, opacity 0.4 → 1.0.
+   Calm presence at the stream tip. No blink (blink is harsh). */
+@keyframes caret-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* OVERDRIVE uses transform: translateY + opacity for msg-arrive
+   (both GPU-composited, NOT layout properties). The "forbidden" note above
+   applies only to layout-animated properties (height, padding, top, etc.).
+   The msg-arrive keyframes below are intentional and compositor-safe. */
+
+/* ============================================================
+   OVERDRIVE — Atmospheric keyframe extensions
+   ============================================================ */
+
+/* Canvas haze rotation — body::before gains a slow transforming haze layer.
+   Near-imperceptible 360s cycle; pure compositor (transform only).
+   "The room is breathing in a different direction than you expect." */
+@keyframes haze-rotate {
+  from {
+    transform: rotate(0deg) scale(1.5);
+  }
+  to {
+    transform: rotate(360deg) scale(1.5);
+  }
+}
+
+/* Mouse parallax: body::before receives --parallax-x/Y nudge (1-2%).
+   Separate from haze-rotate because it runs via custom property interpolation. */
+
+/* Message arrival — overdrive entrance: translateY(12px → 0) + opacity.
+   600ms ease-out-expo. Non-first messages. */
+@keyframes msg-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* First assistant message — more pronounced "the room is now answering" entrance.
+   Slightly longer duration applied via animation-duration override in .css. */
+@keyframes msg-arrive-first {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Copper marginalia arrival pulse — fires once when message lands, then stops.
+   800ms decay, not infinite. */
+@keyframes marginalia-arrive {
+  0% {
+    opacity: 0.9;
+    transform: scale(1.8);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+/* Settled state shimmer — brief brass wash across canvas after message arrives.
+   Applied to body::before for 600ms, then removed via JS class. */
+@keyframes settled-shimmer {
+  0% {
+    opacity: 0.96;
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.96;
+  }
+}
+
+/* (vellum-depth keyframe removed — it powered the ThinkingBlock's 12s
+   breathing band, which was retired in the ProcessStream unification.) */
+
+/* Brass edge shimmer — slow opacity drift on the code fence border.
+   20s cycle; 0.3 → 0.5 → 0.3. Pure opacity, GPU composited. */
+@keyframes brass-edge-shimmer {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Palette open chord — layered decaying brass tones on the card.
+   Fast → medium → slow: like a tuning fork settling. */
+@keyframes palette-chord-fast {
+  0% {
+    box-shadow:
+      var(--shadow-lg),
+      inset 0 0 20px var(--material-brass),
+      0 0 0 1px color-mix(in oklch, var(--color-accent) 50%, transparent);
+  }
+  100% {
+    box-shadow:
+      var(--shadow-lg),
+      inset 0 0 20px var(--material-brass),
+      0 0 0 1px transparent;
+  }
+}
+
+/* caret-halo now animates opacity on the parent (used as a
+   breathing signal alongside caret-pulse). The actual halo ring is rendered
+   by .lmchat-stream-caret::after using caret-halo-ring (transform+opacity). */
+@keyframes caret-halo {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Caret halo ring — ::after pseudo, GPU-composited scale+opacity breathing. */
+@keyframes caret-halo-ring {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+/* Composer typing intensification — ::before atmospheric layer briefly brightens. */
+@keyframes composer-type-flare {
+  0% {
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-streaming-bubble {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .lmchat-stream-caret {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* ============================================================
+   POLISH — Global focus-visible outline
+   ============================================================
+   Several inputs explicitly drop the browser default with
+   outline: none for visual cleanliness, but never paired that
+   with a :focus-visible replacement.  Result: keyboard-only
+   users had no consistent focus indicator across surfaces.
+   This block restores a high-contrast ring on any focusable
+   element that hasn't claimed its own focus styling.
+   - 2px solid accent
+   - 2px offset so it sits outside borders
+   - border-radius matches the element's own
+   - Only fires for :focus-visible (i.e. keyboard nav), not
+     for mouse clicks, so the visual doesn't intrude.
+*/
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs, 2px);
+}
+/* Inputs that opt out of default outline still need a visible ring
+   when the user reaches them via keyboard.  Re-applies the same
+   high-contrast pattern as the global rule above. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* ============================================================
+   Midnight Atelier — signature touches
+   ============================================================ */
+
+/* Copper text selection — replaces the browser default blue so even
+   highlighting reads as part of the palette. Quiet copper wash, text
+   stays on the standard text token for contrast. */
+::selection {
+  background: color-mix(in oklch, var(--color-accent) 32%, transparent);
+  color: var(--color-text);
+}
+
+/* Warm surface grain — faint "atelier paper" texture. A fixed, full-
+   viewport SVG-noise overlay (no asset request; CSP img-src allows
+   data:). soft-light blend + ~4% opacity means it adds tooth to the
+   large flat near-black areas while staying imperceptible on text.
+   pointer-events:none so it never intercepts input. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  /* Bury BEHIND app content (sits above body::before in source order
+   * since both are z=-1). The previous max-int z (2147483646) +
+   * mix-blend-mode put a fullscreen compositing layer on top of every
+   * pixel; while pointer-events:none kept clicks alive, the blend-mode
+   * interaction with scrolled content produced a faint "invisible
+   * overlay" sliding over the brand wordmark on scroll. Without
+   * mix-blend-mode the grain just reads as background tooth. */
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
+/* Light theme: dial the grain back a touch on bright paper. */
+:root.light body::after,
+[data-theme="light"] body::after {
+  opacity: 0.06;
+}
+
+/* ============================================================
+   OVERDRIVE — Canvas haze (html::after)
+   ============================================================
+   A second rotating atmospheric haze on the html pseudo-element.
+   body::after is taken by the grain texture, so we use html::after
+   for this layer. Carries a faint warm haze — near-imperceptible
+   at 360s rotation, pure compositor (transform only).
+   "The room is breathing in a different direction."
+   pointer-events:none; z-index behind content (z-index: -2). */
+html::after {
+  content: "";
+  position: fixed;
+  inset: -50%;
+  width: 200%;
+  height: 200%;
+  z-index: -2;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 60% 40% at 70% 30%,
+    oklch(0.3 0.025 72 / 0.08) 0%,
+    oklch(0.22 0.015 68 / 0.04) 50%,
+    transparent 75%
+  );
+  animation: haze-rotate 360s linear infinite;
+}
+
+/* Light theme: haze is barely perceptible on paper; keep very subtle. */
+:root.light html::after,
+[data-theme="light"] html::after {
+  background: radial-gradient(
+    ellipse 60% 40% at 70% 30%,
+    oklch(0.9 0.012 84 / 0.05) 0%,
+    transparent 65%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html::after {
+    animation: none !important;
+  }
+}
+
+/* ============================================================
+   OVERDRIVE — Presence-state machine on <html data-presence>
+   ============================================================
+   body::before opacity and transition speed adapt to conversation state.
+   States: idle | listening | thinking | speaking | settled
+   Set via JS in the presence machine hook (usePresence.ts).
+   All transitions: transform + opacity only. */
+
+/* IDLE — bloom at 0.6, very slow 20s ambient drift */
+:root[data-presence="idle"] body::before {
+  opacity: 0.6;
+  animation: canvas-drift 20s var(--ease-soft) infinite;
+  transition: opacity 3s var(--ease-soft);
+}
+
+/* LISTENING — composer focused or recently typed. Bloom 0.8, 14s breath */
+:root[data-presence="listening"] body::before {
+  opacity: 0.88;
+  animation: canvas-drift var(--duration-ambient, 14s) var(--ease-soft) infinite;
+  transition: opacity 1.5s var(--ease-soft);
+}
+
+/* THINKING — stream-active, reasoning phase. Bloom intensifies.
+   A copper-tinged radial bleeds stronger at bottom-right. */
+:root[data-presence="thinking"] body::before {
+  opacity: 1;
+  animation: canvas-drift 10s var(--ease-soft) infinite;
+  transition: opacity 0.8s var(--ease-soft);
+}
+
+/* SPEAKING — stream-active, content phase. Faster pulse; room speaking. */
+:root[data-presence="speaking"] body::before {
+  opacity: 1;
+  animation: canvas-drift 8s var(--ease-soft) infinite;
+  transition: opacity 0.5s var(--ease-soft);
+}
+
+/* SETTLED — after message arrives. Brief shimmer then back to listening. */
+:root[data-presence="settled"] body::before {
+  opacity: 1;
+  animation:
+    settled-shimmer 600ms var(--ease-out-quart) both,
+    canvas-drift 14s var(--ease-soft) 600ms infinite;
+  transition: opacity 0.3s var(--ease-out-quart);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-presence] body::before {
+    animation: none;
+    opacity: 1;
+    transition: none;
+  }
+}
+
+/* Light theme: override body bloom — the lower-right bleed is too warm
+   on a bright paper canvas; replace with a much softer daylight version. */
+:root.light body,
+[data-theme="light"] body {
+  background-image:
+    radial-gradient(
+      120% 80% at 50% -10%,
+      color-mix(in oklch, var(--color-surface-elevated) 50%, transparent) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      90% 50% at 100% 100%,
+      oklch(0.92 0.015 82 / 0.25) 0%,
+      transparent 60%
+    );
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not(.dark):not([data-theme="dark"]) body {
+    background-image:
+      radial-gradient(
+        120% 80% at 50% -10%,
+        color-mix(in oklch, var(--color-surface-elevated) 50%, transparent) 0%,
+        transparent 55%
+      ),
+      radial-gradient(
+        90% 50% at 100% 100%,
+        oklch(0.92 0.015 82 / 0.25) 0%,
+        transparent 60%
+      );
+  }
+}
+
+/* ─── Utility: material-breath class ────────────────────────────────────────
+   Apply to pseudo-elements or overlay divs that carry a --material-* token
+   as their background. The animation creates a slow ambient aliveness on
+   material surfaces without touching layout or transform. */
+.material-breath {
+  animation: material-breath var(--duration-ambient, 14s)
+    var(--ease-soft, cubic-bezier(0.4, 0, 0.2, 1)) infinite;
+}
+
+/* ─── Utility: fs-display + fs-marginalia ───────────────────────────────────
+   Quick-access classes for the two new type tokens. Components should use
+   the CSS variables directly in their own rules; these utilities are for
+   rapid prototyping and the token preview page. */
+.fs-display {
+  font-size: var(--fs-display, 2.5rem);
+  line-height: var(--lh-display, 1.15);
+  font-family: var(--font-display);
+  letter-spacing: var(--ls-tight);
+}
+.fs-marginalia {
+  font-size: var(--fs-marginalia, 0.75rem);
+  font-style: italic;
+  line-height: var(--lh-ui, 1.45);
+  color: var(--color-text-subtle);
+}
+
+/* Page-load stagger — one orchestrated entrance. The persistent chrome
+   (sidebar) animates once on app mount; the main content region gives a
+   gentle rise on each route so navigation feels like content arriving.
+   transform + opacity only (no layout props); ease-out-quart; honours
+   reduced-motion. */
+@keyframes atelier-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.atelier-rise {
+  animation: atelier-rise 420ms cubic-bezier(0.165, 0.84, 0.44, 1) both;
+}
+.atelier-rise-1 {
+  animation-delay: 0ms;
+}
+.atelier-rise-2 {
+  animation-delay: 70ms;
+}
+.atelier-rise-3 {
+  animation-delay: 140ms;
+}
+
+/* Pill CTA interaction — a small, confident lift on hover and a settle on
+   press. Uses transform + filter (not background) so it composites over the
+   element's own inline copper fill without specificity fights. */
+.atelier-cta {
+  transition:
+    transform 160ms cubic-bezier(0.165, 0.84, 0.44, 1),
+    filter 160ms ease,
+    box-shadow 200ms cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+.atelier-cta:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: var(--shadow-md, 0 4px 12px oklch(0 0 0 / 0.35));
+}
+.atelier-cta:active {
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
+/* Brand lockup — the mark warms slightly when you hover the home link. */
+.atelier-brand {
+  transition: opacity 160ms ease;
+}
+.atelier-brand:hover svg {
+  filter: brightness(1.14) saturate(1.05);
+}
+.atelier-brand svg {
+  transition: filter 160ms ease;
+}
+
+/* Empty-state motif — a very slow, low-amplitude drift so the canvas feels
+   alive without ever pulling focus. 18s loop; matches the inline base
+   transform at 0/100% for a seamless start. */
+@keyframes atelier-drift {
+  0%,
+  100% {
+    transform: translateY(-50%) rotate(-8deg);
+  }
+  50% {
+    transform: translateY(-52%) rotate(-6.5deg);
+  }
+}
+.atelier-motif-drift {
+  animation: atelier-drift 18s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* ============================================================
+   Warmth micro-interactions — button/interactive warmth
+   ============================================================
+   Applied to icon buttons, TopBar controls, sidebar items.
+   Color + border only (no layout); GPU-composited. */
+.atelier-btn {
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+.atelier-btn:hover {
+  color: var(--color-text);
+}
+.atelier-btn:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::after {
+    display: none;
+  }
+  /* Stop canvas-drift bloom pulse */
+  body::before {
+    animation: none;
+    opacity: 1;
+  }
+  .atelier-rise {
+    animation: none;
+  }
+  .atelier-cta {
+    transition: none;
+  }
+  .atelier-cta:hover {
+    transform: none;
+  }
+  .atelier-motif-drift {
+    animation: none;
+  }
+  .atelier-btn {
+    transition: none;
+  }
+  .atelier-btn:active {
+    transform: none;
+  }
+  /* Stop material-breath */
+  .material-breath {
+    animation: none;
+  }
+  /* status dot sets its pulse via an inline `animation`; !important is the
+     only way to override an inline animation from a stylesheet. */
+  .lmchat-status-dot {
+    animation: none !important;
+  }
+}
+
+/* ============================================================
+   Midnight Atelier — highlight.js syntax theme
+   ============================================================
+   Tokens map to the warm palette: copper for control-flow/keywords,
+   mint for strings, amber for numbers, parchment-muted for comments.
+   No background override here — the CodeBlock container owns that. */
+
+.hljs {
+  color: var(--color-text);
+  background: transparent;
+}
+
+/* Keywords, control flow, built-ins → copper accent */
+.hljs-keyword,
+.hljs-built_in,
+.hljs-type,
+.hljs-tag,
+.hljs-selector-tag {
+  color: var(--color-accent-text);
+  font-weight: 500;
+}
+
+/* Strings, template literals, regex → mint */
+.hljs-string,
+.hljs-regexp,
+.hljs-template-string,
+.hljs-template-variable {
+  color: var(--color-success);
+}
+
+/* Numbers, booleans, null/undefined → amber */
+.hljs-number,
+.hljs-literal {
+  color: var(--color-warning);
+}
+
+/* Comments → subtle, italic for readability */
+.hljs-comment,
+.hljs-quote {
+  color: var(--color-text-subtle);
+  font-style: italic;
+}
+
+/* Function/class names, attributes → parchment-muted */
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-attr,
+.hljs-attribute {
+  color: var(--color-text-muted);
+}
+
+/* Variables, properties → full text weight */
+.hljs-variable,
+.hljs-name,
+.hljs-property,
+.hljs-section {
+  color: var(--color-text);
+}
+
+/* Operators, punctuation — slightly dimmed */
+.hljs-operator,
+.hljs-punctuation {
+  color: var(--color-text-muted);
+}
+
+/* Deletion / addition in diffs */
+.hljs-deletion {
+  color: var(--color-danger);
+}
+.hljs-addition {
+  color: var(--color-success);
+}
+
+/* Light theme: re-anchor to deeper tones for contrast on paper */
+:root.light .hljs-keyword,
+[data-theme="light"] .hljs-keyword,
+:root.light .hljs-built_in,
+[data-theme="light"] .hljs-built_in,
+:root.light .hljs-type,
+[data-theme="light"] .hljs-type {
+  color: var(--color-accent-text);
+}
+:root.light .hljs-string,
+[data-theme="light"] .hljs-string,
+:root.light .hljs-regexp,
+[data-theme="light"] .hljs-regexp {
+  color: var(--color-success);
+}
+:root.light .hljs-number,
+[data-theme="light"] .hljs-number,
+:root.light .hljs-literal,
+[data-theme="light"] .hljs-literal {
+  color: var(--color-warning);
+}
+
+/* ============================================================
+   Code block — copy button hover + settings nav hover treatment
+   ============================================================ */
+
+.lmchat-code-copy {
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+.lmchat-code-copy:hover {
+  color: var(--color-text);
+  background: var(--color-surface-3);
+  border-color: var(--color-border-strong);
+}
+.lmchat-code-copy:active {
+  transform: scale(0.96);
+}
+
+/* Settings sidebar nav item — hover/active treatment handled in settings.css */
+
+/* Chat sidebar item — hover on inactive rows */
+.lmchat-sidebar-item:hover {
+  background: color-mix(
+    in oklch,
+    var(--color-accent) 7%,
+    transparent
+  ) !important;
+  color: var(--color-text) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   PRINT STYLESHEET
+   Goal: user prints a chat → clean conversation transcript, no UI chrome.
+   Strategy: hide all navigation, chrome, and atmospheric decorations;
+   render message content black-on-white with sensible margins.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media print {
+  /* ── Force light output on any theme ────────────────────────────────────── */
+  :root,
+  :root.dark,
+  [data-theme="dark"],
+  [data-theme="light"] {
+    --color-bg: #ffffff;
+    --color-surface: #ffffff;
+    --color-surface-elevated: #f5f5f5;
+    --color-text: #111111;
+    --color-text-muted: #333333;
+    --color-text-subtle: #555555;
+    --color-border: #cccccc;
+    --color-border-default: #cccccc;
+    color-scheme: light;
+  }
+
+  /* ── Page setup ─────────────────────────────────────────────────────────── */
+  @page {
+    margin: 2cm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #111111 !important;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 11pt;
+    line-height: 1.5;
+  }
+
+  /* ── Hide all UI chrome ─────────────────────────────────────────────────── */
+
+  /* Sidebar, topbar, composer, dock, mobile drawer, overlay */
+  .lmchat-sidebar,
+  .lmchat-topbar-shell,
+  .lmchat-topbar-shell--mobile,
+  .lmchat-mobile-sidebar-shell,
+  .lmchat-mobile-backdrop,
+  .lmchat-composer-wrapper,
+  .lmchat-mobile-dock,
+  .lmchat-drawer-header-mobile,
+  .lmchat-collapse-toggle,
+  .lmchat-footer-row,
+  .lmchat-stats-footer {
+    display: none !important;
+  }
+
+  /* Status badges, action menus, overflow triggers */
+  .lmchat-topbar-badge-wrap,
+  .lmchat-message-actions,
+  .lmchat-followup-chips,
+  [data-testid="topbar-overflow-trigger"],
+  .lmchat-header-menu__panel,
+  .lmchat-error-banner,
+  .lmchat-integrations-disclosure,
+  .lmchat-integrations-bar {
+    display: none !important;
+  }
+
+  /* Toast notifications */
+  .toast-container {
+    display: none !important;
+  }
+
+  /* Atmospheric / decorative pseudo-elements */
+  .lmchat-message-row[data-message-role="assistant"]::before,
+  .lmchat-composer-bar::before,
+  .lmchat-stats-footer::before {
+    display: none !important;
+  }
+
+  /* ── Show and style message content ─────────────────────────────────────── */
+
+  .lmchat-chat-shell {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .lmchat-main-column {
+    display: block !important;
+    overflow: visible !important;
+  }
+
+  .lmchat-messages-area {
+    display: block !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    gap: 0 !important;
+  }
+
+  .lmchat-message-row {
+    display: block !important;
+    margin-bottom: 1.25em !important;
+    animation: none !important;
+    break-inside: avoid;
+  }
+
+  /* User bubble: simple indented block with a left border */
+  .lmchat-bubble-user {
+    max-width: 100% !important;
+    background: #f0f0f0 !important;
+    border: none !important;
+    border-left: 3px solid #888888 !important;
+    padding: 6pt 10pt !important;
+    color: #333333 !important;
+    font-size: 10pt !important;
+    margin-bottom: 0.5em !important;
+    page-break-inside: avoid;
+  }
+
+  /* Assistant response: plain text, full width */
+  .lmchat-bubble-assistant {
+    max-width: 100% !important;
+    background: transparent !important;
+    border: none !important;
+    color: #111111 !important;
+    font-size: 11pt !important;
+    line-height: 1.6 !important;
+    page-break-inside: avoid;
+  }
+
+  /* Code blocks: monospace, bordered, no syntax highlight background extremes */
+  pre,
+  code {
+    background: #f5f5f5 !important;
+    border: 1px solid #cccccc !important;
+    color: #222222 !important;
+    font-size: 9pt !important;
+    page-break-inside: avoid;
+  }
+
+  /* Remove animated carets and streaming decorations */
+  .lmchat-stream-caret {
+    display: none !important;
+  }
+
+  /* Ensure animations do not play */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+  }
+}
+
+/* ============================================================
+   FORCED-COLORS (Windows High Contrast mode)
+   ============================================================
+   When forced-colors: active, the OS overrides most color
+   properties. Strip all atmospheric decorations so the app
+   remains functional and legible; layout is preserved.
+
+   What this block does:
+   - Removes radial-gradient atmospheric backgrounds (body,
+     html::after, body::before, subsession copper bleed,
+     settings tab bleed, toast ambient, empty-state grains).
+   - Resets color-mix() / OKLCH decorative backgrounds to
+     transparent so the forced palette shows through.
+   - Stops ambient animations; purely decorative pseudo-
+     elements are hidden with display:none.
+   - Ensures focus rings use system ButtonText keyword so
+     they remain visible regardless of forced palette.
+   - Preserves all layout, spacing, and typography. */
+
+@media (forced-colors: active) {
+  /* Grain texture overlay and haze — purely decorative */
+  body::after,
+  html::after {
+    display: none !important;
+  }
+
+  /* Canvas bloom (ambient warm radial) */
+  body::before {
+    display: none !important;
+  }
+
+  /* Body background: let the OS canvas show through */
+  body {
+    background-image: none !important;
+    background-color: Canvas !important;
+  }
+
+  /* Subsession (research panel) copper bleed */
+  .lmchat-subsession-outer {
+    background-image: none !important;
+  }
+
+  /* Settings nav active-item brass/copper layers */
+  .lmchat-settings-nav-item--active {
+    background-image: none !important;
+    background-color: Highlight !important;
+    color: HighlightText !important;
+  }
+
+  .lmchat-settings-nav-item--active::before,
+  .lmchat-settings-nav-item--active::after {
+    display: none !important;
+  }
+
+  /* Toast ambient bleed pseudo-elements */
+  .toast-item::before,
+  .toast-item::after {
+    display: none !important;
+  }
+
+  /* Prompts empty-state dot-grain card */
+  .rr-empty-state--prompts {
+    background-image: none !important;
+    background-color: Canvas !important;
+    border: 1px solid CanvasText !important;
+    transform: none !important;
+  }
+  .rr-empty-state--prompts::before {
+    display: none !important;
+  }
+
+  /* Memory / Documents / Analytics page atmospheric overlays */
+  .rr-page::before,
+  .rr-page::after {
+    display: none !important;
+  }
+
+  /* Reading rooms bar-chart atmospheric fill */
+  .rr-bar-fill {
+    background-image: none !important;
+    background-color: Highlight !important;
+  }
+
+  /* Focus rings: rely on system ButtonText for maximum contrast */
+  :focus-visible {
+    outline: 2px solid ButtonText !important;
+    outline-offset: 2px !important;
+  }
+
+  /* Copper text-selection highlight — fall back to system default */
+  ::selection {
+    background: Highlight !important;
+    color: HighlightText !important;
+  }
+
+  /* Sidebar skeleton pulse — strip shimmer, show static bars */
+  .lmchat-chat-skeleton__row {
+    background: ButtonFace !important;
+    opacity: 1 !important;
+    animation: none !important;
+  }
+
+  /* Model-select loading pulse */
+  .lmchat-model-select--loading {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+
+  /* Stream caret halo — decorative only */
+  .lmchat-stream-caret::before,
+  .lmchat-stream-caret::after {
+    display: none !important;
+  }
+
+  /* Foxing corners — purely decorative aged-paper effect */
+  .lmchat-foxing-bottomleft::before {
+    display: none !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   DISPLAY PREFERENCES — data-attribute driven overrides (displayStore.ts)
+   Three prefs, each applied as a data-attribute on <html> by displayStore on
+   module load. Defaults carry an explicit attribute so CSS is always explicit
+   (no FOUC, no "unset" state). All values use existing spacing / color tokens.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Text size ───────────────────────────────────────────────────────────────
+   Scales the rem type system globally. The iOS 16px input floor is expressed
+   as an absolute px rule in the mobile block above — it doesn't scale with
+   rem, which is intentional (prevents iOS auto-zoom on input focus). */
+
+:root[data-text-size="sm"] {
+  font-size: 93.75%; /* → 15px base when browser default is 16px */
+}
+
+/* "md" is the browser default (100% / 16px) — no override needed. */
+
+:root[data-text-size="lg"] {
+  font-size: 106.25%; /* → 17px base */
+}
+
+/* ── Conversation density ────────────────────────────────────────────────────
+   Compact mode tightens the message area gap and trims its padding so more
+   turns are visible without scrolling. Comfortable (default) uses the
+   existing .lmchat-messages-area values defined in chat.css. */
+
+:root[data-density="compact"] .lmchat-messages-area {
+  gap: var(--space-sibling); /* 12px — down from GROUP 24px */
+  padding: var(--space-sibling) var(--space-group); /* tighter top/bottom */
+}
+
+/* ── Message style ───────────────────────────────────────────────────────────
+   Flat mode removes the translucent color-field background and softens the
+   border on USER bubbles only. Alignment, max-width, padding, and typography
+   are unchanged — only the surface treatment changes. Response / tool turns
+   are not affected (they already have no background). */
+
+:root[data-message-style="flat"] .lmchat-bubble-user {
+  background: transparent;
+  border-color: color-mix(in oklch, var(--color-border-default) 50%, transparent);
+  border-radius: var(--radius-sm);
+}

@@ -1,0 +1,11 @@
+# Local Tailscale test override — gives the container read-only access to the
+# host's LM Studio MCP config so the composer can list the configured servers.
+# LM Studio (on the host) still executes the tools; the container only lists them.
+services:
+  lmchat:
+    volumes:
+      # Host-bind /data so the SQLite DB survives container death + docker GC
+      # (named volumes were getting pruned under Docker Desktop memory pressure,
+      # wiping the account). Merges by target path → replaces the base named volume.
+      - ${HOME}/lmchat-data:/data
+      - ${HOME}/.lmstudio/mcp.json:/home/nonroot/.lmstudio/mcp.json:ro

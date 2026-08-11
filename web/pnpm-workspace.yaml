@@ -1,0 +1,28 @@
+# pnpm 11 project settings.
+# allowBuilds: approve esbuild's native binary compile step.
+# Vite 7 and Vitest 4 both depend on esbuild internally.
+allowBuilds:
+  esbuild: true
+
+# Suppress peer-dep mismatch: openapi-typescript@7 declares typescript@^5.x
+# but the project pins TS 6 per ADR-018. openapi-typescript is a CLI codegen
+# tool; it does not import the compiler at runtime and works correctly with TS 6.
+peerDependencyRules:
+  allowedVersions:
+    openapi-typescript>typescript: ">=6"
+
+# Security floors for transitive devDependencies (build/test tooling only —
+# never shipped in the browser bundle). Each pins the patched line for a CVE
+# osv-scanner flags against pnpm-lock.yaml. brace-expansion is scoped per-major
+# (2.x reaches us via openapi-typescript, 5.x via eslint) so each consumer
+# keeps an API-compatible line.
+#   brace-expansion 2.1.3/5.0.8 → GHSA-rgw5-rvv9-x895 (ReDoS)
+#   fast-uri        3.1.4       → GHSA-7p8r-x3mc-p8w7
+#   js-yaml         4.2.0       → GHSA-52cp-r559-cp3m
+#   qs              6.15.1      → GHSA-q8mj-m7cp-5q26
+overrides:
+  brace-expansion@2: 2.1.4
+  brace-expansion@5: 5.0.9
+  fast-uri: 3.1.5
+  js-yaml@4: 4.3.0
+  qs: 6.15.2

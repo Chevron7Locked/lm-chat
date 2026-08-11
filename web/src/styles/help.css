@@ -1,0 +1,148 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Help page — dark-theme-aware layout styles.
+ * Replaces the inline-style objects in Help.tsx so theme tokens
+ * (set on :root / [data-theme="dark"]) are honoured automatically.
+ */
+
+.help-page {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: var(--space-group) var(--space-sibling-relaxed);
+  color: var(--color-text);
+}
+
+.help-header {
+  margin-bottom: var(--space-chapter);
+}
+
+.help-h1 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h1);
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: var(--ls-tight);
+  color: var(--color-text);
+}
+
+.help-lead {
+  font-size: var(--fs-lead, 18px);
+  line-height: 1.55;
+  color: var(--color-text-muted);
+  margin-top: var(--space-glue-relaxed);
+  max-width: 65ch;
+}
+
+.help-section {
+  margin-top: var(--space-chapter);
+}
+
+.help-h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h2);
+  font-weight: 600;
+  margin: 0 0 var(--space-sibling);
+  letter-spacing: var(--ls-tight);
+  color: var(--color-text);
+}
+
+.help-h3 {
+  font-size: var(--fs-h3);
+  font-weight: 600;
+  margin: var(--space-group) 0 var(--space-glue-relaxed);
+  color: var(--color-text);
+}
+
+.help-p {
+  line-height: 1.6;
+  max-width: 65ch;
+  margin: var(--space-glue-relaxed) 0;
+  color: var(--color-text);
+}
+
+.help-ul,
+.help-ol {
+  line-height: 1.6;
+  max-width: 65ch;
+  padding-left: var(--space-group);
+  color: var(--color-text);
+}
+
+/* ── Table (keyboard shortcuts / slash commands) ─────────────────────── */
+
+.help-table {
+  display: grid;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  overflow: hidden;
+  margin-top: var(--space-glue-relaxed);
+}
+
+.help-tr-header {
+  display: grid;
+  grid-template-columns: minmax(160px, 28%) 1fr;
+  background: var(--color-surface-elevated);
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  font-weight: 600;
+  font-size: var(--fs-label);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.help-tr {
+  display: grid;
+  grid-template-columns: minmax(160px, 28%) 1fr;
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  border-top: 1px solid var(--color-border);
+  align-items: start;
+  color: var(--color-text);
+}
+
+.help-th,
+.help-td {
+  padding: 0;
+}
+
+.help-td-desc {
+  padding: 0;
+  line-height: 1.55;
+}
+
+.help-dim {
+  color: var(--color-text-muted);
+  font-size: var(--fs-label);
+}
+
+/* ── Troubleshooting ─────────────────────────────────────────────────── */
+
+.help-dl {
+  margin-top: var(--space-glue-relaxed);
+}
+
+.help-trouble-row {
+  padding: var(--space-sibling) 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.help-dt {
+  font-weight: 600;
+  font-size: var(--fs-body);
+  color: var(--color-text);
+}
+
+.help-dd {
+  margin-top: var(--space-glue-relaxed);
+  margin-left: 0;
+  line-height: 1.6;
+  max-width: 65ch;
+  color: var(--color-text);
+}
+
+.help-dd-why {
+  color: var(--color-text-muted);
+  font-size: var(--fs-label);
+}
+
+.help-dd-fix {
+  margin-top: var(--space-glue-relaxed);
+}

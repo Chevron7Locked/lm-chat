@@ -1,0 +1,293 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * KeyboardHelp — warm-future-library material layer stylesheet.
+ *
+ * Modal: brass-edged card on --color-scrim backdrop.
+ * Shortcut keys: --font-mono --fs-label with --material-foxing background.
+ * Descriptions: Hanken Grotesk italic.
+ * Open animation: backdrop opacity + card scale 0.96→1.
+ *
+ * Forbidden: backdrop-filter blur, border-left/right ≥ 2px,
+ * gradient text, bouncy easing, layout-animated properties.
+ */
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   BACKDROP
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.kbd-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--color-scrim);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  z-index: var(--z-max);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CARD — brass-edged dialog
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.kbd-card {
+  width: 560px;
+  max-width: 92vw;
+  max-height: 76vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  /* Brass inner glow — "the reading room hardware" */
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 0 16px var(--material-brass);
+  overflow: hidden;
+  /* Open: scale 0.96 → 1 + opacity; then brass inner-glow pulses ONCE */
+  animation:
+    kbd-card-in var(--duration-base, 200ms)
+      var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both,
+    kbd-brass-once 600ms var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1))
+      both;
+  animation-delay: 0ms, 100ms;
+}
+
+@keyframes kbd-card-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Brass presence-pulse ONCE on open — like the panel just lit up */
+@keyframes kbd-brass-once {
+  0% {
+    box-shadow:
+      var(--shadow-lg),
+      inset 0 0 36px var(--material-brass);
+  }
+  100% {
+    box-shadow:
+      var(--shadow-lg),
+      inset 0 0 16px var(--material-brass);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   HEADER
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.kbd-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sibling-relaxed) var(--space-group);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+/* Title — Hubot Sans 600, --fs-h3 */
+.kbd-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-h3); /* 17px */
+  font-weight: 600;
+  color: var(--color-text);
+  letter-spacing: var(--ls-tight);
+}
+
+/* Close button */
+.kbd-close-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-body);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-quart);
+}
+
+.kbd-close-btn:hover {
+  color: var(--color-text);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   BODY — scrollable
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.kbd-body {
+  padding: var(--space-group) var(--space-group);
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  /* section → section: CHAPTER (48px) */
+  gap: var(--space-chapter);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SECTION
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.kbd-section {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Section title — Hubot Sans 600, --fs-micro, uppercase, copper */
+.kbd-section-title {
+  margin: 0 0 var(--space-sibling-relaxed);
+  font-family: var(--font-display);
+  font-size: var(--fs-micro); /* 11px */
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-text-subtle);
+  line-height: 1;
+  padding-bottom: var(--space-glue-relaxed);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Shortcut list — row → row: SIBLING (12px) */
+.kbd-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sibling);
+}
+
+/* Shortcut row */
+.kbd-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sibling);
+  font-size: var(--fs-body);
+  color: var(--color-text);
+}
+
+/* Shortcut key — --font-mono --fs-label, foxing background */
+.kbd-key {
+  display: inline-block;
+  min-width: 160px;
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  background: var(--material-foxing);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label); /* 13px */
+  color: var(--color-text);
+  text-align: center;
+  flex-shrink: 0;
+  line-height: var(--lh-ui);
+}
+
+/* Shortcut row hover — kbd chip background warms */
+.kbd-row {
+  transition: background var(--duration-fast) var(--ease-out-quart);
+  border-radius: var(--radius-xs);
+  padding-inline: var(--space-glue);
+  margin-inline: calc(-1 * var(--space-glue));
+}
+
+.kbd-row:hover .kbd-key {
+  background: color-mix(
+    in oklch,
+    var(--material-foxing) 100%,
+    var(--color-accent-quiet)
+  );
+  border-color: var(--color-accent-border);
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+/* Description — Hanken Grotesk italic */
+.kbd-desc {
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-size: var(--fs-body); /* 14px */
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+  line-height: var(--lh-ui);
+}
+
+/* "soon" badge */
+.kbd-badge {
+  padding: 1px var(--space-glue-relaxed);
+  background: var(--material-foxing);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-micro); /* 11px */
+  font-style: normal;
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  font-family: var(--font-display);
+  font-weight: 500;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   FOOTER
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.kbd-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: var(--space-glue-relaxed) var(--space-group);
+  border-top: 1px solid var(--color-border);
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption); /* 12px */
+  color: var(--color-text-subtle);
+  gap: var(--space-glue-relaxed);
+  flex-shrink: 0;
+}
+
+/* Inline Esc key in footer */
+.kbd-key-inline {
+  padding: 1px var(--space-glue-relaxed);
+  background: var(--material-foxing);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro); /* 11px */
+  color: var(--color-text);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   REDUCED MOTION
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* Close button: raise to 44px tap target on mobile (HIG minimum). */
+  .kbd-close-btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kbd-card {
+    animation: none;
+  }
+
+  .kbd-close-btn,
+  .kbd-row,
+  .kbd-key {
+    transition: none;
+  }
+}

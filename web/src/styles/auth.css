@@ -1,0 +1,369 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Auth — warm-future-library stylesheet for Login + Register.
+ *
+ * These are the library's ENTRY HALL — first impression surfaces.
+ * The form floats on the warm atmospheric canvas. No card border,
+ * no panel chrome around the outer wrapper. Color-field discipline.
+ *
+ * Spacing grammar (semantic tokens):
+ *   glue (4px) → sibling (12px) → group (24px) → chapter (48px)
+ */
+
+/* ── Page wrapper — full-viewport centered column ────────────────────────────── */
+
+.lmchat-auth-page {
+  min-height: 100dvh;
+  display: grid;
+  /* `safe center` keeps the column centered when it fits AND keeps the
+   * top edge reachable when it doesn't. Plain `center` clipped the top
+   * of the WelcomeWizard off-screen — the page scrolled but the
+   * brand/header was inaccessible above the viewport. */
+  place-items: safe center;
+  padding: var(--space-chapter) var(--space-group);
+  background: var(--color-bg);
+}
+
+.lmchat-auth-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0; /* individual spacing handled per block */
+  max-width: var(--max-auth); /* 400px */
+  width: 100%;
+}
+
+/* ── Brand lockup — wordmark + tagline ───────────────────────────────────────── */
+
+.lmchat-auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(
+    --space-sibling-relaxed
+  ); /* mark → wordmark → tagline: SIBLING-RELAXED (16px) */
+  text-align: center;
+  width: 100%;
+}
+
+/* Wordmark — display scale.
+ * Was Hubot Sans 700 at 40px which read as chunky/dated at this size
+ * (heavy bold + tight tracking + display scale = the "old slab" feel).
+ * Drop to semi-bold + a touch smaller; the
+ * mark beside it carries the visual weight. */
+.lmchat-auth-wordmark {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.75rem, 4.5vw, 2.125rem); /* 28–34px */
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  line-height: var(--lh-display);
+  color: var(--color-text);
+}
+
+/* Tagline — italic, muted, body-lg */
+.lmchat-auth-tagline {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg); /* 15px */
+  font-style: italic;
+  color: var(--color-text-muted);
+  line-height: var(--lh-ui);
+}
+
+/* Gap between brand lockup and form: CHAPTER (48px) */
+.lmchat-auth-form-gap {
+  height: var(--space-chapter);
+}
+
+/* ── Form — floats on the canvas, no card border ──────────────────────────────── */
+/* The outer wrapper has the card chrome (surface + border + shadow).
+   This is the existing design choice — the card IS the landing surface.
+   We do NOT add a second card on top; we refine the inner spacing.       */
+
+.lmchat-auth-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  /* Fields are spaced with --space-group (24px) between them */
+  gap: var(--space-group); /* form fields: GROUP (24px) */
+  padding: var(--space-group-relaxed);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+/* Form header (Sign in / Create account + subtitle) */
+.lmchat-auth-form-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue-relaxed); /* heading ↔ subtitle: GLUE-RELAXED (8px) */
+}
+
+.lmchat-auth-form-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-h3); /* 17px */
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: var(--lh-heading);
+}
+
+.lmchat-auth-form-subtitle {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body); /* 14px */
+  color: var(--color-text-muted);
+  line-height: var(--lh-ui);
+}
+
+/* ── Field: label → input stack ──────────────────────────────────────────────── */
+
+.lmchat-auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue); /* label ↔ input: GLUE (4px) */
+}
+
+.lmchat-auth-field-label {
+  font-family: var(--font-sans);
+  font-size: var(--fs-label); /* 13px — was 12px micro */
+  font-weight: 500;
+  /* Sentence case — no transform, no caps spacing */
+  color: var(--color-text-muted);
+  line-height: 1;
+}
+
+.lmchat-auth-input {
+  width: 100%;
+  padding: var(--space-glue-relaxed) var(--space-sibling-relaxed); /* glue-relaxed (8px) vertical */
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg); /* 15px */
+  color: var(--color-text);
+  outline: none;
+  box-sizing: border-box;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-quart),
+    box-shadow var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-auth-input:focus {
+  border-color: color-mix(
+    in oklch,
+    var(--color-accent) 55%,
+    var(--color-border-default)
+  );
+  /* hairline emerges from the bottom — copper flows up from baseline */
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--color-accent) 18%, transparent),
+    0 2px 0 0 var(--color-accent) inset;
+}
+
+.lmchat-auth-input--error {
+  border-color: var(--color-danger);
+  border-width: 2px;
+}
+
+.lmchat-auth-field-hint {
+  /* Italic marginalia in display font — brand voice, not utility descriptor */
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: var(--fs-marginalia); /* 12px */
+  color: var(--color-text-subtle);
+  line-height: var(--lh-ui);
+}
+
+.lmchat-auth-field-hint--error {
+  color: var(--color-danger);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue);
+}
+
+.lmchat-auth-field-hint--success {
+  color: var(--color-success);
+}
+
+/* Error/status alert banners inside the form */
+.lmchat-auth-alert {
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-ui);
+}
+
+.lmchat-auth-alert--error {
+  background: var(--color-danger-quiet);
+  border: 1px solid var(--color-danger-border);
+  color: var(--color-danger);
+}
+
+.lmchat-auth-alert--info {
+  background: var(--color-accent-quiet);
+  border: 1px solid var(--color-accent-border);
+  color: var(--color-text);
+}
+
+.lmchat-auth-alert--success {
+  background: color-mix(in oklch, var(--color-success) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--color-success) 40%, transparent);
+  color: var(--color-text);
+}
+
+.lmchat-auth-alert--note {
+  background: color-mix(in oklch, var(--color-success) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--color-success) 35%, transparent);
+  color: var(--color-text);
+}
+
+/* ── Submit button ────────────────────────────────────────────────────────────── */
+/* Copper background with brass inner glow on hover */
+
+.lmchat-auth-submit {
+  padding: var(--space-sibling) var(--space-group); /* sibling (12px) vertical — comfortable hit target */
+  background: var(--color-accent-fill);
+  color: var(--color-text-on-accent);
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg); /* 15px */
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    box-shadow var(--duration-fast) var(--ease-out-quart);
+  width: 100%;
+}
+
+.lmchat-auth-submit:hover:not(:disabled) {
+  background: var(--color-accent-fill-hover);
+  box-shadow: inset 0 0 0 1px var(--material-brass);
+}
+
+/* :active — 4ms brass inset shimmer feels like weight */
+.lmchat-auth-submit:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow:
+    inset 0 0 0 2px var(--material-brass),
+    inset 0 2px 4px var(--color-scrim-sm, oklch(0 0 0 / 0.18));
+  transition-duration: 40ms;
+}
+
+.lmchat-auth-submit:disabled {
+  background: var(--color-accent-quiet);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+/* ── Footer link — submit → footer: GROUP-RELAXED (32px) ─────────────────────── */
+/* We set margin-top on the link itself to enforce the gap from submit. */
+
+.lmchat-auth-footer-link {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  text-align: center;
+  margin-top: var(
+    --space-group-relaxed
+  ); /* submit → footer link: GROUP-RELAXED (32px) */
+  transition: color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-auth-footer-link:hover {
+  color: var(--color-text);
+}
+
+/* ── Password reveal toggle ───────────────────────────────────────────────────── */
+
+.lmchat-pw-toggle {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  min-width: 36px;
+  min-height: 36px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── "Powered by LM Studio" attribution ──────────────────────────────────────── */
+/* Lives at the foot, marginalia type (12px italic, subtle) */
+
+.lmchat-auth-attribution {
+  margin-top: var(--space-group);
+  text-align: center;
+  font-family: var(--font-sans);
+  font-size: var(--fs-marginalia); /* 12px */
+  font-style: italic;
+  color: var(--color-text-subtle);
+  line-height: var(--lh-ui);
+  cursor: default;
+  transition: color var(--duration-fast) var(--ease-out-quart);
+}
+
+/* Tiny brass glow on hover — "powered by..." whispers back */
+.lmchat-auth-attribution:hover {
+  color: var(--color-text-muted);
+  text-shadow: 0 0 8px
+    color-mix(in oklch, var(--material-brass) 40%, transparent);
+}
+
+/* ── MONO input variant (TOTP code) ─────────────────────────────────────────── */
+
+.lmchat-auth-input--mono {
+  font-family: var(--font-mono);
+  letter-spacing: 0.2em;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   REDUCED MOTION
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-auth-input,
+  .lmchat-auth-submit,
+  .lmchat-auth-footer-link,
+  .lmchat-auth-attribution {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   AUTH MOBILE RESPONSIVE (≤768px)
+   Auth already renders well on mobile. These tweaks maintain the
+   benchmark quality at narrower viewports.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* Input: 16px prevents iOS auto-zoom on focus. */
+  .lmchat-auth-input {
+    font-size: 1rem;
+    min-height: 48px;
+  }
+
+  /* Submit button: full 48px height on mobile for confident CTA. */
+  .lmchat-auth-submit {
+    min-height: 48px;
+  }
+
+  /* Footer links: adequate tap target. */
+  .lmchat-auth-footer-link {
+    display: inline-block;
+    min-height: 36px;
+    line-height: 36px;
+  }
+}

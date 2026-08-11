@@ -1,0 +1,288 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * ChatMessage — warm-future-library material layer stylesheet.
+ *
+ * Covers: message bubbles prose typography, markdown content, PlainText,
+ * inline code, edit form, action row, stats chip, tool call card.
+ *
+ * All spacing uses the semantic spacing grammar.
+ * No backdrop-filter. No border-left/right ≥ 2px. No gradient text.
+ */
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MARKDOWN CONTENT — assistant editorial prose
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* MarkdownContent root — no explicit styling; child elements below carry it. */
+.lmchat-markdown {
+  /* No background — text lives directly on the canvas */
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg); /* 15px */
+  line-height: var(--lh-prose); /* 1.65 */
+}
+
+/* Paragraph spacing inside markdown — GLUE-RELAXED between paragraphs */
+.lmchat-markdown p {
+  margin: 0;
+}
+.lmchat-markdown p + p {
+  margin-top: var(--space-glue-relaxed); /* 8px between paragraphs */
+}
+
+/* Headings in assistant content — scale from h3 down */
+.lmchat-markdown h1,
+.lmchat-markdown h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h2);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: var(--space-group) 0 var(--space-glue-relaxed); /* GROUP above, GLUE-RELAXED below */
+  line-height: var(--lh-heading);
+  letter-spacing: var(--ls-tight);
+}
+
+.lmchat-markdown h3 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h3);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: var(--space-sibling) 0 var(--space-glue-relaxed); /* SIBLING above, GLUE-RELAXED below */
+  line-height: var(--lh-heading);
+}
+
+.lmchat-markdown h4,
+.lmchat-markdown h5,
+.lmchat-markdown h6 {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: var(--space-sibling) 0 var(--space-glue);
+  line-height: var(--lh-heading);
+}
+
+/* Lists — SIBLING gap between items.
+ * Tailwind v4 preflight zeroes `list-style` on `ul`/`ol`, so chat
+ * markdown was rendering bare-indented items with no marker — looked
+ * like a quoted block, not a list. Explicit list-style + marker color
+ * restores the dots / numbers and keeps them on-brand. */
+.lmchat-markdown ul,
+.lmchat-markdown ol {
+  margin: var(--space-glue-relaxed) 0;
+  padding-left: 1.5em;
+}
+.lmchat-markdown ul {
+  list-style-type: disc;
+}
+.lmchat-markdown ol {
+  list-style-type: decimal;
+}
+.lmchat-markdown ul ul {
+  list-style-type: circle;
+}
+.lmchat-markdown ul ul ul {
+  list-style-type: square;
+}
+
+.lmchat-markdown li {
+  margin-bottom: var(--space-glue); /* GLUE (4px) between list items */
+  line-height: var(--lh-prose);
+}
+.lmchat-markdown li::marker {
+  color: var(--color-text-muted);
+}
+
+/* Blockquote — marginalia treatment, no side stripe */
+.lmchat-markdown blockquote {
+  margin: var(--space-group) 0;
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  background: color-mix(in oklch, var(--color-surface) 40%, transparent);
+  border-radius: var(--radius-sm);
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+/* Horizontal rule */
+.lmchat-markdown hr {
+  margin: var(--space-group) 0;
+  border: none;
+  border-top: 1px solid var(--color-border);
+}
+
+/* Strong / emphasis */
+.lmchat-markdown strong {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.lmchat-markdown em {
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+/* Links */
+.lmchat-markdown a {
+  color: var(--color-accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(
+    in oklch,
+    var(--color-accent) 40%,
+    transparent
+  );
+  transition: text-decoration-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-markdown a:hover {
+  text-decoration-color: var(--color-accent-text);
+}
+
+/* Tables */
+.lmchat-markdown table {
+  display: block;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--space-group) 0;
+  font-size: var(--fs-body);
+}
+
+.lmchat-markdown th {
+  text-align: left;
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  border-bottom: 1px solid var(--color-border-strong);
+  font-weight: 600;
+  color: var(--color-text);
+  font-size: var(--fs-label);
+  letter-spacing: var(--ls-wide);
+}
+
+.lmchat-markdown td {
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  vertical-align: top;
+}
+
+/* Inline code — foxing tint background */
+.lmchat-markdown code:not(pre code) {
+  font-family: var(--font-mono);
+  font-size: 0.875em; /* relative to parent — scales with body-lg */
+  background: color-mix(
+    in oklch,
+    var(--color-surface-elevated) 70%,
+    var(--material-foxing)
+  );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  padding: 0 var(--space-glue); /* GLUE (4px) — inline code gutter */
+}
+
+/* Pre / code block spacing — GROUP above and below */
+.lmchat-markdown pre {
+  margin: var(--space-group) 0; /* GROUP (24px) surrounding prose */
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   PLAIN TEXT — user / system / tool messages
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-plain-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body); /* 14px — user messages slightly smaller */
+  color: var(--color-text-muted); /* muted — receding */
+  line-height: var(--lh-ui);
+}
+
+/* System / tool text — italic, more muted */
+.lmchat-plain-text--muted {
+  font-style: italic;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-label);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   STOPPED CHIP — terminal-state pill on a user-interrupted assistant turn
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Rendered after the preserved partial content when the
+   user pressed Stop. Same pill grammar as the app's other chips; the danger
+   (oxblood) tokens mark the terminal/stop state — quiet fill, subtle border,
+   micro display type. */
+.lmchat-stopped-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-top: var(--space-glue-relaxed); /* GLUE-RELAXED (8px) above partial */
+  padding: 2px 10px;
+  background: var(--color-danger-quiet);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-pill, 999px);
+  font-family: var(--font-display);
+  font-size: var(--fs-micro); /* 11px */
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-danger);
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CONTINUE CHIP — informational pill on a truncated assistant turn
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Continue-chip: rendered after the content when
+   the reply was cut off (stop_reason=length / EOF without terminal). Same
+   pill grammar as the Stopped chip, but on the WARNING tokens — the answer
+   being unfinished is informational ("send another message to continue"),
+   not an error state like a user-initiated Stop. */
+.lmchat-continue-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-top: var(--space-glue-relaxed); /* GLUE-RELAXED (8px) above content */
+  padding: 2px 10px;
+  background: var(--color-warning-quiet);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-pill, 999px);
+  font-family: var(--font-display);
+  font-size: var(--fs-micro); /* 11px */
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-warning);
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   PERSONA LABEL — subtle per-turn label on assistant turns (above the bubble)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Renders the active persona ("General", "Research", "Coder"…) or the
+   sub-agent name on the assistant turn that produced this reply.
+   Design: quiet accent-tinted pill, display-font uppercase caption.
+   WCAG AA: color-accent-text on color-accent-quiet passes 4.5:1 in dark mode
+   (verified against the token palette in design-tokens.css). */
+.lmchat-persona-label {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: var(--space-glue); /* GLUE (4px) above the bubble */
+  padding: 2px 10px;
+  background: color-mix(in oklch, var(--color-accent) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--color-accent) 22%, transparent);
+  border-radius: var(--radius-pill, 999px);
+  font-family: var(--font-display);
+  font-size: var(--fs-micro); /* 11px */
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-accent-text);
+  user-select: none;
+  white-space: nowrap;
+}

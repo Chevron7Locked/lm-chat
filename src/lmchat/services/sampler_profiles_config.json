@@ -1,0 +1,20 @@
+{
+  "$schema_version": "1",
+  "patterns": [
+    {
+      "match": "35b-a3b",
+      "profile": "thinking-general",
+      "comment": "Qwen3.6-35B-A3B vendor profile (HF model card)."
+    },
+    {
+      "match": "122b-a10b",
+      "profile": "thinking-general",
+      "comment": "122B-A10B distill — Qwen-family default per the reference implementation convention."
+    },
+    {
+      "match": "qwen3.6",
+      "profile": "thinking-general",
+      "comment": "Family-wide safety net — matches any unanticipated qwen3.6-* variant."
+    }
+  ]
+}

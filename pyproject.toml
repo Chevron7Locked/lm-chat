@@ -1,0 +1,238 @@
+# SPDX-License-Identifier: Apache-2.0
+[project]
+name = "lmchat"
+version = "1.0.0"
+description = "LM Chat — self-hosted browser-native client for LM Studio. FastAPI backend + React 19 SPA. Projects, sub-sessions, adaptive memory, RAG, per-model sampler profiles."
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Kevin O'Neill", email = "dev@chevron7.io" }]
+readme = "README.md"
+dependencies = [
+    "fastapi>=0.136",
+    "pydantic>=2.13",
+    "pydantic-settings>=2.14",
+    "uvicorn[standard]>=0.47",
+    "httpx>=0.28",
+    "sqlalchemy>=2.0",
+    "alembic>=1.18",
+    "aiosqlite>=0.22",
+    "structlog>=25",
+    "prometheus-client>=0.25",
+    "tiktoken>=0.13",
+    "python-multipart>=0.0.31",
+    "cryptography>=50.0.0",
+    "pyotp>=2.9",
+    "greenlet>=3",
+    "pyyaml>=6",
+    "jinja2>=3.1",
+    # numpy: cosine similarity math for semantic guide retrieval
+    # (services/system_guide.py). A runtime dep, not just transitive.
+    "numpy>=1.26",
+    # Document parsing for RAG pipeline.
+    # pypdf: text extraction from PDF files. Floor 6.15.0 fixes
+    # CVE-2026-71852 / CVE-2026-71870 (crafted-PDF DoS via /ToUnicode),
+    # reachable through the authenticated document-upload path.
+    # beautifulsoup4 + lxml: HTML tag stripping for HTML documents.
+    # defusedxml: XXE-hardened XML parsing for untrusted EPUB/DOCX
+    # container.xml / OPF / document.xml (bandit B314).
+    "pypdf>=6.15.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=5",
+    "defusedxml>=0.7.1",
+    "starlette>=1.3.1",
+    "mcp>=1.27.1",
+    "ddgs>=9.14.4",
+]
+
+[project.optional-dependencies]
+postgres = ["asyncpg>=0.31"]
+
+[project.scripts]
+lmchat = "lmchat.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9",
+    "pytest-asyncio>=1.3",
+    "pytest-cov>=6.0",
+    "pyright>=1.1.400",
+    "ruff>=0.15",
+    "lmstudio>=1.5",
+    "openapi-spec-validator>=0.8",
+    "hypothesis>=6.152",
+    "bandit>=1.9.4",
+    "pip-audit>=2.10.0",
+    "pip-licenses>=5",
+    # Stress-test harness (deployment gate).
+    # Locust drives the load (gevent-based). SSE event parsing is
+    # implemented in-tree (tests/stress/users/_sse.py) directly against
+    # Locust's requests-backed HTTP client — no third-party SSE mixin
+    # required (the wire format is a stable text/event-stream line
+    # iterator, and the plugin-ecosystem options are either unmaintained
+    # forks of the Aleph-Alpha repo or heavy umbrellas like
+    # locust-plugins).  Per PLAN §"DO NOT use Pydantic models for SSE
+    # event parsing if locust-sse provides them natively" the parsing
+    # stays raw + framework-free.
+    "locust>=2.44.0",
+    # Faker generates realistic usernames, chat titles, messages, transcripts.
+    "faker>=13.0.0",
+    # psutil powers RSS / FD-count measurement for the perf ceilings.
+    "psutil>=5.9.0",
+    # OpenTelemetry instrumentation — optional at runtime, gated on
+    # LM_CHAT_OTEL_ENABLED=true.  When unset, the imports stay but no
+    # spans are emitted (the SDK is initialised only inside the gate).
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp>=1.27.0",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+    "opentelemetry-instrumentation-httpx>=0.48b0",
+    # Schemathesis: stateful OpenAPI fuzzer (DAST offline).
+    # Floor target was ≥4.29.0 but PyPI only carries up to 4.19.0
+    # as of 2026-05-23; pinning the current floor.  When 4.29.0 ships,
+    # bump this floor in the same commit that adopts the new flag surface.
+    "schemathesis>=4.19.0",
+    # Garak: LLM red-team toolkit (LLM security gate).
+    # The floor is ≥0.10.0 but the L7 Makefile recipe degrades
+    # gracefully when the binary is missing, so this floor is advisory:
+    # the gate emits a JUnit <skipped> entry when garak is absent.
+    "garak>=0.10.0; python_version < '4'",
+    "playwright>=1.60.0",
+    "cosmic-ray>=8.4.6",
+    # Gap 2: flake detection — randomised run order + auto-rerun unstable tests.
+    # Both are opt-in: `make test-flake-scan` uses --randomly-seed; neither
+    # changes the default `make test` invocation.
+    "pytest-randomly>=3.15",
+    "pytest-rerunfailures>=14",
+]
+
+[tool.uv]
+# Security floors for TRANSITIVE dependencies (not used directly by the app).
+# These arrive via the dev/security tooling (cosmic-ray, garak → litellm /
+# langchain / aiohttp). They carry 2026 CVEs that pip-audit flags at L3; the
+# floors below are the fixed lines. Pinned as constraints rather than direct
+# dependencies because nothing in src/ imports them.
+#   - aiohttp 3.13.5  → 3.14.1 (request smuggling / parser CVEs)
+#   - langchain 1.3.2 → 1.3.9 (GHSA-gr75-jv2w-4656)
+#   - pip 26.1.1      → 26.1.2 (PYSEC-2026-196, the installer in the venv)
+#   - pillow 12.2.0    → 12.3.0 (8 PYSEC-2026 CVEs, garak's image-handling tree)
+#   - setuptools 81.0.0 → 83.0.0 (PYSEC-2026-3447)
+#   - torch 2.12.1     → 2.13.0 (PYSEC-2025-194, garak's model-eval tree)
+# nltk 3.9.4 (PYSEC-2026-597) has no fix version available as of 2026-07-20 —
+# no floor added; it will keep showing up in pip-audit until upstream ships one.
+#   - h2 4.4.0 → 4.4.1 (CVE-2026-71554, duplicate-Host smuggling). Dormant:
+#     transitive of httpx's http2 extra, and no call site sets http2=True — the
+#     floor is cheap insurance against a future PR flipping it on.
+constraint-dependencies = [
+    "aiohttp>=3.14.1",
+    "h2>=4.4.1",
+    "langchain>=1.3.9",
+    "pip>=26.1.2",
+    "pillow>=12.3.0",
+    "setuptools>=83.0.0",
+    "torch>=2.13.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lmchat"]
+
+[tool.pyright]
+include = ["src/lmchat", "tests", "tools"]
+extraPaths = ["src", "tools"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+reportMissingImports = "error"
+reportMissingTypeStubs = "none"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "tools"]
+# Default selection: skip stress_invariant (run only by `make stress-test`
+# / `run_stress.py` against a populated DB).  Pre-existing `stress`
+# marker is also opt-in but the existing 50-concurrent test sits in
+# tests/stress/ and is gated by ``-m stress`` already; the default
+# pytest invocation deselects both.
+addopts = "--strict-markers --strict-config -p no:randomly -m 'not stress_invariant'"
+markers = [
+    "stress: heavy concurrent stream tests; opt-in via -m stress",
+    # Post-load DB invariants under tests/stress/invariants/.
+    # Excluded from the default run via `--strict-markers` + the
+    # default `-m 'not stress_invariant'` in `make gates` / `make test`.
+    # Invoked explicitly by `make stress-test` / `run_stress.py`.
+    "stress_invariant: post-load DB invariants; opt-in via -m stress_invariant",
+]
+# Scoped suppression: aiosqlite's background thread closes after the
+# event loop, surfacing a PytestUnhandledThreadExceptionWarning whose
+# message contains "Event loop is closed" + a RuntimeError traceback.
+# It fires at teardown only — the DB work has already succeeded; this
+# is pure teardown noise.  Suppress the thread-exception warning that
+# originates in the aiosqlite module specifically.  Do NOT add a
+# blanket ignore — anything that surfaces from non-aiosqlite modules
+# still fails the run.  Filter syntax is action:message:category:module
+# — the category field requires a Warning subclass (RuntimeError is an
+# Exception, not a Warning), so the message match below covers the
+# RuntimeError-carrier warning by text instead.
+filterwarnings = [
+    "ignore::pytest.PytestUnhandledThreadExceptionWarning:aiosqlite",
+    "ignore:.*Event loop is closed.*:pytest.PytestUnhandledThreadExceptionWarning",
+]
+
+[tool.coverage.run]
+source = ["src/lmchat"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_empty = true
+
+[tool.coverage.lcov]
+output = "coverage/py.lcov"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+# B008: FastAPI uses Depends() in function default args — intentional pattern.
+# B904: Route handlers raise HTTPException directly (no `from exc` chaining).
+#        Stack frames never reach the client regardless of chaining; avoiding
+#        `from exc` keeps the audit-log / structured-log record as the single
+#        source of truth without the original exception leaking into the
+#        HTTPException's __cause__ chain (FastAPI debug pages, error reporters).
+"src/lmchat/routes/*.py" = ["B008", "B904"]
+"tests/routes/*.py" = ["B008", "B904"]
+# E501 for inline auth fixture strings ("correct-horse-battery" etc.) that span
+# register+login call pairs — splitting would obscure the test intent.
+"tests/routes/test_models.py" = ["E501"]
+"tests/routes/test_params.py" = ["E501"]
+"tests/routes/test_prompt_library.py" = ["E501"]
+"tests/routes/test_search.py" = ["E501"]
+"tests/routes/test_chats.py" = ["E501"]
+"tests/routes/test_messages.py" = ["E501"]
+"tests/routes/test_analytics.py" = ["E501"]
+"tests/routes/test_memory.py" = ["E501"]
+# E501 for long inline fixture dicts and docstring literals in service tests.
+"tests/services/test_chat_service_autotitle.py" = ["E501"]
+"tests/services/test_streaming_service.py" = ["E501"]
+# E501 for long alembic revision SQL strings + hardcoded head-version sets
+# (``in {"0028", ..., "0037"}``) in migration tests.
+"tests/db/test_alembic.py" = ["E501"]
+"tests/db/test_migration_insight_activations.py" = ["E501"]
+"tests/db/test_migration_p13l.py" = ["E501"]
+# E501 for long integration test URL strings.
+"tests/integration/test_docker_compose_boot.py" = ["E501"]
+"tests/integration/test_e2e_rewire.py" = ["E501"]
+"tests/integration/test_lm_studio_errors.py" = ["E501"]
+# ASYNC240 for offline RAG CLI that uses sync pathlib — trio/anyio not available here.
+"src/lmchat/services/d2_sweep.py" = ["ASYNC240"]
+# E402 for streaming_service.py — _LOCAL_TZ must be computed before imports that may
+# trigger the event loop; late imports are intentional to avoid circular deps.
+"src/lmchat/services/streaming_service.py" = ["E402"]

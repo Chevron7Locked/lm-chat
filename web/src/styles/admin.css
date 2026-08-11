@@ -1,0 +1,846 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Admin — warm-future-library material layer stylesheet.
+ *
+ * Covers: AdminQuotas, AdminModels, AdminIntegrations, AdminUsers.
+ * "The back office of the library" — same calm warm canvas; density
+ * where data demands it; library materiality throughout.
+ *
+ * All spacing uses the semantic spacing grammar:
+ *   glue (4px) → sibling (12px) → group (24px) → chapter (48px)
+ *
+ * Forbidden (locked):
+ *   No border-left/right ≥ 2px.
+ *   No gradient text.
+ *   No backdrop-filter blur.
+ *   No card grids.
+ *   No bouncy easing.
+ *   No layout-animated properties.
+ */
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   PAGE WRAPPER
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Shared page container — all admin pages */
+.admin-page {
+  max-width: var(--max-admin); /* 960px — 6-col table fits */
+  margin-inline: auto;
+  padding: var(--padding-page-y) var(--padding-page-x);
+  overflow-y: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  /* Page entrance: opacity fade --duration-page --ease-out-expo */
+  animation: rr-page-enter var(--duration-page, 900ms)
+    var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+
+/* ── Page header — eyebrow + display title + optional toolbar ────────────────── */
+
+.admin-page-header {
+  display: flex;
+  flex-direction: column;
+  /* eyebrow → title: GLUE (4px) */
+  gap: var(--space-glue);
+  /* page title → first body block (search/filter/table): CHAPTER (48px) */
+  margin-bottom: var(--space-chapter);
+}
+
+/* Eyebrow: "LM CHAT" — Hubot Sans 600, --fs-micro, uppercase, copper */
+.admin-eyebrow {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--fs-micro); /* 11px */
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-accent-text);
+  line-height: 1;
+}
+
+/* Page title — Hubot Sans 700, --fs-display (40px), --ls-tight */
+.admin-page-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-display); /* 40px */
+  font-weight: 700;
+  letter-spacing: var(--ls-tight);
+  line-height: var(--lh-display);
+  color: var(--color-text);
+}
+
+/* Title row: heading + primary action (e.g. Refresh, Invite admin) side-by-side */
+.admin-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-group);
+}
+
+/* Page description — subordinate copy below heading */
+/* GLUE-RELAXED (8px) above before section starts */
+.admin-page-desc {
+  margin: 0 0 var(--space-group);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body); /* 14px */
+  color: var(--color-text-muted);
+  line-height: var(--lh-prose);
+}
+
+/* Section heading within admin pages — Hubot Sans 600, --fs-h3 */
+.admin-section-heading {
+  margin: 0 0 var(--space-glue-relaxed);
+  font-family: var(--font-display);
+  font-size: var(--fs-h3); /* 17px */
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: var(--lh-heading);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   TABLE
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Overflow wrapper for horizontal scroll on narrow viewports */
+.admin-table-wrap {
+  overflow-x: auto;
+}
+
+/* Table — full width, collapse borders, Hanken Grotesk body */
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body); /* 14px */
+  color: var(--color-text);
+}
+
+/* Sticky header — Hubot Sans 500, --fs-micro, uppercase caps */
+.admin-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--color-surface);
+}
+
+.admin-th {
+  text-align: left;
+  padding: var(--space-sibling) var(--space-glue-relaxed);
+  font-family: var(--font-display);
+  font-size: var(--fs-micro); /* 11px */
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-text-subtle);
+  border-bottom: 1px solid var(--color-border-default);
+  white-space: nowrap;
+  line-height: var(--lh-ui);
+}
+
+.admin-th--right {
+  text-align: right;
+}
+.admin-th--center {
+  text-align: center;
+}
+
+/* Ink-bleed gradient between header and body */
+.admin-table thead::after {
+  content: "";
+  display: block;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    var(--material-ink-bleed) 20%,
+    color-mix(in oklch, var(--material-ink-bleed) 70%, var(--color-border)) 50%,
+    var(--material-ink-bleed) 80%,
+    transparent 100%
+  );
+}
+
+/* Table data cell — vertical padding SIBLING (12px) */
+.admin-td {
+  padding: var(--space-sibling) var(--space-glue-relaxed);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  vertical-align: middle;
+  line-height: var(--lh-ui);
+}
+
+.admin-td--right {
+  text-align: right;
+}
+.admin-td--center {
+  text-align: center;
+}
+.admin-td--muted {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.admin-td--mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--color-text-muted);
+}
+
+/* Alternating foxing tint on even rows — aged paper, NOT a harsh zebra */
+.admin-table tbody tr:nth-child(even) .admin-td {
+  background: color-mix(in oklch, var(--material-foxing) 55%, transparent);
+}
+
+/* Row hover — subtle background tint, --duration-fast --ease-out-quart */
+.admin-table tbody tr {
+  transition: background var(--duration-fast) var(--ease-out-quart);
+}
+
+.admin-table tbody tr:hover .admin-td {
+  background: color-mix(in oklch, var(--color-accent) 5%, transparent);
+}
+
+/* Row hover: action group fades in — affordances emerge as you approach */
+.admin-table tbody tr .admin-action-group {
+  opacity: 0.45;
+  transition: opacity var(--duration-fast) var(--ease-out-quart);
+}
+
+.admin-table tbody tr:hover .admin-action-group {
+  opacity: 1;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   STATUS CHIPS — loaded/unloaded, active/pending, admin/user
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Base chip — foxing background, Hubot Sans 500, --fs-micro, uppercase */
+.admin-chip {
+  display: inline-block;
+  padding: 2px var(--space-glue-relaxed);
+  background: var(--material-foxing);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: var(--fs-micro); /* 11px */
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-text-subtle);
+  white-space: nowrap;
+}
+
+/* Loaded / Active / Admin — copper accent register */
+.admin-chip--active {
+  background: var(--color-accent-quiet);
+  border: 1px solid var(--color-accent-border);
+  color: var(--color-accent-text);
+}
+
+/* Loaded ×N — success mint register */
+.admin-chip--loaded {
+  background: color-mix(in oklch, var(--color-success) 14%, transparent);
+  border: 1px solid color-mix(in oklch, var(--color-success) 40%, transparent);
+  color: var(--color-success);
+}
+
+/* Not loaded / Pending / User — quiet foxing */
+.admin-chip--inactive {
+  background: var(--material-foxing);
+  border: 1px solid var(--color-border-default);
+  color: var(--color-text-subtle);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ACTION BUTTONS — inline row actions
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Action group inside a row — GLUE-RELAXED (8px) between buttons */
+.admin-action-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+  flex-wrap: wrap;
+}
+
+/* Primary row action — copper background */
+.admin-btn-primary {
+  padding: var(--space-glue) var(--space-sibling);
+  background: var(--color-accent-fill);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label); /* 13px */
+  font-weight: 600;
+  color: var(--color-text-on-accent);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    box-shadow var(--duration-fast) var(--ease-out-quart);
+}
+
+.admin-btn-primary:hover:not(:disabled) {
+  background: var(--color-accent-fill-hover);
+  /* brass-edge inner glow on hover */
+  box-shadow: inset 0 0 0 1px var(--material-brass);
+}
+
+.admin-btn-primary:active:not(:disabled) {
+  transform: translateY(1px);
+  filter: brightness(0.96);
+}
+
+.admin-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Secondary row action — surface elevated + border */
+.admin-btn-secondary {
+  padding: var(--space-glue) var(--space-sibling);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label); /* 13px */
+  color: var(--color-text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart);
+}
+
+.admin-btn-secondary:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-3);
+}
+
+.admin-btn-secondary:active:not(:disabled) {
+  transform: translateY(1px);
+  filter: brightness(0.97);
+}
+
+.admin-btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Danger action — foxing tint background + rasp text */
+.admin-btn-danger {
+  padding: var(--space-glue) var(--space-sibling);
+  background: var(--material-foxing);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label); /* 13px */
+  font-weight: 500;
+  color: var(--color-danger);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.admin-btn-danger:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--color-danger) 12%, transparent);
+  border-color: var(--color-danger);
+}
+
+.admin-btn-danger:active:not(:disabled) {
+  transform: translateY(1px);
+  filter: brightness(0.96);
+}
+
+.admin-btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Danger outline — for "Delete" pre-confirm state */
+.admin-btn-danger-outline {
+  padding: var(--space-glue) var(--space-sibling);
+  background: transparent;
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  color: var(--color-danger);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.admin-btn-danger-outline:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--color-danger) 8%, transparent);
+  border-color: var(--color-danger);
+}
+
+.admin-btn-danger-outline:active:not(:disabled) {
+  transform: translateY(1px);
+  filter: brightness(0.96);
+}
+
+.admin-btn-danger-outline:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   INLINE ROW ERROR
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.admin-row-error {
+  display: block;
+  margin-top: var(--space-glue);
+  font-size: var(--fs-caption);
+  color: var(--color-danger);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MODALS — confirmation dialogs, invite modal
+   Uses .lmchat-form patterns from settings.css
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Backdrop — --color-scrim */
+.admin-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--color-scrim-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+/* Modal card — --color-surface-elevated, .lmchat-form patterns within */
+.admin-modal-card {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 0 16px var(--material-brass);
+  padding: var(--space-group-relaxed); /* 32px all sides */
+  min-width: 320px;
+  max-width: 520px;
+  width: 90vw;
+  display: flex;
+  flex-direction: column;
+  /* Modal open: scale 0.96 → 1, opacity 0 → 1; then warm border pulse once */
+  animation:
+    admin-modal-in var(--duration-base) var(--ease-out-expo) both,
+    admin-modal-border-pulse 600ms var(--ease-out-expo) both;
+  animation-delay: 0ms, 80ms;
+}
+
+@keyframes admin-modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Warm caramel border pulse ONCE on open — single, not infinite */
+@keyframes admin-modal-border-pulse {
+  0% {
+    border-color: color-mix(
+      in oklch,
+      var(--color-warning) 60%,
+      var(--color-border-strong)
+    );
+  }
+  100% {
+    border-color: var(--color-border-strong);
+  }
+}
+
+/* Modal heading — Hubot Sans 700, --fs-h3 */
+.admin-modal-heading {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-h3); /* 17px */
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: var(--lh-heading);
+}
+
+/* Modal body copy — modal heading → form: GROUP-RELAXED (32px) */
+.admin-modal-body {
+  margin: var(--space-group) 0 0; /* GROUP (24px) below heading */
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text-muted);
+  line-height: var(--lh-prose);
+}
+
+/* Modal actions row */
+.admin-modal-actions {
+  display: flex;
+  gap: var(--space-glue-relaxed);
+  justify-content: flex-end;
+  margin-top: var(--space-group); /* body → actions: GROUP (24px) */
+}
+
+/* Token display in invite modal */
+.admin-token-box {
+  display: block;
+  margin-top: var(--space-sibling);
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--color-text);
+  word-break: break-all;
+  line-height: var(--lh-prose);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   WARNING / INFO BANNERS — AdminIntegrations
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.admin-banner {
+  padding: var(--space-sibling) var(--space-sibling-relaxed);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-prose);
+  color: var(--color-text);
+  margin-bottom: var(--space-group);
+}
+
+.admin-banner--warning {
+  background: color-mix(in oklch, var(--color-warning) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--color-warning) 35%, transparent);
+}
+
+.admin-banner--info {
+  background: var(--color-accent-quiet);
+  border: 1px solid var(--color-accent-border);
+}
+
+.admin-banner code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  background: var(--color-surface-3);
+  border-radius: 2px;
+  padding: 0 var(--spacing-2xs); /* 2px inline code gutter — intentional micro */
+}
+
+.admin-banner a {
+  color: var(--color-accent-text);
+  text-decoration: underline;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   INTEGRATIONS LIST — AdminIntegrations custom list
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Integration entry list */
+.admin-int-list {
+  list-style: none;
+  margin: 0 0 var(--space-sibling);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue-relaxed); /* GLUE-RELAXED (8px) between items */
+}
+
+/* Integration list item — flex row */
+.admin-int-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast) var(--ease-out-quart);
+}
+
+.admin-int-item:hover {
+  background: color-mix(
+    in oklch,
+    var(--color-surface-elevated) 80%,
+    var(--material-foxing)
+  );
+}
+
+/* Integration ID tag — monospaced, foxing background */
+.admin-int-tag {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-xs);
+  padding: 2px var(--space-glue-relaxed);
+  color: var(--color-text);
+  flex: 1;
+}
+
+/* Default-on toggle */
+.admin-default-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue);
+  font-family: var(--font-display);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  cursor: pointer;
+  user-select: none;
+  padding: 2px var(--space-glue-relaxed);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-default);
+  background: transparent;
+  color: var(--color-text-subtle);
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.admin-default-toggle--active {
+  background: var(--color-accent-quiet);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent-text);
+}
+
+/* Remove button — ghost, subtle danger on hover */
+.admin-remove-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  border-radius: var(--radius-sm);
+  line-height: 1;
+  transition: color var(--duration-fast) var(--ease-out-quart);
+}
+
+.admin-remove-btn:hover {
+  color: var(--color-danger);
+}
+
+.admin-remove-btn:active {
+  opacity: 0.7;
+}
+
+/* Add form — inline input + button */
+.admin-add-form {
+  display: flex;
+  gap: var(--space-glue-relaxed);
+  margin-top: var(--space-sibling);
+}
+
+/* Add input */
+.admin-add-input {
+  flex: 1;
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  outline: none;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-quart),
+    box-shadow var(--duration-fast) var(--ease-out-quart);
+}
+
+.admin-add-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1.5px
+    color-mix(in oklch, var(--color-accent) 28%, transparent);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   PAGINATION — AdminAuditLog page walk
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.admin-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-group);
+  margin-top: var(--space-group);
+}
+
+.admin-pagination-status {
+  font-family: var(--font-sans);
+  font-size: var(--fs-label); /* 13px */
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   INSTANCE PICKER — AdminModels multi-instance unload dropdown
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.admin-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: var(--space-sibling);
+}
+
+.admin-picker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-glue-relaxed) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.admin-picker-row:last-child {
+  border-bottom: none;
+}
+
+.admin-picker-id {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--color-text-muted);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SOURCE NOTE / MUTED COPY — AdminIntegrations source indicator
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.admin-source-note {
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  color: var(--color-text-subtle);
+  margin-top: var(--space-sibling);
+}
+
+/* Inline code in prose */
+.admin-inline-code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  background: var(--color-surface-3);
+  border-radius: 2px;
+  padding: 0 var(--spacing-2xs); /* 2px inline code gutter — intentional micro */
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   EMPTY / LOADING STATES
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.admin-empty {
+  padding: var(--space-chapter) var(--space-group);
+  text-align: center;
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-size: var(--fs-body-lg);
+  color: var(--color-text-muted);
+  line-height: var(--lh-prose);
+}
+
+.admin-error {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-danger);
+  margin: 0 0 var(--space-sibling);
+}
+
+/* Inline edit input in table rows */
+.admin-inline-input {
+  width: min(100%, 100px);
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  outline: none;
+  transition: border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.admin-inline-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1.5px
+    color-mix(in oklch, var(--color-accent) 28%, transparent);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MODEL NAME BLOCK — model name + mono ID stacked
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.admin-model-name {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: var(--lh-ui);
+}
+
+.admin-model-id {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro); /* 11px */
+  color: var(--color-text-subtle);
+  margin-top: var(
+    --spacing-2xs
+  ); /* 2px — micro visual offset below model name */
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   HELP TEXT / SECTION DESCRIPTION
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.admin-help-text {
+  font-family: var(--font-sans);
+  font-size: var(--fs-label); /* 13px */
+  color: var(--color-text-muted);
+  line-height: var(--lh-prose);
+  margin: 0 0 var(--space-sibling);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   REDUCED MOTION
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-page {
+    animation: none;
+  }
+
+  .admin-modal-card {
+    animation: none;
+  }
+
+  .admin-table tbody tr,
+  .admin-btn-primary,
+  .admin-btn-secondary,
+  .admin-btn-danger,
+  .admin-btn-danger-outline,
+  .admin-remove-btn,
+  .admin-int-item,
+  .admin-default-toggle,
+  .admin-add-input,
+  .admin-inline-input {
+    transition: none;
+    transform: none;
+    filter: none;
+  }
+
+  .admin-table tbody tr .admin-action-group {
+    opacity: 1;
+    transition: none;
+  }
+}

@@ -1,0 +1,62 @@
+# .dockerignore — keep the build context small + reproducible.
+# Without this, COPY web/ ./ drags the host's web/node_modules into the
+# image, which (a) bloats build context and image size, (b) confuses pnpm
+# into a deps-status-check that aborts under "no TTY" in CI (P12g caught
+# this 2026-05-21).
+
+# Node / pnpm
+**/node_modules/
+**/.pnpm-store/
+**/.pnpm-state/
+**/dist/
+**/build/
+**/.vite/
+**/.turbo/
+
+# Python
+**/__pycache__/
+**/.venv/
+**/.uv-cache/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/htmlcov/
+**/*.pyc
+**/*.pyo
+
+# Local state / secrets — NEVER bake into an image
+.env
+.env.local
+.env.validate
+.env.*.local
+
+# Git + VCS
+.git/
+.gitignore
+.gitattributes
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Docs / panel transcripts — not needed in runtime image
+docs/postmortem/
+docs/phases/
+docs/release/
+docs/superpowers/
+docs/calibration/
+
+# Test fixtures + reports
+tests/calibration/golden_pairs.jsonl
+web/test-results/
+web/playwright-report/
+web/coverage/
+htmlcov/
+
+# Project tooling
+.claude/
+.serena/
+*.log

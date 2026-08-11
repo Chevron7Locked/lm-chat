@@ -1,0 +1,1044 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Composer — warm-future-library material layer stylesheet.
+ *
+ * Covers: Composer wrapper, input bar, textarea, action buttons,
+ * slash menu, slash palette, preset badge, integration pills.
+ *
+ * All spacing uses the semantic spacing grammar.
+ * No backdrop-filter. No border-left/right ≥ 2px. No gradient text.
+ * Composer → bottom of viewport: GROUP (24px) via padding.
+ * Attached files row → input: GLUE (4px).
+ */
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   COMPOSER WRAPPER — floating on canvas
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Wrapper — slight surface tint so it separates from the message canvas.
+   GROUP padding at bottom so composer breathes from the viewport edge.
+   iOS keyboard handling:
+   - padding-bottom uses max() to layer all keyboard-inset sources:
+     a. env(keyboard-inset-height) — Safari 17.4+ native (most accurate)
+     b. env(safe-area-inset-bottom) — notch / home-indicator
+     c. --keyboard-inset-fallback — visualViewport JS hook (cross-browser)
+     d. --space-group (24px) — minimum breathing room
+   - padding-bottom + visualViewport hook keep the composer above the
+     keyboard edge. (The `interactive-widget=resizes-content` viewport
+     meta attribute was dropped — Chrome doesn't recognize it yet and
+     emitted a console warning; the visualViewport JS hook covers the
+     reflow on all current browsers.)
+   - The `padding-top` is bumped to var(--space-sibling) (12px) on mobile
+     so there is visible breathing room between the MobileDock border-bottom
+     and the composer's top edge. This is controlled via the media query
+     below — desktop layout unchanged. */
+.lmchat-composer-wrapper {
+  /* Symmetric top/bottom on desktop so the bar reads as vertically centered in
+     its wrapper. Mobile media-query below re-introduces a keyboard-aware bottom. */
+  padding: var(--space-sibling-relaxed) var(--space-sibling);
+  border-top: 1px solid var(--color-border);
+  background: color-mix(in oklch, var(--color-bg) 85%, transparent);
+}
+
+/* Mobile composer wrapper — sibling breathing on all four sides.
+   12px top / 16px sides / safe-area-aware bottom. Desktop layout unchanged. */
+@media (max-width: 768px) {
+  .lmchat-composer-wrapper {
+    padding: var(--space-sibling) var(--space-sibling-relaxed)
+      max(
+        var(--space-group),
+        env(safe-area-inset-bottom, 0px),
+        env(keyboard-inset-height, 0px),
+        var(--keyboard-inset-fallback, 0px)
+      );
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   INPUT BAR — hairline border + brass focus glow
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* The slash menu sits in a max-width-constrained container above the bar */
+.lmchat-composer-inner {
+  position: relative;
+  max-width: var(--max-chat);
+  margin-inline: auto;
+}
+
+/* Input bar — floating card on canvas.
+   Hairline border bottom; on focus, border becomes copper + brass glow.
+   align-items: center keeps the send button vertically centred with the
+   textarea's first-line baseline when the composer is single-line. For
+   multi-line the textarea grows upward while the button stays centred. */
+.lmchat-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed); /* 8px between bar elements */
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  /* Asymmetric padding: vertical kept tight so the bar
+     reads as "a line you type on," horizontal kept
+     generous so neither the textarea nor the send button sit flush
+     against the rounded border. Using CSS logical properties — the
+     2026 standard for direction-agnostic spacing. */
+  padding-block: var(--space-glue);
+  padding-inline: var(--space-sibling);
+  width: 100%;
+  transition: border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+/* Focus state: copper border + brass inner glow */
+.lmchat-composer-bar:focus-within {
+  border-color: var(--color-accent);
+  box-shadow:
+    0 0 0 3px var(--color-accent-quiet),
+    inset 0 0 12px var(--material-brass);
+}
+
+/* ── Composer atmospheric layer ────────────────────────────────
+   A ::before pseudo carries a thin warm vellum layer that briefly intensifies
+   when the user types ([data-typing] attribute). The intensification is a
+   faster-firing composer-type-flare keyframe (0 → 1 → 0 over 800ms).
+   Wire: Composer.tsx adds data-typing to .lmchat-composer-bar via
+   a keystroke debouncer (300ms timeout). */
+.lmchat-composer-bar {
+  position: relative;
+}
+
+.lmchat-composer-bar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--material-vellum);
+  mix-blend-mode: soft-light;
+  opacity: 0;
+  /* Normally invisible; only fires when data-typing flare triggers */
+  transition: opacity 300ms var(--ease-soft);
+}
+
+/* When typing, the ::before vellum layer briefly blooms */
+.lmchat-composer-bar[data-typing]::before {
+  animation: composer-type-flare 800ms var(--ease-out-quart) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-composer-bar::before {
+    display: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   TEXTAREA — the input field
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-composer-textarea {
+  flex: 1;
+  resize: none;
+  background: none;
+  border: none;
+  outline: none;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg); /* 15px per spec */
+  color: var(--color-text);
+  line-height: var(--lh-ui);
+  /* Horizontal padding is owned by the bar (padding-inline), not the
+     textarea — having both was double-indenting the typed text.
+     Vertical padding here just keeps the first line visually centered
+     against the textarea's min-height. */
+  padding-block: var(--space-glue-relaxed);
+  padding-inline: 0;
+  min-height: 36px;
+  overflow-y: auto;
+}
+
+/* The bar's :focus-within already paints the copper border + box-shadow.
+ * Suppress the global `textarea:focus-visible` outline so we don't render
+ * two concentric copper borders (container + inner field). The bar is the
+ * focus surface; the textarea is just the input within it. */
+.lmchat-composer-textarea:focus-visible {
+  outline: none;
+}
+
+.lmchat-composer-textarea:disabled {
+  color: var(--color-text-muted);
+}
+
+.lmchat-composer-textarea::placeholder {
+  color: var(--color-text-subtle);
+  font-style: italic;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ACTION BUTTONS — icon buttons inside the bar
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue);
+  flex-shrink: 0;
+}
+
+/* Send button — copper rounded */
+.lmchat-composer-send-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue);
+  height: 36px;
+  padding: 0 var(--space-sibling);
+  background: var(--color-accent-fill);
+  color: var(--color-text-on-accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    opacity var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-composer-send-btn:hover:not(:disabled) {
+  background: var(--color-accent-fill-hover);
+}
+
+.lmchat-composer-send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Stop button — danger variant */
+.lmchat-composer-stop-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  background: var(--color-danger-quiet);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-composer-stop-btn:hover {
+  background: color-mix(in oklch, var(--color-danger) 20%, transparent);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SLASH MENU — brass-edged card, copper selected item
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Menu — brass-edged card that slides out from the input.
+   Animate in: opacity + translateY(4px → 0) over duration-fast ease-out-expo.
+   Close: instant (no exit animation). */
+.lmchat-slash-menu {
+  position: absolute;
+  bottom: calc(100% + var(--space-glue)); /* GLUE (4px) above the bar */
+  left: 0;
+  right: 0;
+  background: var(--color-surface-elevated);
+  /* Subtle brass inner glow on the selected item's container */
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 0 16px var(--material-brass);
+  overflow: hidden;
+  z-index: var(--z-popover);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-glue);
+  /* Entrance animation */
+  animation: slash-menu-in var(--duration-fast) var(--ease-out-expo) both;
+}
+
+@keyframes slash-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Group label — MICRO / mono caps */
+.lmchat-slash-group-label {
+  padding: var(--space-glue) var(--space-glue-relaxed) 2px;
+  font-family: var(--font-display);
+  font-size: var(--fs-micro); /* 11px */
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-text-subtle);
+}
+
+/* Item button — GLUE-RELAXED gap between items in the list */
+.lmchat-slash-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed); /* GLUE-RELAXED within an item */
+  width: 100%;
+  padding: var(--space-glue-relaxed) var(--space-glue-relaxed);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart);
+}
+
+/* Hover — brass material wash */
+.lmchat-slash-item:hover {
+  background: color-mix(
+    in oklch,
+    var(--color-surface-3) 50%,
+    var(--material-brass)
+  );
+  color: var(--color-text);
+}
+
+/* Active / keyboard-selected — copper background */
+.lmchat-slash-item--active {
+  background: color-mix(in oklch, var(--color-accent) 14%, transparent);
+  color: var(--color-text);
+}
+
+/* Command name — mono 600, copper accent */
+.lmchat-slash-cmd-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label); /* 13px */
+  font-weight: 600;
+  color: var(--color-accent-text);
+  flex-shrink: 0;
+  min-width: 88px;
+}
+
+/* Command description — italic sans, marginalia */
+.lmchat-slash-cmd-desc {
+  font-family: var(--font-sans);
+  font-size: var(--fs-marginalia); /* 12px */
+  font-style: italic;
+  color: var(--color-text-subtle);
+  flex: 1;
+}
+
+/* Coming-soon badge */
+.lmchat-slash-badge {
+  padding: 1px 6px;
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-micro); /* 11px */
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  flex-shrink: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-slash-menu {
+    animation: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   COMPOSER MOBILE RESPONSIVE (≤768px)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* Lateral padding now handled by the unified mobile block above. */
+
+  /* The chat shell uses height:100dvh (chat.css) so the visual
+     viewport contracts when the iOS keyboard opens. The composer is a
+     flex-shrink:0 child of the flex-column main column, so it naturally
+     stays at the bottom edge as the messages area (flex:1) shrinks. */
+  .lmchat-composer-wrapper {
+    flex-shrink: 0;
+  }
+
+  /* Send button: ensure minimum 44px height on mobile. */
+  .lmchat-composer-send-btn {
+    height: 44px;
+    padding: 0 var(--space-sibling-relaxed);
+  }
+
+  /* Stop button: already 44×44, no change needed. */
+
+  /* Slash menu: constrain to viewport on narrow screens. */
+  .lmchat-slash-menu {
+    max-height: 40vh; /* leave room for keyboard + composer */
+  }
+
+  /* Integration pills: ensure minimum tap height (HIG 44px). */
+  .lmchat-integration-pill {
+    min-height: 44px;
+    padding: var(--space-glue-relaxed) var(--space-sibling);
+  }
+}
+
+/* ── pointer:coarse — touch lift for composer send button ───────
+   Send button is 36px at desktop. Lift to 44px min-height on coarse-pointer
+   devices (iPad + Magic Keyboard is 1024+ viewport with touch input). */
+@media (pointer: coarse) {
+  .lmchat-composer-send-btn {
+    min-height: 44px;
+    height: auto;
+    padding-block: var(--space-glue-relaxed);
+  }
+
+  /* Slash palette items: padding-only height (~24px) → 44px on touch */
+  .lmchat-slash-item,
+  .lmchat-palette-item {
+    min-height: 44px;
+  }
+}
+
+/* ── Two-row composer only on very narrow phones (≤360px) ────────────
+   At ~320px the action buttons (~177px) genuinely crowd the textarea (85px —
+   27%), so stack them on a second row there. ABOVE 360px (iPhone SE 375,
+   12–14 390, Pro Max 430) the bar stays SINGLE-ROW — textarea + icons share
+   one line, so an empty composer reads as one line, not several. */
+@media (max-width: 360px) {
+  .lmchat-composer-bar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .lmchat-composer-textarea {
+    width: 100%;
+    flex: 1 1 100%;
+    order: 1;
+  }
+
+  .lmchat-composer-actions {
+    order: 2;
+    flex: 1 1 100%;
+    justify-content: flex-end;
+    padding-top: var(--space-glue);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   COMPOSER META ROW — badges + integrations summary on one horizontal line
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Single flex row that holds InProjectChip, RagModeBadge, and the integrations
+   <details> summary side-by-side.  flex-wrap:wrap lets the expanded
+   .lmchat-integrations-bar break onto its own line when open. */
+.lmchat-composer-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+  max-width: var(--max-chat);
+  margin-inline: auto;
+  width: 100%;
+}
+
+/* SIBLING (12px) breathing room between the meta indicators (in-project chip /
+   RAG badge / context meter / tools summary) and the input bar below.
+   The indicators previously sat FLUSH against the input field's border
+   with no breathing room. The meta row and the bar are
+   siblings, not one unit, so SIBLING spacing — not GLUE — is the right grammar
+   level here.
+
+   :has()-gated so an EMPTY meta row (no model loaded → no context meter, no
+   project → no chip/badge, no integrations) doesn't leave a phantom gap above
+   the bar. Only applies when the row actually renders an indicator. */
+.lmchat-composer-meta-row:has(
+    .lmchat-in-project-chip,
+    [data-testid="rag-mode-badge"],
+    .lmchat-integrations-disclosure,
+    .lmchat-ctx-meter
+  ) {
+  margin-bottom: var(--space-sibling);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   INTEGRATIONS DISCLOSURE — collapsible MCP integrations panel
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Shared container sizing (standalone / fallback). */
+.lmchat-integrations-disclosure {
+  max-width: var(--max-chat);
+  margin-inline: auto;
+  width: 100%;
+}
+
+/* Inside the meta-row the disclosure is a flex child — let it size naturally
+   when closed so it lines up next to the badges.  When open on mobile it
+   expands to its own full row via flex-basis. */
+.lmchat-composer-meta-row > .lmchat-integrations-disclosure {
+  width: auto;
+  margin-inline: 0;
+  flex: none;
+}
+
+@media (max-width: 768px) {
+  .lmchat-composer-meta-row > .lmchat-integrations-disclosure[open] {
+    flex-basis: 100%;
+  }
+}
+
+/* Desktop (≥769px): when OPEN, display:contents flattens the <details> so the
+   inner .lmchat-integrations-bar flows into the wrapper as if the details were
+   not there — preserving the pre-F2 always-visible grid layout (≤4 tools, or
+   any count the user expands). When CLOSED (>4 tools collapsed by default),
+   the styled summary stays visible and clickable so the picker is reachable. */
+@media (min-width: 769px) {
+  .lmchat-integrations-disclosure[open] {
+    display: contents;
+  }
+  /* Hide the summary only when expanded — the open grid is the affordance. */
+  .lmchat-integrations-disclosure[open] > .lmchat-integrations-summary {
+    display: none;
+  }
+}
+
+/* Summary trigger — the styled, clickable "N of M active" chip shown whenever
+   the disclosure is CLOSED. Lives unscoped (applies at all widths) because the
+   collapsed state now happens on BOTH viewports: mobile always, and desktop
+   when there are >4 tools. The desktop @media block above hides it only when
+   [open], so this is the trigger that expands the picker. */
+.lmchat-integrations-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue);
+  padding: var(--space-glue-relaxed) var(--space-sibling-relaxed);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  list-style: none;
+  border-radius: var(--radius-sm);
+  user-select: none;
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart);
+}
+
+/* Muted hint that N tools live in the OTHER endpoint's tool system
+   (Store vs LM Studio mcp.json) — surfaced so the endpoint→tools split isn't
+   silent when the visible bar is empty or partial. */
+.lmchat-integrations-other-hint {
+  margin: var(--space-glue) 0 0;
+  padding: 0 var(--space-sibling-relaxed);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  color: var(--color-text-subtle);
+}
+
+/* Remove native triangle. */
+.lmchat-integrations-summary::-webkit-details-marker {
+  display: none;
+}
+.lmchat-integrations-summary::marker {
+  display: none;
+}
+
+/* Chevron rotates when open. */
+.lmchat-integrations-summary::after {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 6px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none' stroke='%23999' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='1,1 5,5 9,1'/></svg>");
+  background-repeat: no-repeat;
+  background-size: contain;
+  transition: transform var(--duration-fast) var(--ease-out-quart);
+  margin-left: var(--space-glue);
+  flex-shrink: 0;
+}
+
+.lmchat-integrations-disclosure[open] .lmchat-integrations-summary::after {
+  transform: rotate(180deg);
+}
+
+.lmchat-integrations-summary:hover {
+  background: var(--color-surface-elevated);
+  color: var(--color-text);
+}
+
+/* Mobile (≤768px): collapsed by default; summary shows "N of M active". */
+@media (max-width: 768px) {
+  .lmchat-integrations-disclosure {
+    padding: var(--space-glue) 0;
+  }
+
+  /* Inside the meta-row, remove the extra block padding — the row's gap handles
+     vertical rhythm already. */
+  .lmchat-composer-meta-row > .lmchat-integrations-disclosure {
+    padding: 0;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   INTEGRATION PILLS — per-chat MCP tool toggles
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-integrations-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-glue); /* GLUE (4px) between pills */
+  padding: var(--space-glue) 0 var(--space-glue-relaxed);
+  max-width: var(--max-chat);
+  margin-inline: auto;
+}
+
+/* On desktop, display:contents on <details> promotes .lmchat-integrations-bar
+   to a direct flex child of .lmchat-composer-meta-row.  Force it to its own
+   row so the pill list stays below the badges/summary line. */
+@media (min-width: 769px) {
+  .lmchat-composer-meta-row > .lmchat-integrations-bar {
+    flex-basis: 100%;
+    margin-inline: 0;
+  }
+}
+
+.lmchat-integration-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue);
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-marginalia);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-integration-pill--on {
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-quiet);
+  color: var(--color-accent-text);
+}
+
+.lmchat-integration-pill--off {
+  border: 1px solid var(--color-border-default);
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.lmchat-integration-pill:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.lmchat-integration-pill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SLASH PALETTE — Cmd+K modal command picker
+   Brass-edged card with scrim backdrop. Same item language as slash menu.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Backdrop — scrim (no blur per spec), centers card near the top */
+.lmchat-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--color-scrim);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 16vh;
+  z-index: var(--z-dialog);
+}
+
+/* Card — brass-edged, prominent shadow */
+.lmchat-palette-card {
+  width: 480px;
+  max-width: 92vw;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 0 20px var(--material-brass);
+  overflow: hidden;
+  /* Palette open chord — slash-menu-in entrance + layered brass
+     tones that decay like a tuning fork settling. Three animations compose:
+     the slide-up entrance, then the fast chord ring, then it's done. */
+  animation:
+    slash-menu-in var(--duration-base) var(--ease-out-expo) both,
+    palette-chord-fast 1.2s var(--ease-out-expo) var(--duration-base) both;
+}
+
+/* Search input focus — copper hairline emerges from bottom.
+   Using box-shadow since border-image isn't transitionable. */
+.lmchat-palette-input:focus {
+  border-bottom-color: var(--color-accent);
+  box-shadow:
+    0 1px 0 0 var(--color-accent),
+    inset 0 -12px 16px -8px
+      color-mix(in oklch, var(--material-vellum) 80%, transparent);
+}
+
+/* Result row keyboard-hover — copper marginalia dot fade-in at leading edge.
+   The dot appears via ::before on the active item. */
+.lmchat-palette-item--active::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-accent-fill);
+  margin-right: var(--space-glue);
+  flex-shrink: 0;
+  /* Fade in with the highlight */
+  animation: marginalia-arrive 400ms var(--ease-out-quart) both;
+  opacity: 0.85;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-palette-card {
+    animation: none;
+  }
+  .lmchat-palette-item--active::before {
+    animation: none;
+  }
+}
+
+/* Search input — full-width, no background, copper focus border */
+.lmchat-palette-input {
+  padding: var(--space-sibling); /* SIBLING (12px) inner padding */
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  outline: none;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg); /* 15px — readable */
+  color: var(--color-text);
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-palette-input::placeholder {
+  color: var(--color-text-subtle);
+  font-style: italic;
+}
+
+/* Command list — flex-fills the remaining height */
+.lmchat-palette-list {
+  margin: 0;
+  padding: var(--space-glue); /* GLUE (4px) inset from card edges */
+  list-style: none;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Command item — GLUE (4px) between items, same row as slash-item */
+.lmchat-palette-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed); /* GLUE-RELAXED (8px) within item row */
+  padding: var(--space-glue-relaxed) var(--space-glue-relaxed);
+  margin: 1px 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: transparent;
+  color: var(--color-text-muted);
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart);
+  list-style: none;
+}
+
+/* Active / keyboard-selected — brass material wash + copper text */
+.lmchat-palette-item--active {
+  background: color-mix(in oklch, var(--color-accent) 14%, transparent);
+  color: var(--color-text);
+}
+
+.lmchat-palette-item:hover {
+  background: color-mix(
+    in oklch,
+    var(--color-surface-3) 50%,
+    var(--material-brass)
+  );
+  color: var(--color-text);
+}
+
+/* Command name — mono 600, copper accent, same as lmchat-slash-cmd-name */
+.lmchat-palette-cmd-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label); /* 13px */
+  font-weight: 600;
+  color: var(--color-accent-text);
+  flex-shrink: 0;
+  min-width: 90px;
+}
+
+/* Command description — italic sans, marginalia scale */
+.lmchat-palette-cmd-desc {
+  font-family: var(--font-sans);
+  font-size: var(--fs-marginalia); /* 12px */
+  font-style: italic;
+  color: var(--color-text-subtle);
+  flex: 1;
+}
+
+/* Coming-soon badge — same as lmchat-slash-badge */
+.lmchat-palette-badge {
+  padding: 1px 6px;
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-micro);
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  flex-shrink: 0;
+}
+
+/* Empty state — centered, muted */
+.lmchat-palette-empty {
+  padding: var(--space-sibling);
+  font-size: var(--fs-body);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* Footer — kbd hints */
+.lmchat-palette-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  border-top: 1px solid var(--color-border);
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  color: var(--color-text-subtle);
+}
+
+/* Kbd chip — same shell as slash-badge */
+.lmchat-palette-kbd {
+  padding: 1px 6px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+}
+
+/* reduced-motion guard for palette card is in the block above */
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ATTACH CHIPS — attached image/file preview row
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Replaces the former inline style on the chips row in
+   Composer.tsx — GLUE-level (4px) gaps inside a single staged-files group. */
+.lmchat-attach-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-glue);
+  margin-bottom: var(--space-glue);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CONTEXT CHIPS — staged sub-session summaries / context blocks
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-context-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-glue);
+  padding: var(--space-glue) 0 var(--space-glue-relaxed);
+  max-width: var(--max-chat);
+  margin-inline: auto;
+}
+
+.lmchat-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue);
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  background: color-mix(
+    in oklch,
+    var(--color-accent-fill) 10%,
+    var(--color-surface)
+  );
+  border: 1px solid
+    color-mix(in oklch, var(--color-accent-fill) 30%, transparent);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-marginalia);
+  color: var(--color-text-muted);
+  max-width: 100%;
+}
+
+.lmchat-context-chip__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.lmchat-context-chip__remove {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: inherit;
+  opacity: 0.5;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: opacity var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-context-chip__remove:hover {
+  opacity: 1;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   /COMPARE PICKER — popover anchored above the composer bar.
+   No full-screen modal. Follows the same absolute-bottom pattern as
+   .lmchat-slash-menu; same z-index, same opaque surface token.
+   4pt spacing scale. No border-left accent stripes, no gradient text.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-compare-picker {
+  position: absolute;
+  bottom: calc(100% + var(--space-glue)); /* GLUE (4px) above the bar */
+  left: 0;
+  right: 0;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow:
+    var(--shadow-lg),
+    inset 0 0 16px var(--material-brass);
+  z-index: var(--z-popover);
+  animation: slash-menu-in var(--duration-fast) var(--ease-out-expo) both;
+  overflow: hidden;
+}
+
+.lmchat-compare-picker__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.lmchat-compare-picker__title {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.lmchat-compare-picker__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-compare-picker__close:hover {
+  color: var(--color-text);
+  background: color-mix(in oklch, var(--color-surface) 60%, var(--color-border));
+}
+
+.lmchat-compare-picker__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue-relaxed);
+  padding: var(--space-sibling-relaxed) var(--space-sibling);
+}
+
+.lmchat-compare-picker__label {
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  color: var(--color-text-subtle);
+  /* Labels sit above their selects — grid-like stacking via flex column */
+  margin-bottom: 0;
+}
+
+.lmchat-compare-picker__warn {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--color-warning, oklch(0.72 0.18 75));
+}
+
+.lmchat-compare-picker__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-glue-relaxed);
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  border-top: 1px solid var(--color-border);
+}
+
+.lmchat-compare-picker__cancel {
+  padding: 6px var(--space-sibling);
+  background: none;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-body);
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-compare-picker__cancel:hover {
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.lmchat-compare-picker__confirm {
+  padding: 6px var(--space-sibling);
+  background: var(--color-accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--color-text-on-accent);
+  cursor: pointer;
+  transition: opacity var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-compare-picker__confirm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

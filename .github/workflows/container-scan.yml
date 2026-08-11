@@ -1,0 +1,167 @@
+# SPDX-License-Identifier: Apache-2.0
+# Container Scan — Hadolint + Docker build + Trivy + Dockle
+# PLAN v3 §2F extension to the existing .L4-passed pipeline.
+#
+# Focused scan-only workflow: lints deploy/Dockerfile, builds the image,
+# runs trivy (HIGH/CRITICAL + secret + misconfig), and runs dockle
+# (FATAL-level CIS benchmark check).
+#
+# No Postgres service, no compose boot, no healthz poll, no SBOM.
+# For full integration (boot + SBOM + cosign) see Makefile .L4-passed.
+#
+# Runs on every push/PR affecting the Dockerfile, dependency files,
+# or the scan script itself.
+#
+# Pinned tool versions:
+#   hadolint  v2.12.0
+#   trivy     0.58.x
+#   dockle    v0.4.15
+
+name: container-scan
+
+on:
+  push:
+    branches: [v1, main]
+    paths:
+      - 'deploy/Dockerfile'
+      - 'deploy/*.dockerfile'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'web/package.json'
+      - 'web/pnpm-lock.yaml'
+      - 'scripts/container-scan.sh'
+      - '.github/workflows/container-scan.yml'
+  pull_request:
+    branches: [v1, main]
+    paths:
+      - 'deploy/Dockerfile'
+      - 'deploy/*.dockerfile'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'web/package.json'
+      - 'web/pnpm-lock.yaml'
+      - 'scripts/container-scan.sh'
+      - '.github/workflows/container-scan.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI: true
+
+jobs:
+  container-scan:
+    name: Container Scan — hadolint + trivy + dockle
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Install Python + uv (for JUnit conversion) ──────────────────
+      - name: Install Python + uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13'
+          enable-cache: true
+          cache-suffix: container-scan
+
+      # ── Install Hadolint v2.12.0 ──────────────────────────────────────
+      - name: Install Hadolint
+        run: |
+          curl -sSfL \
+            https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64 \
+            -o /usr/local/bin/hadolint
+          chmod +x /usr/local/bin/hadolint
+          hadolint --version
+
+      # ── Install Trivy 0.58.x ──────────────────────────────────────────
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin v0.58.0
+          trivy --version
+
+      # ── Install Dockle v0.4.15 ────────────────────────────────────────
+      - name: Install Dockle
+        run: |
+          VERSION=v0.4.15
+          curl -sSfL \
+            "https://github.com/goodwithtech/dockle/releases/download/${VERSION}/dockle_${VERSION#v}_Linux-64bit.tar.gz" \
+            | tar -xz -C /usr/local/bin dockle
+          chmod +x /usr/local/bin/dockle
+          dockle --version
+
+      # ── Run container-scan.sh (CI mode) ───────────────────────────────
+      - name: Run container-scan.sh
+        run: |
+          bash scripts/container-scan.sh
+
+      # ── Convert Trivy JSON → JUnit XML ───────────────────────────────
+      - name: Convert Trivy report to JUnit XML
+        if: always()
+        run: |
+          if [ -f target/gates/L4-trivy.json ]; then
+            uv run python tools/junit_from_trivy.py \
+              --input target/gates/L4-trivy.json \
+              --output target/gates/L4-trivy.xml
+          else
+            echo "No trivy JSON found — emitting skipped testcase"
+            uv run python tools/junit_from_trivy.py --skipped \
+              --output target/gates/L4-trivy.xml
+          fi
+
+      # ── Convert Dockle JSON → JUnit XML ──────────────────────────────
+      - name: Convert Dockle report to JUnit XML
+        if: always()
+        run: |
+          if [ -f target/gates/L4-dockle.json ]; then
+            uv run python tools/junit_from_dockle.py \
+              --input target/gates/L4-dockle.json \
+              --output target/gates/L4-dockle.xml
+          else
+            echo "No dockle JSON found — emitting skipped testcase"
+            uv run python tools/junit_from_dockle.py --skipped \
+              --output target/gates/L4-dockle.xml
+          fi
+
+      # ── Upload JUnit XML artifacts ───────────────────────────────────
+      - name: Upload JUnit XML artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-scan-junit
+          path: |-
+            target/gates/L4-trivy.xml
+            target/gates/L4-dockle.xml
+          retention-days: 14
+
+      # ── Upload Trivy report (if generated) ──────────────────────────
+      - name: Upload Trivy JSON artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report
+          path: |-
+            target/gates/L4-trivy.json
+            target/gates/L4-trivy-info.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # ── Upload Dockle report (if generated) ─────────────────────────
+      - name: Upload Dockle JSON artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dockle-report
+          path: target/gates/L4-dockle.json
+          if-no-files-found: ignore
+          retention-days: 30

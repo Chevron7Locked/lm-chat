@@ -1,0 +1,54 @@
+# Ephemeral Postgres for the P14 stress harness.
+#
+# Stress runs require Postgres (option B from
+# the auth-bottleneck decision).  SQLite serialized writes + scrypt KDF +
+# 200 concurrent registrations produced login 500s that were false-positive
+# auth findings rooted in SQLite's writer lock.
+#
+# Volume strategy: tmpfs (RAM-backed) inside the container so teardown is
+# instantaneous and no host-side cleanup is required.  Data is intentionally
+# lost on container stop.
+#
+# Port choice: 5433 to avoid colliding with a system Postgres on 5432.
+#
+# Boot/teardown:
+#   make stress-postgres-up
+#   make stress-postgres-down
+#
+# Or via the orchestrator wrapper:
+#   make stress-baseline / make stress-test
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: lm-chat-stress-postgres
+    restart: "no"
+    environment:
+      POSTGRES_USER: lm_chat_stress
+      POSTGRES_PASSWORD: stress
+      POSTGRES_DB: lm_chat_stress
+      # Trust local connections to avoid pg_hba.conf surprises with the
+      # asyncpg driver against a fresh image.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    ports:
+      - "127.0.0.1:5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lm_chat_stress -d lm_chat_stress"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 5s

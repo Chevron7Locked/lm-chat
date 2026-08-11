@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+# One-shot Jaeger compose for the P14 stress harness.
+# Stand up before --with-tracing runs:
+#     docker compose -f tests/stress/tracing/compose-jaeger.yml up -d
+# Open http://localhost:16686 in a browser for the flame graphs.
+# Tear down with:
+#     docker compose -f tests/stress/tracing/compose-jaeger.yml down -v
+services:
+  jaeger:
+    # Jaeger all-in-one: collector + agent + query + UI in one binary.
+    # 1.55 includes OTLP receiver on gRPC port 4317 / HTTP port 4318.
+    image: jaegertracing/all-in-one:1.55
+    container_name: lm-chat-stress-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      # Span retention — keep traces in memory for the duration of the
+      # 10-min stress run.  Memory storage is fine; we are not running
+      # this in production.
+      SPAN_STORAGE_TYPE: memory
+    ports:
+      # OTLP gRPC ingest (LM_CHAT_OTEL_EXPORTER_OTLP_ENDPOINT defaults
+      # to localhost:4317).
+      - "127.0.0.1:4317:4317"
+      # OTLP HTTP ingest (alt path for some exporters).
+      - "127.0.0.1:4318:4318"
+      # Jaeger UI.
+      - "127.0.0.1:16686:16686"
+    # Health check uses the admin endpoint that returns 200 once the
+    # collector is ready to ingest.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:14269/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12

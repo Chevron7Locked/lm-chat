@@ -1,0 +1,13 @@
+{
+  "_comment": "Configuration for the lm-chat SSE generator (see tools/garak_sse_generator.py).",
+  "_comment_2": "Loaded by the L7 recipe via --generator-option-file; the recipe also supplies",
+  "_comment_3": "the cookie (from a setup-token auth bootstrap) and the chat_id via CLI args.",
+  "lmchat_sse": {
+    "LmChatSseGenerator": {
+      "name": "lmchat-sse",
+      "url": "http://127.0.0.1:18001/api/chat/stream",
+      "chat_id": 1,
+      "timeout": 60
+    }
+  }
+}

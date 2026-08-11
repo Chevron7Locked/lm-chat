@@ -1,0 +1,509 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Docs reader — /docs and /docs/:slug routes.
+ *
+ * Three-column layout: sidebar nav | article prose | on-this-page TOC.
+ * Collapses to single-column on mobile.
+ *
+ * Uses the same warm-dark token vocabulary as settings.css and the rest
+ * of the Midnight Atelier design system. No new tokens introduced.
+ */
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   DOCS PAGE SHELL
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-docs-page {
+  display: contents;
+}
+
+.lmchat-docs-main {
+  flex: 1;
+  min-width: 0;
+  /* Fill the AppShell main (height:100vh) and DON'T scroll here — the columns
+     own their own scroll, so the left/right rails stay pinned. */
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+}
+
+.lmchat-docs-layout {
+  display: grid;
+  /* sidebar | article | toc */
+  grid-template-columns: 220px 1fr 200px;
+  grid-template-areas: "sidebar article toc";
+  gap: 0;
+  /* Fixed-height shell: each column stretches to full height and scrolls on
+     its own; only the center article actually moves. */
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 1100px) {
+  .lmchat-docs-layout {
+    grid-template-columns: 200px 1fr;
+    grid-template-areas: "sidebar article";
+  }
+
+  .lmchat-docs-toc {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  /* On mobile the columns stack; let the whole page scroll normally instead of
+     pinning fixed-height rails. */
+  .lmchat-docs-main {
+    height: auto;
+    overflow: visible;
+  }
+
+  .lmchat-docs-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "sidebar"
+      "article";
+    height: auto;
+    overflow: visible;
+  }
+
+  .lmchat-docs-sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+    height: auto;
+    overflow: visible;
+  }
+
+  .lmchat-docs-article-wrap {
+    height: auto;
+    overflow: visible;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SIDEBAR NAV
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-docs-sidebar {
+  grid-area: sidebar;
+  /* Pinned rail: fills the column height and scrolls its own overflow only. */
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-group) var(--space-sibling-relaxed);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-default) transparent;
+}
+
+.lmchat-docs-sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.lmchat-docs-sidebar::-webkit-scrollbar-thumb {
+  background: var(--color-border-default);
+  border-radius: 2px;
+}
+
+/* Sidebar header — "Docs" label */
+.lmchat-docs-sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+  margin-bottom: var(--space-group);
+  padding-bottom: var(--space-sibling-relaxed);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.lmchat-docs-sidebar-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-text-subtle);
+  margin: 0;
+}
+
+/* Nav group */
+.lmchat-docs-nav-group {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--space-group);
+}
+
+.lmchat-docs-nav-group-label {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-text-subtle);
+  padding-left: var(--space-glue-relaxed);
+  margin-bottom: var(--space-sibling);
+  line-height: 1;
+}
+
+.lmchat-docs-nav-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lmchat-docs-nav-item {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  font-weight: 400;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  line-height: var(--lh-ui);
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.lmchat-docs-nav-item:hover {
+  background: color-mix(in oklch, var(--color-accent) 8%, transparent);
+  color: var(--color-text);
+}
+
+.lmchat-docs-nav-item--active {
+  background-image:
+    radial-gradient(
+      ellipse 100% 100% at 50% 50%,
+      color-mix(in oklch, var(--color-accent) 14%, transparent) 0%,
+      color-mix(in oklch, var(--color-accent) 8%, transparent) 100%
+    );
+  color: var(--color-accent-text);
+  font-weight: 600;
+  position: relative;
+}
+
+.lmchat-docs-nav-item--active::after {
+  content: "";
+  position: absolute;
+  left: var(--space-glue-relaxed);
+  right: var(--space-glue-relaxed);
+  bottom: 2px;
+  height: 1px;
+  background: var(--color-accent-fill);
+  opacity: 0.45;
+  border-radius: 1px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ARTICLE PROSE
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-docs-article-wrap {
+  grid-area: article;
+  padding: var(--space-group) clamp(var(--space-group), 4vw, var(--space-chapter));
+  min-width: 0;
+  /* The only scrolling column. */
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.lmchat-docs-article {
+  max-width: 680px;
+  margin: 0 auto;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-prose);
+}
+
+/* ── Prose elements ─────────────────────────────────────────────────────────── */
+
+.lmchat-docs-article h1 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h1);
+  font-weight: 700;
+  letter-spacing: var(--ls-tight);
+  line-height: var(--lh-display);
+  color: var(--color-text);
+  margin: 0 0 var(--space-group) 0;
+  padding-bottom: var(--space-sibling-relaxed);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.lmchat-docs-article h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h2);
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+  line-height: var(--lh-heading);
+  color: var(--color-text);
+  margin: var(--space-chapter) 0 var(--space-sibling-relaxed) 0;
+}
+
+.lmchat-docs-article h3 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h3);
+  font-weight: 600;
+  line-height: var(--lh-heading);
+  color: var(--color-text);
+  margin: var(--space-group-relaxed) 0 var(--space-sibling) 0;
+}
+
+.lmchat-docs-article h4 {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: var(--space-group) 0 var(--space-glue-relaxed) 0;
+}
+
+.lmchat-docs-article p {
+  margin: 0 0 var(--space-sibling-relaxed) 0;
+  max-width: 68ch;
+}
+
+.lmchat-docs-article ul,
+.lmchat-docs-article ol {
+  margin: 0 0 var(--space-sibling-relaxed) 0;
+  padding-left: var(--space-group);
+  max-width: 68ch;
+}
+
+.lmchat-docs-article li {
+  margin-bottom: var(--space-glue-relaxed);
+  line-height: var(--lh-prose);
+}
+
+.lmchat-docs-article li > p {
+  margin-bottom: var(--space-glue-relaxed);
+}
+
+/* Inline code */
+.lmchat-docs-article code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-mono);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  padding: 1px 5px;
+  color: var(--color-accent-text);
+}
+
+/* Code blocks */
+.lmchat-docs-article pre {
+  margin: 0 0 var(--space-sibling-relaxed) 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  padding: var(--space-sibling-relaxed) var(--space-group);
+  overflow-x: auto;
+  max-width: 100%;
+  line-height: var(--lh-code);
+}
+
+.lmchat-docs-article pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-text);
+  font-size: var(--fs-mono);
+  border-radius: 0;
+}
+
+/* Blockquote */
+.lmchat-docs-article blockquote {
+  margin: 0 0 var(--space-sibling-relaxed) 0;
+  padding: var(--space-sibling) var(--space-group);
+  border-left: 3px solid var(--color-accent-fill);
+  background: color-mix(in oklch, var(--color-accent) 6%, transparent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--color-text-muted);
+}
+
+.lmchat-docs-article blockquote p {
+  margin: 0;
+}
+
+/* Tables */
+.lmchat-docs-article table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: var(--space-sibling-relaxed);
+  font-size: var(--fs-body);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.lmchat-docs-article th {
+  background: var(--color-surface-elevated);
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  text-align: left;
+  font-weight: 600;
+  font-size: var(--fs-label);
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.lmchat-docs-article td {
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  border-top: 1px solid var(--color-border);
+  vertical-align: top;
+  line-height: var(--lh-ui);
+}
+
+.lmchat-docs-article tr:first-child td {
+  border-top: none;
+}
+
+/* Links */
+.lmchat-docs-article a {
+  color: var(--color-accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.lmchat-docs-article a:hover {
+  color: var(--color-accent-text-hover);
+}
+
+/* Strong + em */
+.lmchat-docs-article strong {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.lmchat-docs-article em {
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ON THIS PAGE TOC
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-docs-toc {
+  grid-area: toc;
+  /* Pinned rail: fills the column height and scrolls its own overflow only. */
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-group) var(--space-sibling-relaxed);
+  border-left: 1px solid var(--color-border);
+}
+
+.lmchat-docs-toc-title {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-text-subtle);
+  margin-bottom: var(--space-sibling);
+  line-height: 1;
+}
+
+.lmchat-docs-toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lmchat-docs-toc-item {
+  display: block;
+}
+
+.lmchat-docs-toc-link {
+  display: block;
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  color: var(--color-text-subtle);
+  text-decoration: none;
+  line-height: var(--lh-ui);
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+
+.lmchat-docs-toc-link:hover {
+  color: var(--color-text-muted);
+  background: color-mix(in oklch, var(--color-accent) 6%, transparent);
+}
+
+.lmchat-docs-toc-link--h3 {
+  padding-left: var(--space-sibling);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   NOT FOUND STATE
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-docs-not-found {
+  padding: var(--space-chapter) var(--space-group);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.lmchat-docs-not-found h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h2);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 var(--space-sibling) 0;
+}
+
+.lmchat-docs-not-found p {
+  font-size: var(--fs-body);
+  line-height: var(--lh-prose);
+  max-width: 48ch;
+  margin: 0 auto var(--space-sibling-relaxed);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   REDUCED MOTION
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-docs-nav-item,
+  .lmchat-docs-toc-link,
+  .lmchat-docs-article a {
+    transition: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SPACING TOKENS SHIM
+   Docs uses the same grammar as settings.css. Aliases not defined in globals.css:
+   --space-group-relaxed is used in settings but not declared there; define here
+   in case it's missing. Resolved at 32px (between GROUP 24px and CHAPTER 48px).
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --space-glue: 4px;
+  --space-glue-relaxed: 8px;
+  --space-sibling: 12px;
+  --space-sibling-relaxed: 16px;
+  --space-group: 24px;
+  --space-group-relaxed: 32px;
+  --space-chapter: 48px;
+  /* ease-out-quart alias — used in settings, mirrors --ease-out */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+}

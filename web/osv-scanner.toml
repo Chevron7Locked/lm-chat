@@ -1,0 +1,14 @@
+# osv-scanner configuration — https://google.github.io/osv-scanner/configuration/
+# Auto-discovered next to web/pnpm-lock.yaml by scripts/security-static.sh.
+
+[[IgnoredVulns]]
+id = "GHSA-qwww-vcr4-c8h2"
+# "React Router: RSC Mode CSRF Bypass Allows Action Execution Before 400
+# Response." The vulnerable path is React Router's RSC (React Server
+# Components) mode. LM Chat is a client-side Vite SPA — it does not use RSC
+# or server actions, so the affected code path is never reached. The
+# advisory's only fixed version (8.3.0) is unpublished as of 2026-08-05
+# (react-router tops out at 8.1.0), so it cannot be resolved by a bump.
+# Revisit and drop this ignore once react-router ships >= 8.3.0, and evaluate
+# the 7.x -> 8.x major migration at that time.
+reason = "RSC-mode-only advisory; app is a client-side SPA (no RSC). No fixed version released (8.3.0 unpublished as of 2026-08-05)."

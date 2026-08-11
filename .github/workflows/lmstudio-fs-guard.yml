@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# lm-chat must NEVER read or write under ~/.lmstudio/.  This workflow
+# enforces the rule that birthed `docs/INTEGRATION_MAP.md` and the
+# 2026-05-21 mcp.json wipe incident (docs/release/INCIDENT_REPORT_2026_05_21.md).
+#
+# Two passes via `tools/check_no_lmstudio_fs.py`:
+#   1. Python source under src/ + tests/ — grep + AST scan.
+#   2. Docs under docs/ — flag references to removed LM-Studio-state surfaces.
+#
+# The `--docs` flag enables the second pass.  Both passes are fast (<5s).
+
+name: lmstudio-fs-guard
+
+on:
+  push:
+    branches: [main, v1]
+  pull_request:
+    branches: [main, v1]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+
+      - name: Sync deps (no dev needed — script is stdlib only)
+        run: uv sync --frozen
+
+      - name: Enforce no ~/.lmstudio/ filesystem access
+        run: uv run python tools/check_no_lmstudio_fs.py --docs

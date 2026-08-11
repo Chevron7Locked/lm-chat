@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+# Custom Semgrep rules for lm-chat v3 security extension.
+# Per PLAN v3 §1F: regex-without-deadline rule.
+# See: docs/audit/2026-06-13-qa-security-suite-PLAN-v3.md
+
+rules:
+  - id: regex-without-deadline
+    languages:
+      - python
+    message: >
+      re.compile(...) in tool_args.py without a matching
+      @settings(deadline= test reference. Each regex compiled in
+      tool_args.py must have a corresponding test in
+      tests/tools/test_tool_args_property.py that uses Hypothesis
+      @settings(deadline=...) and references the same variable
+      name. This catches D1-class regressions where a new regex
+      ships without a wall-clock-bounded test.
+    severity: ERROR
+    paths:
+      include:
+        - "src/lmchat/services/tool_args.py"
+    patterns:
+      - pattern-inside: |
+          $VAR = re.compile(...)
+      - pattern: re.compile(...)
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: "^_[A-Z_]+$"

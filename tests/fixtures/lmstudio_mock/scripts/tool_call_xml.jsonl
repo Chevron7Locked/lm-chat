@@ -1,0 +1,6 @@
+{"event": "chat.start", "data": {"type": "chat.start", "model_instance_id": "mock-instance", "response_id": "mock-resp-003"}, "delay": 0.01}
+{"event": "message.start", "data": {"type": "message.start"}, "delay": 0.01}
+{"event": "message.delta", "data": {"type": "message.delta", "content": "I'll search for that."}, "delay": 0.01}
+{"event": "message.delta", "data": {"type": "message.delta", "content": "<tool_call><function=search><parameter=q>foo</parameter></function></tool_call>"}, "delay": 0.01}
+{"event": "message.end", "data": {"type": "message.end"}, "delay": 0.01}
+{"event": "chat.end", "data": {"type": "chat.end", "response_id": "mock-resp-003"}, "delay": 0.01}

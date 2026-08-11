@@ -1,0 +1,241 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/**
+ * CompactionTab — "folded page" reimagining, Midnight Atelier design system.
+ *
+ * Collapsed: NOT a card. A seam — a hairline rule on each side of a small
+ * pill tab ("N turns folded") that reads as the fold itself, not a bordered
+ * container holding chat.
+ *
+ * Expanded: the fold's contents — a running summary, then a dense transcript
+ * rendered straight from role + content (no chat-bubble chrome, no avatars,
+ * no per-message action bars). Deliberately quieter and denser than live
+ * chat so archived history never reads as an active conversation.
+ *
+ * Animation: grid-template-rows 0fr → 1fr (no JS height measurement,
+ * reduced-motion-safe). Same proven pattern as process-stream.css.
+ */
+
+/* ─── Container — no card. Just spacing + shrink guard ──────────────────────── */
+
+.lmchat-compaction-tab {
+  margin: var(--space-glue) 0;
+  /* The messages area is a flex column; without a card's overflow:hidden this
+     item has no forced min-height, so flex-shrink would otherwise let the
+     seam collapse. flex-shrink:0 keeps it at natural height. */
+  flex-shrink: 0;
+}
+
+/* ─── The seam — flanking rules + centered fold tab ─────────────────────────── */
+
+.lmchat-compaction-tab__seam {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: var(--space-glue-relaxed);
+}
+
+.lmchat-compaction-tab__rule {
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+
+/* ─── The fold tab — the whole pill IS the toggle button ────────────────────── */
+
+.lmchat-compaction-tab__tab {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: var(--space-glue);
+  padding: var(--space-glue) var(--space-glue-relaxed);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-quiet);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-base) var(--ease-out-quart),
+    border-color var(--duration-base) var(--ease-out-quart);
+}
+
+.lmchat-compaction-tab__tab:hover {
+  background: color-mix(in srgb, var(--color-accent-quiet) 70%, var(--color-accent) 15%);
+  border-color: var(--color-accent);
+}
+
+.lmchat-compaction-tab__tab:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.lmchat-compaction-tab__tab-icon {
+  color: var(--color-accent-text);
+  flex-shrink: 0;
+}
+
+.lmchat-compaction-tab__tab-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption); /* 12px */
+  color: var(--color-accent-text);
+  white-space: nowrap;
+}
+
+.lmchat-compaction-tab__tab-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-accent-text);
+  transition: transform var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-compaction-tab__tab-chevron--expanded {
+  transform: rotate(180deg);
+}
+
+/* ─── Expanded body — grid-template-rows animation ──────────────────────────── */
+
+.lmchat-compaction-tab__body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--duration-base) var(--ease-out-quart);
+  overflow: hidden;
+}
+
+.lmchat-compaction-tab__body--expanded {
+  grid-template-rows: 1fr;
+}
+
+.lmchat-compaction-tab__body-inner {
+  overflow: hidden;
+  min-height: 0;
+  padding: var(--space-sibling) 0 0;
+}
+
+/* ─── Summary block — the fold's running summary + token metadata ───────────── */
+
+.lmchat-compaction-tab__summary-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue);
+  margin-bottom: var(--space-sibling);
+}
+
+.lmchat-compaction-tab__eyebrow {
+  font-family: var(--font-display);
+  font-size: var(--fs-caption); /* 12px */
+  font-weight: 600;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.lmchat-compaction-tab__summary-text {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: var(--lh-ui);
+  color: var(--color-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.lmchat-compaction-tab__meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--color-text-subtle);
+}
+
+/* ─── Archived group eyebrow — ONE label for the whole transcript ───────────── */
+
+.lmchat-compaction-tab__archived-eyebrow {
+  font-family: var(--font-display);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+  margin-bottom: var(--space-glue-relaxed);
+}
+
+/* ─── The dense transcript — left spine, plain-text rows, capped height ─────── */
+
+.lmchat-compaction-tab__transcript {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tier-compact-gap);
+  border-left: 1px solid var(--color-border);
+  padding-left: var(--space-sibling);
+  max-height: 420px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.lmchat-compaction-tab__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-glue-relaxed);
+}
+
+.lmchat-compaction-tab__role {
+  flex-shrink: 0;
+  min-width: 3.25rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.lmchat-compaction-tab__role--assistant {
+  color: var(--color-accent-text);
+}
+
+.lmchat-compaction-tab__text {
+  min-width: 0;
+  font-size: var(--tier-compact-body-size); /* 11px */
+  line-height: var(--tier-compact-lh);
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ─── Loading state ─────────────────────────────────────────────────────────── */
+
+.lmchat-compaction-tab__loading {
+  font-size: var(--fs-micro);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ─── Touch — bump the fold tab to the 44px minimum tap target ──────────────── */
+
+@media (pointer: coarse) {
+  .lmchat-compaction-tab__tab {
+    min-height: var(--tap-target-min);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-compaction-tab__tab,
+  .lmchat-compaction-tab__tab-chevron,
+  .lmchat-compaction-tab__body {
+    transition: none;
+  }
+}
+
+/* ─── Screen-reader only ────────────────────────────────────────────────────── */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}

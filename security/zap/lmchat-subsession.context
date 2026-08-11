@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ZAP context for lm-chat sub-session DAST (L6 online).
+
+  Targets:
+    POST /api/chats/{id}/sub-session/stream
+    POST /api/chats/{id}/sub-session/finalize
+    POST /api/chats/{id}/inject-message
+
+  Requires the `lmchat_session` cookie on every request.
+-->
+<context>
+  <name>lmchat-subsession</name>
+  <desc>lm-chat sub-session endpoint DAST — requires authenticated session cookie.</desc>
+  <inscope>true</inscope>
+  <regex>http://127\.0\.0\.1:\d+/api/chats/\d+/(sub-session/stream|sub-session/finalize|inject-message)</regex>
+  <urls>
+    <url>http://127.0.0.1</url>
+  </urls>
+  <tech>
+    <include>Python</include>
+    <include>FastAPI</include>
+    <include>PostgreSQL</include>
+  </tech>
+  <authentication>
+    <type>manual</type>
+  </authentication>
+  <session>
+    <!-- Ensure lmchat_session cookie is included in every spider/scan request -->
+    <cookies>
+      <cookie>lmchat_session</cookie>
+    </cookies>
+  </session>
+</context>

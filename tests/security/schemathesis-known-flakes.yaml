@@ -1,0 +1,99 @@
+# Schemathesis known false-positives — see LMC-2026-006.
+# Each entry: a testcase_name glob + a failure_message substring + rationale.
+# The flake filter downgrades matching <failure> to <skipped> at L5 emit
+# time so the cert sees a clean schemathesis run.
+#
+# Approval is by operator only. Adding to this file is a load-bearing
+# trust act; auditors read it to determine what was NOT verified.
+#
+# REQUIRED fields per entry:
+#   testcase:          glob matched against the JUnit <testcase name="..."> attribute
+#   failure_substring: substring matched against the <failure message="..."> attribute
+#   rationale:         human-readable justification (multi-line OK)
+#   lmc_id:            LMC tracking ID
+#   approved_by:       operator name or email
+#   approved_at:       ISO-8601 date string
+
+known_flakes:
+  - testcase: "POST /api/chats/{chat_id}/inject-message"
+    failure_substring: "Path parameter 'chat_id' is not defined"
+    rationale: |
+      Schemathesis false-positive: the OpenAPI spec correctly defines the
+      path parameter `chat_id` (see `docs/api/openapi.yaml` lines 3914–3920).
+      The error is a known schemathesis quirk with path-param + request-body
+      coexistence; the schema is valid and FastAPI resolves the parameter
+      correctly at runtime.
+    lmc_id: LMC-2026-010
+    approved_by: operator
+    approved_at: "2026-06-16"
+
+  - testcase: "POST /api/auth/login"
+    failure_substring: "429"
+    rationale: |
+      Rate-limit middleware returns 429 on rapid schemathesis fuzzing.
+      Defensible by design. Not a product bug.
+    lmc_id: LMC-2026-006
+    approved_by: operator
+    approved_at: "2026-05-24"
+
+  - testcase: "GET /api/admin/users/count"
+    failure_substring: "Unsupported method DELETE returned 401"
+    rationale: |
+      Auth middleware fires before method routing → 401 instead of 405
+      on unsupported methods for unauthenticated requests. This is the
+      intended auth-first design.
+    lmc_id: LMC-2026-006
+    approved_by: operator
+    approved_at: "2026-05-24"
+
+  - testcase: "PATCH /api/chats/reorder"
+    failure_substring: "Unsupported method GET returned 401"
+    rationale: |
+      Same auth-first ordering as the previous entry.
+    lmc_id: LMC-2026-006
+    approved_by: operator
+    approved_at: "2026-05-24"
+
+  - testcase: "*"
+    failure_substring: "Received: 401"
+    rationale: |
+      Auth-first ordering: the auth middleware returns 401 to any
+      unauthenticated request before route/method resolution. Schemathesis's
+      stateful phase attributes such cross-endpoint 401 probes to a randomly
+      chosen operation each run, so the testcase name is not stable. The 401 is
+      correct, intended behavior; every operation that legitimately returns 401
+      already documents it (the emit auth-response augmenter), so a remaining
+      undocumented-401 is necessarily this irreducible auth-first probe.
+    lmc_id: LMC-2026-006
+    approved_by: operator
+    approved_at: "2026-06-27"
+
+  - testcase: "PUT /api/admin/providers/{provider}"
+    failure_substring: "Path parameter 'provider' is not defined"
+    rationale: |
+      Schemathesis false-positive (same quirk as LMC-2026-010): the OpenAPI spec
+      correctly defines the path parameter `provider` AND a requestBody on this
+      operation (verified in docs/api/openapi.yaml). Schemathesis misreads the
+      path-param + request-body coexistence as an undefined parameter. The schema
+      is valid and FastAPI resolves the parameter at runtime.
+    lmc_id: LMC-2026-010
+    approved_by: operator
+    approved_at: "2026-06-27"
+
+  - testcase: "POST /api/admin/providers/{provider}/test"
+    failure_substring: "Path parameter 'provider' is not defined"
+    rationale: |
+      Same schemathesis path-param + requestBody false-positive as the previous
+      entry; `provider` is defined in the spec. Valid schema.
+    lmc_id: LMC-2026-010
+    approved_by: operator
+    approved_at: "2026-06-27"
+
+  - testcase: "PATCH /api/mcp-store/servers/{slug}"
+    failure_substring: "Path parameter 'slug' is not defined"
+    rationale: |
+      Same schemathesis path-param + requestBody false-positive; `slug` is
+      defined in the spec for this operation. Valid schema.
+    lmc_id: LMC-2026-010
+    approved_by: operator
+    approved_at: "2026-06-27"

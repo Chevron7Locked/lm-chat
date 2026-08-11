@@ -1,0 +1,231 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * CodeBlock — warm-future-library material layer stylesheet.
+ *
+ * A brass-bound passage in the book. Subtle warm border, foxing tint
+ * background, copy button copper on hover. Language label top-left in
+ * marginalia italic.
+ *
+ * GROUP (24px) margin above and below — code block breathes from surrounding prose.
+ * No backdrop-filter. No border-left/right ≥ 2px.
+ */
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CODE FENCE CONTAINER — brass-bound passage
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-code-fence {
+  margin: var(--space-group) 0; /* GROUP (24px) above and below — prose breathing room */
+  border-radius: var(--radius-md);
+  /* Warm border — border-strong for the brass-bound feel */
+  border: 1px solid var(--color-border-strong);
+  overflow: hidden;
+  /* Base: surface-elevated + foxing overlay for aged-paper warmth */
+  background: var(--color-surface-elevated);
+  position: relative;
+  /* Inset shadow at top — under-shelf depth */
+  box-shadow: inset 0 2px 6px var(--material-shadow);
+}
+
+/* Foxing overlay pseudo-element — warm aged-paper tint on the entire block.
+   The ::after carries a slow brass edge shimmer — 1px outline on the
+   fence that drifts 0.3→0.5→0.3 opacity over 20s. Pure compositor.
+   Disabled by reduced-motion. */
+.lmchat-code-fence::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--material-foxing);
+  z-index: 0;
+  border-radius: inherit;
+}
+
+.lmchat-code-fence::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px var(--material-brass);
+  z-index: 2;
+  animation: brass-edge-shimmer 20s var(--ease-soft) infinite;
+  will-change: opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-code-fence::after {
+    animation: none;
+    opacity: 0.35;
+  }
+}
+
+.lmchat-code-fence > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   FENCE HEADER — language label + copy button
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px var(--space-glue-relaxed);
+  /* Header surface slightly elevated over the foxing tint */
+  background: color-mix(
+    in oklch,
+    var(--color-surface-3) 80%,
+    var(--material-brass)
+  );
+  border-bottom: 1px solid var(--color-border-strong);
+  min-height: 28px;
+}
+
+/* Language label — marginalia italic, top-left per spec.
+   Copper marginalia dot to the left of the label. */
+.lmchat-code-lang-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-marginalia); /* 12px — marginalia scale */
+  font-style: italic; /* italic per spec */
+  color: var(--color-text-subtle);
+  text-transform: lowercase;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue);
+}
+
+.lmchat-code-lang-label::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-accent-fill);
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+/* Copy button — opacity 0 → 1 on hover, copper color */
+.lmchat-code-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue);
+  margin-left: auto;
+  padding: 2px var(--space-glue);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-marginalia); /* 12px */
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  /* Emerge on container hover */
+  transition:
+    opacity var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart);
+}
+
+/* Show copy button when the fence header is hovered */
+.lmchat-code-fence:hover .lmchat-code-copy,
+.lmchat-code-header:hover .lmchat-code-copy {
+  opacity: 1;
+}
+
+/* Copy button hover — copper */
+.lmchat-code-copy:hover {
+  color: var(--color-accent-text);
+  border-color: color-mix(in oklch, var(--color-accent) 30%, transparent);
+  background: var(--color-accent-quiet);
+}
+
+.lmchat-code-copy:active {
+  transform: scale(0.96);
+}
+
+/* Copied state — always visible */
+.lmchat-code-copy--copied {
+  opacity: 1;
+  color: var(--color-success);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CODE CONTENT — the pre / code inside the fence
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.lmchat-code-pre {
+  margin: 0;
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-mono); /* 13px per spec */
+  line-height: var(--lh-code); /* 1.6 */
+  /* No background here — container and foxing overlay handle it */
+  background: transparent;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   INLINE CODE — foxing tint, body-font-size relative
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Inline code — foxing background tint, mono font, body-relative size.
+   Applied in globals.css via .lmchat-markdown code; kept here for co-location. */
+.lmchat-inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.875em; /* relative to parent — scales with body-lg context */
+  background: color-mix(
+    in oklch,
+    var(--color-surface-elevated) 70%,
+    var(--material-foxing)
+  );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  padding: 0 var(--space-glue); /* GLUE (4px) — inline code gutter */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-code-copy {
+    transition:
+      color var(--duration-fast),
+      border-color var(--duration-fast);
+    /* opacity stays at the hover-driven value — reduced-motion only stops transitions */
+  }
+  .lmchat-code-copy:active {
+    transform: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CODE BLOCK MOBILE RESPONSIVE (≤768px)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* Code fence: ensure it never breaks page width. The pre inside already
+     has overflow-x: auto; this ensures the fence itself is bounded. */
+  .lmchat-code-fence {
+    max-width: 100%;
+    /* Enable momentum scroll on iOS for the horizontal scroll of pre. */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Code pre: explicit max-width 100% so long lines horizontal-scroll within
+     the fence, not outside it. */
+  .lmchat-code-pre {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    /* Slightly smaller font on mobile for density. 12px is the min for mono. */
+    font-size: 0.75rem; /* 12px — down from --fs-mono (13px) */
+  }
+
+  /* Copy button: enlarge tap target on mobile. */
+  .lmchat-code-copy {
+    min-width: 44px;
+    min-height: 32px;
+  }
+}

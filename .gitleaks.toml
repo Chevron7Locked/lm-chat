@@ -1,0 +1,51 @@
+# .gitleaks.toml — lm-chat v1 false-positive suppressions
+#
+# Task: #173 — fix L3 gitleaks gate (17 false-positive generic-api-key findings)
+# Policy: every entry requires operator approval before addition (default-deny,
+#         same policy as cert-skip allowlists). DO NOT add blanket suppressions.
+#
+# Each entry documents the false-positive class it covers and why it is safe.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# Entry 1 — test service fixtures (tests/services/test_models_service.py)
+#   Covers findings #4 #6 #7 #8 #9 #10 #11 #12 (8 findings across 2 commits)
+#   Reason: LM Studio's /api/v1/models response uses a "key" field that holds
+#   the model identifier (e.g. "qwen3-8b"). gitleaks' generic-api-key
+#   rule fires on the word "key" + a string value. These are not credentials.
+#
+# Entry 2 — test_l3_adapters.py (tests/security/test_l3_adapters.py)
+#   Covers finding #1 (1 finding, commit db0c4ccd)
+#   Reason: an AKIA-prefixed pattern (intentionally fake) is used as fixture
+#   for the L3 secret-scan adapter itself. The line already carries a
+#   # noqa: secrets-scan comment. Not a real credential.
+#
+# Entry 3 — dos e2e test (tests/security/test_dos_e2e.py)
+#   Covers finding #2 (1 finding, commit 62d44223)
+#   Reason: LM_STUDIO_API_KEY is set to a project-prefixed placeholder string
+#   in the DoS e2e test harness so the HTTP client has a non-empty auth
+#   header. The value is not a real key and is not accepted by any real service.
+#
+# Entry 4 — web e2e specs (web/tests/e2e/)
+#   Covers finding #3 (1 finding, commit 04381a8b)
+#   Reason: INVITE_TOKEN = "tok_p13k_test_invite_2026" is a hard-coded test
+#   fixture token for the admin-invite e2e flow. Format is project-specific
+#   and not accepted by any external service.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+[allowlist]
+  description = "lm-chat v1 known false positives — task #173"
+
+  paths = [
+    # Entry 1: LM Studio model-key fixtures in service test suite
+    '''^tests/services/test_models_service\.py$''',
+
+    # Entry 2: L3 adapter test — intentionally fake AKIA-pattern fixture
+    '''^tests/security/test_l3_adapters\.py$''',
+
+    # Entry 3: DoS e2e test — named placeholder sk-dos-e2e-placeholder
+    '''^tests/security/test_dos_e2e\.py$''',
+
+    # Entry 4: web e2e specs — invite token test fixtures
+    '''^web/tests/e2e/.+\.spec\.ts$''',
+  ]

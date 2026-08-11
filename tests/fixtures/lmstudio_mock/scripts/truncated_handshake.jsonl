@@ -1,0 +1,2 @@
+{"event": "chat.start", "data": {"type": "chat.start", "model_instance_id": "mock-instance", "response_id": "mock-resp-006"}, "delay": 0.01}
+{"event": "_raise_connection_error", "data": {}, "delay": 0.01, "_raise_connection_error": true}

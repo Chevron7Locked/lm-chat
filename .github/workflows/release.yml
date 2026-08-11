@@ -1,0 +1,114 @@
+name: Release
+
+# Tag a release (`git tag v1.2.3 && git push --tags`) to build a multi-arch
+# image, push it to GHCR, and cut a GitHub Release. Adapted for the v1 layout:
+# the Dockerfile lives at deploy/Dockerfile (not repo root).
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+  security-events: write
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Attach an SPDX SBOM and SLSA-style provenance attestation to the
+          # pushed manifest. Both surface in the GHCR UI and let downstream
+          # consumers verify what's in the image without re-pulling layers.
+          sbom: true
+          provenance: mode=max
+
+      - name: Lowercase image name
+        id: img
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Trivy — container vulnerability scan
+        # Pinned to a specific commit — never use @master (mutable, OpenSSF Scorecard finding).
+        # Update via Dependabot.
+        uses: aquasecurity/trivy-action@314ff8b43182423b84c50b1670b0e10f858f2d98 # 0.34.0
+        with:
+          image-ref: ${{ steps.img.outputs.name }}:${{ steps.meta.outputs.version }}
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        with:
+          generate_release_notes: true
+          body: |
+            ## Docker
+
+            ```bash
+            docker pull ${{ steps.img.outputs.name }}:${{ steps.meta.outputs.version }}
+            ```
+
+            **Supported architectures:** `linux/amd64`, `linux/arm64` (Apple Silicon)
+
+            Or with Docker Compose — clone for the compose file and env template:
+
+            ```bash
+            git clone https://github.com/${{ github.repository }}.git
+            cd lm-chat
+            cp deploy/.env.example deploy/.env    # then set LM_CHAT_SECRET
+            docker compose -f deploy/docker-compose.yml up -d
+            ```
+
+            ## Run from source
+
+            ```bash
+            git clone https://github.com/${{ github.repository }}.git
+            cd lm-chat
+            uv run uvicorn lmchat.app:app --port 8011   # backend (Python 3.11+)
+            cd web && pnpm install && pnpm dev           # frontend
+            ```

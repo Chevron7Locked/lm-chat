@@ -1,0 +1,43 @@
+# Ephemeral Postgres for the P15c L5 (dast-offline) gate.
+#
+# Distinct from tests/stress/postgres/compose-postgres.yml so an L5 run does
+# not collide with a concurrent stress run (which holds 5433).  L5 uses
+# 5434 and its own container name; the rest of the configuration mirrors
+# the stress compose file (tmpfs data, scram-sha-256, fsync off) so the
+# behaviour is identical aside from the port + container name.
+#
+# Boot / teardown is driven inline by the L5 Makefile recipe via
+# ``docker compose -f tests/security/postgres/compose-postgres-l5.yml``.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: lm-chat-l5-postgres
+    restart: "no"
+    environment:
+      POSTGRES_USER: lm_chat_l5
+      POSTGRES_PASSWORD: l5
+      POSTGRES_DB: lm_chat_l5
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    ports:
+      - "127.0.0.1:5434:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lm_chat_l5 -d lm_chat_l5"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 5s

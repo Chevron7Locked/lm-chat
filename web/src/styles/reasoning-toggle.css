@@ -1,0 +1,136 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * ReasoningToggle — marginalia-style reasoning-effort cycle button + dropdown.
+ *
+ * Extracted from the former thinking-block.css (which was deleted with the
+ * ThinkingBlock/ThinkingIndicator → ProcessStream unification). These styles
+ * are unrelated to the streaming "thinking" surface; they belong to the
+ * ChatSettingsRail's reasoning-effort control and are now owned by it.
+ *
+ * No backdrop-filter. No border-left/right ≥ 2px. No gradient text.
+ */
+
+/* Container — inline-flex so it stays in the TopBar / rail flow */
+.lmchat-reasoning-toggle {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Cycle button — sibling (12px) gap from adjacent controls.
+   2026-06-06: padding + min-height + border-radius bumped to match
+   the rest of the chat-header row (model select / LM Studio badge /
+   topbar buttons all at 38px / --radius-xs). Was the only outlier
+   sitting 2px shorter than its siblings. */
+.lmchat-reasoning-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue); /* GLUE (4px) between icon and label */
+  padding: var(--padding-btn-y) var(--space-glue-relaxed);
+  min-height: 38px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-display); /* Hubot Sans 500 */
+  font-size: var(--fs-caption); /* 12px */
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    border-color var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart);
+}
+
+/* Active state — copper underline via box-shadow, accent background tint */
+.lmchat-reasoning-btn--active {
+  background: var(--color-accent-quiet);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent-text);
+}
+
+/* Hover: copper underline reveal */
+.lmchat-reasoning-btn:hover {
+  color: var(--color-accent-text);
+  border-color: color-mix(in oklch, var(--color-accent) 40%, transparent);
+}
+
+/* Active copper marginalia dot — sits to the left of the label */
+.lmchat-reasoning-btn__dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-accent-fill);
+  flex-shrink: 0;
+}
+
+/* Dropdown — brass-edged, same shadow language as slash-menu */
+.lmchat-reasoning-dropdown {
+  position: absolute;
+  top: calc(100% + var(--space-glue));
+  left: 0;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow:
+    var(--shadow-md),
+    inset 0 0 8px var(--material-brass);
+  min-width: 110px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-glue);
+  animation: slash-menu-in var(--duration-fast) var(--ease-out-expo) both;
+}
+
+/* Dropdown option — same item pattern as slash menu */
+.lmchat-reasoning-option {
+  padding: var(--space-glue-relaxed) var(--space-glue-relaxed);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+  font-weight: 400;
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-reasoning-option--selected {
+  background: var(--color-accent-quiet);
+  color: var(--color-accent-text);
+  font-weight: 500;
+}
+
+.lmchat-reasoning-option:hover {
+  background: color-mix(
+    in oklch,
+    var(--color-surface-3) 50%,
+    var(--material-brass)
+  );
+  color: var(--color-text);
+}
+
+/* Clear-override option — italic, hairline top rule */
+.lmchat-reasoning-option--clear {
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--space-glue);
+  padding-top: var(--space-glue-relaxed);
+  color: var(--color-text-subtle);
+  font-style: italic;
+  font-size: var(--fs-label);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-reasoning-dropdown {
+    animation: none;
+  }
+}

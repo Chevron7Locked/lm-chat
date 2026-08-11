@@ -1,0 +1,17 @@
+# hadolint configuration — https://github.com/hadolint/hadolint#configure
+#
+# Auto-discovered from the repo root by both `scripts/container-scan.sh`
+# (local) and the `container-scan` CI workflow, which invoke
+# `hadolint deploy/Dockerfile` from here.
+#
+# DL3066 ("Non-numeric user-id may not be resolvable by host system")
+# fires on our two intentional named users:
+#   * `USER root`    — the privileged build/setup stage, dropped back to
+#                      an unprivileged user before the runtime stage.
+#   * `USER nonroot` — the distroless runtime identity (UID 65532), the
+#                      standard user baked into gcr.io/distroless/*:nonroot.
+# Both names are universally resolvable; the numeric-UID nitpick does not
+# apply here. Suppress just this one info-level rule — every other rule,
+# including all warnings/errors, still fails the scan.
+ignored:
+  - DL3066

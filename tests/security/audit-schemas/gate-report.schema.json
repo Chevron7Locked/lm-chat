@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lmchat:audit-schemas:gate-report",
+  "title": "Production-Gate Report",
+  "description": "Aggregated output of `make production-gate` (L9 aggregator). Schema is the contract between tools/aggregate_junit.py and any CI consumer that parses target/gates/report.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ok",
+    "wall_clock_seconds",
+    "layer_results",
+    "findings",
+    "owasp_llm_coverage",
+    "production_ready"
+  ],
+  "properties": {
+    "ok": {
+      "type": "boolean",
+      "description": "True iff every required layer's JUnit XML reported zero failures + zero errors AND no layer XML was missing."
+    },
+    "wall_clock_seconds": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Total wall-clock for the gate run, summed across layers."
+    },
+    "layer_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["layer", "name", "ok", "tools", "duration_s"],
+        "properties": {
+          "layer": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9
+          },
+          "name": { "type": "string" },
+          "ok": { "type": "boolean" },
+          "tools": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["tests", "failures", "errors", "skipped"],
+              "properties": {
+                "tests": { "type": "integer", "minimum": 0 },
+                "failures": { "type": "integer", "minimum": 0 },
+                "errors": { "type": "integer", "minimum": 0 },
+                "skipped": { "type": "integer", "minimum": 0 },
+                "xml_path": { "type": "string" }
+              }
+            }
+          },
+          "duration_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "missing": {
+            "type": "boolean",
+            "description": "True iff the layer's XML file was missing at aggregation time."
+          },
+          "stub": {
+            "type": "boolean",
+            "description": "True iff the layer is a not-yet-implemented stub (passes vacuously)."
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "tool", "title"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "high", "medium", "low", "info"]
+          },
+          "tool": { "type": "string" },
+          "title": { "type": "string" },
+          "file": { "type": "string" },
+          "line": { "type": "integer", "minimum": 0 },
+          "layer": { "type": "integer", "minimum": 0, "maximum": 9 }
+        }
+      }
+    },
+    "owasp_llm_coverage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^LLM\\d{2}$" },
+          "status": {
+            "type": "string",
+            "enum": ["matches", "missing-on-purpose", "missing-by-accident"]
+          },
+          "risk": { "type": "string" },
+          "test": { "type": "string" }
+        }
+      },
+      "description": "OWASP LLM Top 10 coverage table. Starts as an empty list until test coverage is populated."
+    },
+    "production_ready": {
+      "type": "boolean",
+      "description": "True iff `ok` AND no missing layers AND no critical findings, computed conservatively with anti-fabrication safeguards layered in over time."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "commit": {
+      "type": "string",
+      "description": "git rev-parse HEAD at emit time (best effort; empty when not in a git tree)."
+    }
+  }
+}

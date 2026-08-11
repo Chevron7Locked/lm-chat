@@ -1,0 +1,267 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * ProcessStream — ONE calm "process" surface per assistant turn.
+ *
+ * Replaces thinking-block.css's ThinkingBlock vellum band + ThinkingIndicator
+ * verb/dots. A single transparent surface: no card chrome, no vellum overlay,
+ * no perpetual breathing animation. Reasoning streams live, collapses to one
+ * quiet line, tool calls render as quiet inline lines.
+ *
+ * Spacing: semantic grammar only. No border-left/right ≥ 2px accent
+ * stripe, no gradient text, no backdrop-filter. Motion budget: one calm cursor
+ * (the shared .lmchat-stream-caret) + the natural text streaming.
+ */
+
+/* ── Surface ──────────────────────────────────────────────────────────────── */
+
+/* Transparent — sits in the same column as the answer, no background/border.
+   GLUE-RELAXED (8px) below it so the answer that follows reads as a sibling. */
+.lmchat-process-stream {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue-relaxed); /* 8px between reasoning / tools / waiting */
+  margin-bottom: var(--space-glue-relaxed);
+}
+
+/* ── Reasoning ────────────────────────────────────────────────────────────── */
+
+.lmchat-process-reasoning {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Thinkbox container — the shared elevated recessed panel used for both the
+      live reasoning view and the expanded collapsed-reasoning body.
+      Uses theme tokens only; no hardcoded colours.
+      Visually subordinate to the main answer (smaller text, muted palette)
+      but clearly a distinct contained surface. ─────────────────────────────── */
+.lmchat-process-thinkbox {
+  background: color-mix(
+    in srgb,
+    var(--color-surface-elevated, var(--color-surface)) 60%,
+    var(--color-surface, #000) 40%
+  );
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  box-shadow:
+    inset 0 1px 3px color-mix(in srgb, var(--color-border) 50%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-border) 20%, transparent);
+  padding: var(--space-sibling) var(--space-section, 16px);
+}
+
+/* LIVE reasoning (streaming, pre-answer): shown open + uncollapsible inside the
+   thinkbox. The <pre> itself is the scroll container (max-height + overflow). */
+.lmchat-process-reasoning--live .lmchat-process-reasoning__text {
+  max-height: 240px;
+  overflow-y: auto;
+  /* Clip the scrollbar inside the rounded box. */
+  border-radius: var(--radius-sm, 4px);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+/* Collapsed "Reasoning" line (answer started / turn settled). Quiet toggle. */
+.lmchat-process-reasoning__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue); /* GLUE (4px) chevron↔label */
+  align-self: flex-start;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-text-subtle);
+}
+
+.lmchat-process-reasoning__chevron {
+  display: inline-block;
+  font-style: normal;
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--color-text-subtle);
+  transition: transform var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-process-reasoning__chevron--expanded {
+  transform: rotate(90deg);
+}
+
+/* Hubot Sans 600 caps, marginalia scale — matches the prior heading tone. */
+.lmchat-process-reasoning__label {
+  font-family: var(--font-display);
+  font-size: var(--fs-caption); /* 12px */
+  font-weight: 600;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+.lmchat-process-reasoning__toggle:hover .lmchat-process-reasoning__label,
+.lmchat-process-reasoning__toggle:hover .lmchat-process-reasoning__chevron {
+  color: var(--color-text-muted);
+}
+
+/* Body collapse — grid-template-rows 0fr → 1fr (no JS height measurement,
+   reduced-motion-safe). Same proven pattern as the former ThinkingBlock. */
+.lmchat-process-reasoning__body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--duration-base) var(--ease-out-quart);
+  /* Top breathing room between the toggle and the body box. */
+  margin-top: 0;
+}
+
+.lmchat-process-reasoning__body--expanded {
+  grid-template-rows: 1fr;
+  margin-top: var(--space-glue);
+}
+
+.lmchat-process-reasoning__body-inner {
+  overflow: hidden;
+}
+
+/* Reasoning text — marginalia italic, muted. */
+.lmchat-process-reasoning__text {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-marginalia); /* 12px */
+  font-style: italic;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: var(--lh-prose);
+}
+
+/* Expanded body: the <pre> inside the thinkbox also gets constrained height
+   and scroll so very long reasoning doesn't grow unbounded. */
+.lmchat-process-reasoning__body-inner .lmchat-process-reasoning__text {
+  max-height: 320px;
+  overflow-y: auto;
+  border-radius: var(--radius-sm, 4px);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-process-reasoning__body {
+    transition: none;
+  }
+  .lmchat-process-reasoning__chevron {
+    transition: none;
+  }
+}
+
+/* ── Tool lines — quiet inline, NOT cards ─────────────────────────────────── */
+
+.lmchat-process-tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue); /* GLUE (4px) line↔line */
+}
+
+/* Each tool is an expandable <details>, but the summary reads as a single
+   quiet monospace line — no card background, no border box. */
+.lmchat-process-tool {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption); /* 12px */
+}
+
+.lmchat-process-tool__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue); /* 4px between chevron / name / status */
+  padding: 0;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  color: var(--color-text-subtle);
+}
+
+.lmchat-process-tool__summary::-webkit-details-marker {
+  display: none;
+}
+.lmchat-process-tool__summary::marker {
+  content: "";
+}
+
+/* Monospace "›" prefix, rotates on open — the inline cue the spec asks for. */
+.lmchat-process-tool__chevron {
+  display: inline-block;
+  color: var(--color-text-subtle);
+  transition: transform var(--duration-fast) var(--ease-out-quart);
+}
+
+.lmchat-process-tool[open] .lmchat-process-tool__chevron {
+  transform: rotate(90deg);
+}
+
+.lmchat-process-tool__name {
+  color: var(--color-text-muted);
+}
+
+.lmchat-process-tool__summary:hover .lmchat-process-tool__name {
+  color: var(--color-text);
+}
+
+/* Status — quiet by default; success/failure get the semantic accent. */
+.lmchat-process-tool__status {
+  margin-left: var(--space-glue);
+  font-size: var(--fs-micro); /* 11px */
+  text-transform: capitalize;
+  color: var(--color-text-subtle);
+}
+
+.lmchat-process-tool__status--success {
+  color: var(--color-success);
+}
+.lmchat-process-tool__status--failure {
+  color: var(--color-danger);
+}
+
+/* Expanded args/result — indented under the line, GLUE (4px) top breathing. */
+.lmchat-process-tool__body {
+  padding-top: var(--space-glue);
+  padding-left: var(--space-sibling); /* align under the name, past the chevron */
+}
+
+.lmchat-process-tool__pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro); /* 11px */
+  color: var(--color-text-subtle);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lmchat-process-tool__pre--result {
+  margin-top: var(--space-glue);
+  color: var(--color-text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-process-tool__chevron {
+    transition: none;
+  }
+}
+
+/* ── Waiting line — quiet phase copy + the single calm cursor ──────────────── */
+
+.lmchat-process-waiting {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed); /* 8px between phase copy and cursor */
+}
+
+/* Phase line (Thinking / Loading model 42% / Processing prompt …) — marginalia
+   italic, subtle. No rotation, no dots; a single steady line. */
+.lmchat-process-phase {
+  font-family: var(--font-sans);
+  font-size: var(--fs-label); /* 13px */
+  font-style: italic;
+  letter-spacing: 0.01em;
+  color: var(--color-text-subtle);
+}
+
+/* The cursor itself is the shared .lmchat-stream-caret (globals.css): a calm
+   copper opacity pulse, already reduced-motion-safe. No extra motion added. */

@@ -1,0 +1,91 @@
+# usage:
+#   Start:           docker compose up -d
+#   View logs:       docker compose logs -f lmchat
+#   Backup DB:       docker compose exec lmchat \
+#                      sqlite3 /data/lmchat.db .dump \
+#                      | gzip > lmchat-$(date +%Y%m%d).sql.gz
+#   Stop:            docker compose down
+#
+# See docs/release/BACKUP_RESTORE.md for full backup/restore procedures.
+
+services:
+  lmchat:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    ports:
+      # Host-side port is configurable so the validate-deploy gate
+      # can pick a non-conflicting port (e.g. when host's 8000 is in
+      # use by another service). Container port is always 8000.
+      - "${LM_CHAT_HOST_PORT:-8000}:8000"
+    volumes:
+      - lmchat-data:/data
+      # Persist the MCP package caches across restarts. Without these, every
+      # container recreate wipes ~/.npm and ~/.cache, so the FIRST connect to
+      # each stdio MCP server re-downloads from npm/PyPI — slow, and a cold
+      # concurrent fetch can race (the transient ENOENT seen 2026-07-09).
+      # Pre-created + chowned to uid 65532 in the Dockerfile, so the first
+      # mount seeds the volume with the right ownership (writable by nonroot).
+      - lmchat-npm-cache:/home/nonroot/.npm
+      - lmchat-uv-cache:/home/nonroot/.cache
+      # LM Studio's own mcp.json (read-only) so the native-mode composer can
+      # DISPLAY the MCP servers LM Studio runs host-side. LM Studio does not
+      # expose MCP enumeration over HTTP, so LMChat reads the file directly —
+      # but in a container ~ is /home/nonroot, not the host home, so without
+      # this mount the servers never surface (they appear as empty on every
+      # fresh onboarding). Same-host deploys only: ~/.lmstudio lives on the
+      # host running LM Studio. Mounting the directory (not just the file)
+      # stays graceful when ~/.lmstudio is absent. Split-host deployment?
+      # Remove this mount and set LM_CHAT_LOCAL_MCP_DISCOVERY_ENABLED=false.
+      - ${HOME}/.lmstudio:/home/nonroot/.lmstudio:ro
+    environment:
+      DATABASE_URL: "sqlite+aiosqlite:////data/lmchat.db"
+      # LM Studio running on the Docker host
+      LM_STUDIO_BASE_URL: "http://host.docker.internal:1234"
+      # Override secrets via a .env file next to this compose file
+      # (never commit secrets; see deploy/systemd/lmchat.env.example)
+    env_file:
+      - path: .env
+        required: false
+    extra_hosts:
+      # Resolves host.docker.internal on Linux hosts (no-op on Mac/Windows)
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      # Chainguard hardened base does NOT include curl.  Use python
+      # urllib — exits 0 on HTTP 200, non-zero otherwise.  Mirrors
+      # the HEALTHCHECK already defined in deploy/Dockerfile.
+      #
+      # Deliberately /healthz (always 200), NOT /readyz — readiness (DB +
+      # session-store reachability) is a Service-routing concern, not a
+      # process-liveness one. Do NOT swap this to /readyz: "unless-stopped"
+      # would restart-loop a perfectly healthy container over a transient
+      # DB hiccup. (/readyz no longer gates on LM Studio reachability
+      # either way — an admin closing LM Studio is normal operation for
+      # this local-first app — see src/lmchat/routes/_meta.py.)
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request, sys; r = urllib.request.urlopen('http://localhost:8000/healthz', timeout=2); sys.exit(0 if r.status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    # Persist application logs across restarts with rotation. 50MB × 10 files
+    # ≈ 500MB ceiling — sufficient for multi-day operator validation. Pull
+    # with `docker compose logs -f lmchat` or export with
+    # `docker compose logs --no-color lmchat > test-period.log`.
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "10"
+
+volumes:
+  lmchat-data:
+    driver: local
+  lmchat-npm-cache:
+    driver: local
+  lmchat-uv-cache:
+    driver: local

@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+# Dependabot configuration for lm-chat v1.
+# Weekly Dependabot updates for Python and Node.js dependencies.
+#
+# Ecosystems:
+#   - pip  : Python dependencies in pyproject.toml / uv.lock
+#   - npm  : Node.js dependencies in web/package.json / pnpm-lock.yaml
+#
+# Schedule: weekly on Monday.  Both ecosystems are in the same batch so
+# a single PR review cycle handles both runtimes.
+#
+# Assignees / reviewers: left blank — the sole maintainer (Kevin O'Neill)
+# handles all PRs.
+#
+# Labels: "dependencies" is the default Dependabot label; no additional
+# custom labels are needed for a single-maintainer project.
+
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"

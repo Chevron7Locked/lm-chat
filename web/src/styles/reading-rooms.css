@@ -1,0 +1,1635 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Reading Rooms — warm-future-library material layer stylesheet.
+ *
+ * Covers: Memory (librarian's index), Documents (the desk),
+ * Analytics (the ledger), PromptLibrary (the recipe collection).
+ *
+ * All spacing uses the semantic grammar:
+ *   glue (4px) → sibling (12px) → group (24px) → chapter (48px)
+ *
+ * Forbidden patterns:
+ *   No border-left/right ≥ 2px.
+ *   No gradient text.
+ *   No backdrop-filter blur.
+ *   No card-grid layouts.
+ *   No nested cards.
+ */
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   PAGE WRAPPER — shared across all four reading rooms
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.rr-page {
+  max-width: var(--max-page);
+  margin-inline: auto;
+  padding: var(--padding-page-y) var(--padding-page-x);
+  overflow-y: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  /* The reading rooms also mount inside the chat right rail (380px
+     Drawer). Component-internal responsive is container-query driven —
+     the narrow rules below key off this container, not the viewport. */
+  container-type: inline-size;
+  container-name: rr-room;
+  /* Page entrance: opacity fade, 320ms (--duration-base) for snappy
+     intra-session navigation between Memory ↔ Documents ↔ Analytics.
+     Keeps the warm entrance while staying quick. */
+  animation: rr-page-enter var(--duration-base, 320ms)
+    var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+
+/* Rail variant — mounted inside the chat right Drawer. The Drawer header
+   already carries the room's title, and full-page padding (32/24px) wastes
+   most of a 380px panel. GROUP vertical / SIBLING-RELAXED lateral. */
+.rr-page--rail {
+  max-width: none;
+  padding: var(--space-group) var(--space-sibling-relaxed);
+}
+
+@keyframes rr-page-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ── Page header — eyebrow + display title ───────────────────────────────────── */
+
+.rr-page-header {
+  display: flex;
+  flex-direction: column;
+  /* eyebrow → title: GLUE (4px) — they are one thing */
+  gap: var(--space-glue);
+  /* page title → first body block: CHAPTER (48px) */
+  margin-bottom: var(--space-chapter);
+}
+
+/* Eyebrow: "LM CHAT" — Hubot Sans 600, --fs-micro, uppercase, copper */
+.rr-eyebrow {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--fs-micro); /* 11px */
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-accent-text);
+  line-height: 1;
+}
+
+/* Page title — Hubot Sans 700, --fs-h1 (24px), --ls-tight.
+   Normalized to one page-title scale across Memory / Analytics /
+   Documents / Prompts. Home hero h1 keeps its 72px display size
+   (different class). */
+.rr-page-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-h1); /* 24px — page-title rung */
+  font-weight: 700;
+  letter-spacing: var(--ls-tight);
+  line-height: var(--lh-heading);
+  color: var(--color-text);
+}
+
+/* ── Ink-bleed section divider — worn book page rule ────────────────────────── */
+/* CHAPTER (48px) above + below (matches .lmchat-section-divider pattern) */
+
+.rr-divider {
+  display: block;
+  width: 100%;
+  height: 1px;
+  border: none;
+  margin: var(--space-chapter) 0;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    var(--material-ink-bleed) 20%,
+    color-mix(in oklch, var(--material-ink-bleed) 70%, var(--color-border)) 50%,
+    var(--material-ink-bleed) 80%,
+    transparent 100%
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MEMORY — the librarian's index
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Search / add input row */
+.rr-memory-input-row {
+  display: flex;
+  gap: var(
+    --space-glue-relaxed
+  ); /* GLUE-RELAXED (8px) between input + button */
+  /* search input → first list item: GROUP (24px) — via .rr-memory-list margin-top */
+}
+
+/* Hairline search input — focus-emerges to copper */
+.rr-memory-input {
+  flex: 1;
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  background: transparent;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg); /* 15px */
+  color: var(--color-text);
+  outline: none;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-quart),
+    box-shadow var(--duration-fast) var(--ease-out-quart);
+}
+
+.rr-memory-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1.5px
+    color-mix(in oklch, var(--color-accent) 28%, transparent);
+}
+
+/* Pin / primary action button on the input row */
+.rr-memory-pin-btn {
+  padding: var(--space-glue-relaxed) var(--space-sibling-relaxed);
+  background: var(--color-accent-fill);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body); /* 14px */
+  font-weight: 600;
+  color: var(--color-text-on-accent);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background var(--duration-fast) var(--ease-out-quart),
+    opacity var(--duration-fast) var(--ease-out-quart);
+}
+
+.rr-memory-pin-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  filter: brightness(0.96);
+}
+
+.rr-memory-pin-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--color-accent-quiet);
+  color: var(--color-text-subtle);
+}
+
+/* Memory list — no border, no bubble: text on canvas */
+.rr-memory-list {
+  list-style: none;
+  margin: var(--space-group) 0 0; /* search → first item: GROUP (24px) */
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-group); /* item → item: GROUP (24px) — memories breathe */
+}
+
+/* Memory row — index-card feel: NO bubble/card border; color-field separation via gap */
+.rr-memory-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sibling); /* left-margin date ↔ body: SIBLING (12px) */
+  position: relative;
+}
+
+/* Marginalia date stamp — sits in the left gutter */
+.rr-memory-date {
+  flex-shrink: 0;
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-size: var(--fs-marginalia); /* 12px */
+  color: var(--color-text-subtle);
+  line-height: var(--lh-ui);
+  min-width: 64px;
+  text-align: right;
+}
+
+/* Memory body text — Hanken Grotesk 500, body-lg, prose lh */
+.rr-memory-body {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg); /* 15px */
+  font-weight: 500;
+  color: var(--color-text);
+  line-height: var(--lh-prose);
+  word-break: break-word;
+}
+
+/* Wrapper cell for long pins (body + "show more" toggle). */
+.rr-memory-body-cell {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 6-line clamp for long pins — without it, a very long pin can render
+ * as a many-thousand-pixel-tall block. Clamp by default; the row's
+ * "show more" toggle expands it. Once expanded the clamp is removed via
+ * the data-expanded attribute. */
+.rr-memory-body[data-clamped="true"] {
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+}
+
+.rr-memory-show-more {
+  margin-top: var(--space-glue);
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-accent-text);
+  font: inherit;
+  font-size: var(--fs-caption);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* Memory search input — sits above the list, sticky on the
+ * canvas. */
+.rr-memory-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+  margin: 0 0 var(--space-sibling) 0;
+}
+.rr-memory-search input {
+  flex: 1;
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--color-text);
+}
+.rr-memory-search input:focus {
+  outline: 2px solid color-mix(in oklch, var(--color-accent) 35%, transparent);
+  outline-offset: 1px;
+}
+
+/* Row action cluster — hover reveals (opacity 0→1, --duration-fast) */
+.rr-memory-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-quart);
+}
+
+.rr-memory-row:hover .rr-memory-actions,
+.rr-memory-row:focus-within .rr-memory-actions {
+  opacity: 1;
+}
+
+/* Action icon buttons (edit, delete) — copper on hover */
+.rr-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart);
+}
+
+.rr-icon-btn:hover {
+  color: var(--color-accent-text);
+  background: color-mix(in oklch, var(--color-accent) 8%, transparent);
+}
+
+.rr-icon-btn:active {
+  transform: scale(0.94);
+}
+
+/* Inline edit form within a memory row */
+.rr-memory-edit-form {
+  display: flex;
+  gap: var(--space-glue-relaxed);
+  flex: 1;
+  align-items: center;
+}
+
+/* Refine / admin action row */
+.rr-memory-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sibling);
+  align-items: center;
+  margin-top: var(--space-group);
+  min-width: 0;
+}
+
+/* Refine confirm dialog */
+.rr-refine-confirm {
+  padding: var(--space-sibling-relaxed) var(--space-group);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sibling);
+  margin-top: var(--space-group);
+}
+
+.rr-refine-confirm-text {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text);
+}
+
+.rr-refine-confirm-actions {
+  display: flex;
+  gap: var(--space-glue-relaxed);
+}
+
+/* Admin reindex section */
+.rr-admin-section {
+  margin-top: var(--space-chapter); /* CHAPTER (48px) above admin section */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sibling-relaxed);
+}
+
+.rr-admin-heading {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-h3); /* 17px */
+  font-weight: 600;
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+}
+
+.rr-admin-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sibling);
+  align-items: center;
+  min-width: 0;
+}
+
+/* Auto-saved (distilled) memories section — a labelled shelf below the
+   admin's pinned insights. Separated by a CHAPTER break and a hairline
+   rule so it reads as a distinct, machine-curated collection. */
+.rr-auto-memory-section {
+  margin-top: var(--space-chapter); /* CHAPTER (48px) break from pinned list */
+  padding-top: var(--space-sibling-relaxed);
+  border-top: 1px solid var(--color-border-default);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sibling-relaxed);
+}
+
+.rr-auto-memory-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue-relaxed);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   DOCUMENTS — the desk
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Upload zone — vellum-tinted panel, dashed border, NOT a solid box */
+.rr-upload-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sibling);
+  padding: var(--space-chapter) var(--space-group);
+  /* vellum overlay via radial background-image */
+  background-image: radial-gradient(
+    ellipse 80% 100% at 50% 100%,
+    var(--material-vellum) 0%,
+    transparent 100%
+  );
+  background-color: transparent;
+  border: 1.5px dashed var(--color-border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    border-color var(--duration-base) var(--ease-out-quart),
+    background-image var(--duration-base) var(--ease-out-quart);
+}
+
+/* Drag-over: border warms to copper, vellum deepens */
+.rr-upload-zone--drag {
+  border-color: var(--color-accent);
+  border-style: dashed;
+  background-image: radial-gradient(
+    ellipse 80% 100% at 50% 100%,
+    color-mix(in oklch, var(--material-vellum) 300%, transparent) 0%,
+    color-mix(in oklch, var(--color-accent) 6%, transparent) 100%
+  );
+}
+
+.rr-upload-zone-label {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg); /* 15px */
+  color: var(--color-text-subtle);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+}
+
+.rr-upload-zone-hint {
+  font-family: var(--font-sans);
+  font-size: var(--fs-marginalia); /* 12px */
+  color: var(--color-text-subtle);
+  font-style: italic;
+}
+
+/* Document list — GROUP gap between rows */
+.rr-doc-list {
+  list-style: none;
+  margin: var(--space-group) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-group); /* row → row: GROUP (24px) */
+}
+
+/* Document row — NO card chrome; title typography carries the row */
+.rr-doc-row {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Document row header: expand button + title + meta + delete */
+.rr-doc-row-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sibling); /* cells: SIBLING (12px) */
+}
+
+/* Expand + title button — title typography carries weight */
+.rr-doc-title-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue); /* icon ↔ text: GLUE (4px) */
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.rr-doc-expand-icon {
+  color: var(--color-text-subtle);
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+/* Document title — Hanken Grotesk 500, --fs-body-lg */
+.rr-doc-title {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg); /* 15px */
+  font-weight: 500;
+  color: var(--color-text);
+  line-height: var(--lh-ui);
+}
+
+/* File-type chip — foxing background, micro uppercase Hubot Sans */
+.rr-doc-type-chip {
+  flex-shrink: 0;
+  display: inline-block;
+  padding: 1px var(--space-glue-relaxed);
+  background: var(--material-foxing);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: var(--fs-micro); /* 11px */
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-text-subtle);
+}
+
+/* Marginalia metadata — italic, micro */
+.rr-doc-meta {
+  flex-shrink: 0;
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-size: var(--fs-marginalia); /* 12px */
+  color: var(--color-text-subtle);
+}
+
+/* Processing dot — small copper indicator */
+.rr-doc-processing-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent-fill);
+  margin-inline-end: var(--space-glue);
+  animation: rr-dot-pulse 1.6s var(--ease-soft) infinite;
+}
+
+@keyframes rr-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* Delete / action row — hover-revealed */
+.rr-doc-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-glue-relaxed);
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-quart);
+}
+
+.rr-doc-row:hover .rr-doc-actions,
+.rr-doc-row:focus-within .rr-doc-actions {
+  opacity: 1;
+}
+
+/* Chunk expansion panel — fades in below the row header */
+.rr-chunk-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: var(--space-sibling);
+  border-top: 1px solid var(--color-border);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.rr-chunk-row {
+  display: flex;
+  gap: var(--space-sibling);
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  border-bottom: 1px solid var(--color-border);
+  /* --fs-label (13px) — chunk previews are content, not passive
+     metadata, so they read at label size rather than a smaller
+     metadata size. */
+  font-size: var(--fs-label);
+}
+
+.rr-chunk-ordinal {
+  flex-shrink: 0;
+  color: var(--color-text-subtle);
+  font-variant-numeric: tabular-nums;
+  min-width: 28px;
+  font-family: var(--font-mono);
+}
+
+.rr-chunk-text {
+  font-family: var(--font-sans);
+  color: var(--color-text);
+  line-height: var(--lh-prose);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   NARROW CONTAINER — reading rooms inside the chat right rail (380px Drawer)
+   and any other sub-480px mount. Container-driven, not viewport-driven.
+
+   Date and memory are sibling info on a list row, not one thing — at
+   narrow widths the date becomes marginalia UNDERNEATH the body instead
+   of competing for the line.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@container rr-room (max-width: 480px) {
+  /* Memory row: body + actions on the first line, date stacked below.
+     GLUE (4px) row gap — the date is the body's own marginalia here. */
+  .rr-memory-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "body actions"
+      "date date";
+    column-gap: var(--space-sibling);
+    row-gap: var(--space-glue);
+    align-items: start;
+  }
+
+  .rr-memory-row > .rr-memory-body,
+  .rr-memory-row > .rr-memory-body-cell {
+    grid-area: body;
+  }
+
+  .rr-memory-row > .rr-memory-actions {
+    grid-area: actions;
+  }
+
+  .rr-memory-row > .rr-memory-date {
+    grid-area: date;
+    min-width: 0;
+    text-align: left;
+  }
+
+  /* The copper hover dot hangs 10px past the date's right edge; with the
+     date spanning the full row it would bleed out of the panel. Hide it
+     in narrow mode (the row-hover color warm-up still signals). */
+  .rr-memory-date::after {
+    display: none;
+  }
+
+  /* Inline edit form spans the whole row. */
+  .rr-memory-row > .rr-memory-edit-form {
+    grid-column: 1 / -1;
+  }
+
+  /* Document row: filename + chip + actions keep the first line; the
+     size · chunks · date marginalia wraps to its own line, indented to
+     the title's text edge (14px expand icon + GLUE). */
+  .rr-doc-row-header {
+    flex-wrap: wrap;
+    row-gap: var(--space-glue);
+  }
+
+  .rr-doc-meta {
+    order: 5;
+    flex-basis: 100%;
+    white-space: normal;
+    padding-inline-start: calc(14px + var(--space-glue));
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ANALYTICS — the ledger
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Analytics hero — asymmetric editorial composition.
+   Primary metric at display scale with marginalia voice line.
+   Secondary metrics as a plain text stack below. No cards. */
+.rr-analytics-hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-group); /* primary → secondary: GROUP (24px) */
+  /* hero block → first analytics section: CHAPTER (48px) via section margin-top */
+}
+
+/* Primary metric block — the number leads, marginalia attaches below */
+.rr-analytics-primary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue-relaxed); /* number ↔ marginalia: GLUE-RELAXED (8px) */
+}
+
+/* Hero number — Hubot Sans 700, fluid from 3rem→6rem, mint */
+.rr-hero-number {
+  font-family: var(--font-display);
+  font-size: clamp(3rem, 8vw, 6rem);
+  font-weight: 700;
+  color: var(--color-success); /* mint — $ saved vs cloud */
+  line-height: 1;
+  letter-spacing: var(--ls-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Marginalia voice line — describes the number in conversational voice */
+.rr-analytics-marginalia {
+  margin: 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: var(--fs-marginalia); /* 12px */
+  color: var(--color-text-subtle);
+  max-width: 44ch;
+  line-height: var(--lh-prose);
+}
+
+/* "saved vs cloud" label — slightly lighter, keeps test + a11y contract intact */
+.rr-analytics-marginalia-label {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--color-text-subtle);
+}
+
+/* Secondary metrics — plain text stack, "value · italic descriptor" lines */
+.rr-analytics-secondary-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sibling); /* line → line: SIBLING (12px) */
+}
+
+.rr-analytics-secondary-line {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0; /* separator handles its own spacing */
+  flex-wrap: wrap;
+}
+
+.rr-analytics-secondary-value {
+  font-family: var(--font-display);
+  font-size: var(--fs-stat); /* 28px */
+  font-weight: 700;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.rr-analytics-secondary-sep {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text-subtle);
+  white-space: pre;
+}
+
+.rr-analytics-secondary-desc {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: var(--fs-label); /* 13px */
+  color: var(--color-text-subtle);
+  line-height: 1;
+  align-self: flex-end;
+  padding-bottom: 2px; /* optical baseline alignment with stat value */
+}
+
+/* Legacy subtitle class — kept for any remaining references */
+.rr-hero-subtitle {
+  margin: var(--space-glue) 0 0;
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-size: var(--fs-body); /* 14px */
+  color: var(--color-text-subtle);
+}
+
+/* Analytics section block — chapter spacing above */
+.rr-analytics-section {
+  margin-top: var(--space-chapter); /* CHAPTER (48px) between sections */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Section heading — Hubot Sans 600, --fs-h3 (17px), copper underline accent */
+.rr-analytics-heading {
+  margin: 0;
+  padding-bottom: var(--space-glue-relaxed);
+  font-family: var(--font-display);
+  font-size: var(--fs-h3); /* 17px — H2 rung */
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Sub-section heading — H3 drops to --fs-label (15px) so H2/H3 have
+   distinct rungs. Metrics (--fs-stat 28px) remain the loudest type.
+   Shares the same family/uppercase/caps treatment as
+   .rr-analytics-heading but sits one step quieter on the scale. */
+.rr-analytics-subheading {
+  margin: 0;
+  padding-bottom: var(--space-glue-relaxed);
+  font-family: var(--font-display);
+  font-size: var(--fs-h4); /* 15px — H3 rung, one step below H2 */
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Sub-stat row — "Your usage" stats displayed as editorial text, not cards */
+.rr-stat-row-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sibling); /* stat → stat: SIBLING (12px) */
+  margin-top: var(--space-group); /* heading → stats: GROUP (24px) */
+}
+
+.rr-stat-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sibling); /* number ↔ label: SIBLING (12px) */
+}
+
+/* Stat number — Hubot Sans 700, --fs-stat (28px) */
+.rr-stat-value {
+  font-family: var(--font-display);
+  font-size: var(--fs-stat); /* 28px */
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Stat label — Hanken Grotesk italic, --fs-label (13px) */
+.rr-stat-label {
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-size: var(--fs-label); /* 13px */
+  color: var(--color-text-subtle);
+}
+
+/* Activity chart container — ink-bleed bottom axis, copper bars */
+.rr-activity-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--spacing-2xs, 2px);
+  height: 96px;
+  /* No card chrome — open chart sits on canvas */
+  border-bottom: 1px solid;
+  border-image: linear-gradient(
+      to right,
+      transparent 0%,
+      var(--material-ink-bleed) 20%,
+      color-mix(in oklch, var(--material-ink-bleed) 70%, var(--color-border))
+        50%,
+      var(--material-ink-bleed) 80%,
+      transparent 100%
+    )
+    1;
+  padding-bottom: var(--space-glue);
+  margin-top: var(--space-group); /* heading → chart: GROUP (24px) */
+}
+
+.rr-activity-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-2xs, 2px);
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.rr-activity-bar-wrap {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  height: 100%;
+}
+
+/* Copper bar — no grow-up animation (forbidden); opacity only */
+.rr-activity-bar {
+  width: 100%;
+  height: 100%;
+  background: var(--color-accent-fill);
+  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
+  transform-origin: bottom;
+  /* opacity entrance: --duration-base --ease-out-expo */
+  animation: rr-bar-enter var(--duration-base, 200ms)
+    var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+
+@keyframes rr-bar-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.rr-activity-tick {
+  font-size: var(--fs-micro); /* 11px */
+  color: var(--color-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.rr-activity-caption {
+  margin: var(--space-sibling) 0 0;
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-size: var(--fs-caption); /* 12px */
+  color: var(--color-text-subtle);
+}
+
+/* Daily table — chart → table: CHAPTER (48px) via section margin-top */
+.rr-daily-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: var(--space-group); /* heading → table: GROUP (24px) */
+}
+
+.rr-daily-table-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: var(--space-group);
+  align-items: baseline;
+  padding: var(--space-sibling) 0; /* row → row: SIBLING (12px) padding */
+}
+
+/* Foxing tint on alternate rows — aged paper, NOT data-grid zebra */
+.rr-daily-table-row:nth-child(odd) {
+  background: color-mix(in oklch, var(--material-foxing) 60%, transparent);
+  padding-inline: var(--space-glue-relaxed);
+  border-radius: var(--radius-xs);
+}
+
+.rr-daily-label {
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-size: var(--fs-label); /* 13px */
+  color: var(--color-text-subtle);
+}
+
+.rr-daily-value {
+  font-family: var(--font-display);
+  font-size: var(--fs-label); /* 13px */
+  font-weight: 700;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Model bar rows */
+.rr-model-bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sibling); /* SIBLING (12px) */
+  margin-top: var(--space-group); /* heading → models: GROUP (24px) */
+}
+
+.rr-model-bar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sibling);
+}
+
+.rr-model-label {
+  font-family: var(--font-sans);
+  font-size: var(--fs-label); /* 13px */
+  color: var(--color-text-muted);
+  min-width: 160px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.rr-bar-track {
+  flex: 1;
+  height: 8px;
+  background: var(--color-border);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+}
+
+.rr-bar-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--color-accent-fill);
+  border-radius: var(--radius-xs);
+  transform-origin: left center;
+  transition: transform var(--duration-base) var(--ease-out);
+}
+
+.rr-bar-count {
+  font-family: var(--font-sans);
+  font-size: var(--fs-label); /* 13px */
+  color: var(--color-text-subtle);
+  min-width: 32px;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   PROMPT LIBRARY — the recipe collection
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Category section header — Hubot Sans 600, --fs-h3, copper underline */
+.rr-prompt-category {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-chapter); /* category → category: CHAPTER (48px) */
+}
+
+.rr-prompt-category:first-of-type {
+  margin-top: 0;
+}
+
+.rr-prompt-category-heading {
+  margin: 0;
+  padding-bottom: var(--space-glue-relaxed);
+  font-family: var(--font-display);
+  font-size: var(--fs-h3); /* 17px */
+  font-weight: 600;
+  /* Tracked + muted — matches Analytics h2 rhythm. Copper underline
+     (border-image below) is the Prompts-specific differentiator. */
+  letter-spacing: var(--ls-caps);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  border-bottom: 1.5px solid var(--color-accent);
+  /* copper underline accent */
+  border-image: linear-gradient(
+      to right,
+      var(--color-accent) 0%,
+      color-mix(in oklch, var(--color-accent) 40%, transparent) 70%,
+      transparent 100%
+    )
+    1;
+}
+
+/* Prompt list within a category */
+.rr-prompt-list {
+  list-style: none;
+  margin: var(--space-sibling-relaxed) 0 0; /* heading → first prompt: SIBLING-RELAXED (16px) */
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-group); /* prompt → prompt: GROUP (24px) */
+}
+
+/* Prompt row — NO background/border; title typography carries it */
+.rr-prompt-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sibling-relaxed);
+  padding-bottom: var(--space-group);
+  border-bottom: 1px solid var(--color-border);
+  position: relative;
+}
+
+.rr-prompt-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+/* Prompt body — title + preview */
+.rr-prompt-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue-relaxed); /* title ↔ preview: GLUE-RELAXED (8px) */
+}
+
+/* Prompt title — Hanken Grotesk 500, --fs-h4 (15px) */
+.rr-prompt-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-h4, var(--fs-body-lg)); /* 15px */
+  font-weight: 500;
+  color: var(--color-text);
+  line-height: var(--lh-ui);
+}
+
+/* Prompt preview — Hanken Grotesk italic, --fs-body, 2-line clamp */
+.rr-prompt-preview {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-size: var(--fs-body); /* 14px */
+  color: var(--color-text-subtle);
+  line-height: var(--lh-prose);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Prompt action cluster (Edit / Use / Delete) */
+.rr-prompt-actions {
+  display: flex;
+  gap: var(--space-glue-relaxed);
+  flex-shrink: 0;
+  align-items: flex-start;
+  /* Quiet by default; visible always (no hover-only hide — they're interactive) */
+}
+
+/* Create prompt section */
+.rr-prompt-create {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-group); /* field → field: GROUP (24px) */
+  padding-bottom: var(--space-chapter);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Edit form (inline row replacement) — .lmchat-form pattern */
+.rr-prompt-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-group); /* field → field: GROUP (24px) */
+  flex: 1;
+}
+
+.rr-prompt-edit-actions {
+  display: flex;
+  gap: var(--space-glue-relaxed);
+  align-items: center;
+  margin-top: var(--space-glue-relaxed);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SHARED UTILITY CLASSES
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Hint / loading state text */
+.rr-hint {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text-subtle);
+}
+
+.rr-hint--error {
+  color: var(--color-danger);
+}
+
+/* Empty state — left-aligned editorial composition */
+.rr-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 0;
+  padding-top: var(--space-chapter);
+  max-width: 520px;
+}
+
+.rr-empty-icon {
+  color: var(--color-text-subtle);
+  opacity: 0.5;
+  margin-bottom: var(--space-sibling);
+}
+
+/* Primary line — display weight, H2 scale */
+.rr-empty-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-h2); /* 20px — primary empty-state line */
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: var(--lh-heading);
+}
+
+/* Marginalia — italic subordinate voice, GROUP below primary */
+.rr-empty-marginalia {
+  margin: var(--space-group) 0 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: var(--fs-marginalia); /* 12px */
+  font-weight: 400;
+  color: var(--color-text-subtle);
+  line-height: var(--lh-prose);
+  max-width: 48ch;
+}
+
+/* Legacy .rr-empty-copy — kept for any remaining references */
+.rr-empty-copy {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body); /* 14px */
+  color: var(--color-text-subtle);
+  line-height: var(--lh-prose);
+}
+
+.rr-empty-hint {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption); /* 12px */
+  color: var(--color-text-subtle);
+  font-style: italic;
+}
+
+/* ── Memory empty-state — notebook paper texture (vellum + ruled lines) ─────── */
+
+.rr-empty-state--memory {
+  /* Push the empty-state box away from the search/submit row above it */
+  margin-top: var(--space-group);
+
+  position: relative;
+  padding: var(--space-group) var(--space-group);
+  /* Vellum base tint */
+  background-color: color-mix(
+    in oklch,
+    var(--color-surface) 92%,
+    var(--color-text-subtle) 8%
+  );
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Notebook ruled lines at 24px increments — 8% opacity */
+.rr-empty-state--memory::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 23px,
+    color-mix(in oklch, var(--color-border) 30%, transparent) 23px,
+    color-mix(in oklch, var(--color-border) 30%, transparent) 24px
+  );
+  opacity: 0.08;
+}
+
+/* Content sits above the texture pseudo-element */
+.rr-empty-state--memory > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Documents empty-state — library-book margin guide rule ─────────────────── */
+
+.rr-empty-state--documents {
+  position: relative;
+  padding-left: var(--space-group-relaxed);
+  /* Thin copper-quiet margin guide rule on the left — evokes a library page.
+     NOT a card border; this is a guide rule INSIDE the content area. */
+  border-left: 1px solid var(--color-warning-quiet);
+}
+
+/* ── Prompts empty-state — dot-grain pinboard card, slight off-axis hang ────── */
+
+.rr-empty-state--prompts {
+  position: relative;
+  padding: var(--space-group);
+  border-radius: var(--radius-md);
+  /* Prevent the gradient container from overflowing its parent */
+  max-width: 100%;
+  /* Very slight off-axis rotation — evokes a card pinned to a board */
+  transform: rotate(-0.3deg);
+  /* Dot-grain texture at 4% opacity, spacing ~var(--space-glue-relaxed) = 8px */
+  background-image: repeating-radial-gradient(
+    circle at 0 0,
+    color-mix(in oklch, var(--color-text-subtle) 30%, transparent) 0px,
+    color-mix(in oklch, var(--color-text-subtle) 30%, transparent) 1px,
+    transparent 1px,
+    transparent 8px
+  );
+  background-color: var(--color-surface);
+  overflow: hidden;
+}
+
+/* Overlay the dot-grain at 4% via pseudo-element so we can control opacity
+   independently of the background-color. */
+.rr-empty-state--prompts::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: repeating-radial-gradient(
+    circle at 0 0,
+    color-mix(in oklch, var(--color-text-subtle) 60%, transparent) 0px,
+    color-mix(in oklch, var(--color-text-subtle) 60%, transparent) 1px,
+    transparent 1px,
+    transparent 8px
+  );
+  opacity: 0.04;
+  pointer-events: none;
+}
+
+.rr-empty-state--prompts > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Reduced motion: remove the off-axis hang — it's a visual disturbance */
+@media (prefers-reduced-motion: reduce) {
+  .rr-empty-state--prompts {
+    transform: none;
+  }
+}
+
+/* Inline code chip (used in Memory empty state) */
+.rr-code-chip {
+  padding: 1px 5px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption); /* 12px */
+  color: var(--color-text-muted);
+  font-style: normal;
+}
+
+/* Select — reused in admin reindex row */
+.rr-select {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: var(--space-glue-relaxed) var(--space-sibling);
+  min-height: 36px;
+  /* Prevent long model-id option text from stretching beyond the container */
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out-quart);
+}
+
+.rr-select:focus {
+  border-color: var(--color-accent);
+  outline: none;
+  box-shadow: 0 0 0 1.5px
+    color-mix(in oklch, var(--color-accent) 30%, transparent);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   DELIGHT LAYER — memory rows, prompt rows, analytics, upload zone
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Memory: copper dot as ::after on the date gutter.
+   Sits at the end of the date slot; on hover, brightens and slightly grows.
+   Uses absolute positioning so it doesn't disturb the flex row layout. */
+.rr-memory-date {
+  position: relative;
+}
+
+.rr-memory-date::after {
+  content: "●";
+  font-size: 6px;
+  color: var(--color-accent);
+  opacity: 0.3;
+  position: absolute;
+  right: -10px;
+  top: 50%;
+  transform: translateY(-50%) scale(1);
+  transition:
+    opacity var(--duration-fast) var(--ease-out-quart),
+    transform var(--duration-fast) var(--ease-out-quart);
+  pointer-events: none;
+  line-height: 1;
+}
+
+.rr-memory-row:hover .rr-memory-date::after {
+  opacity: 1;
+  transform: translateY(-50%) scale(1.5);
+}
+
+/* Memory: date marginalia color warms on row hover */
+.rr-memory-row:hover .rr-memory-date {
+  color: var(--color-text-muted);
+  transition: color var(--duration-fast) var(--ease-out-quart);
+}
+
+/* Memory empty-state: copper glow on the code-chip tip on hover */
+.rr-code-chip:hover {
+  box-shadow: inset 0 0 0 1px var(--color-accent-border);
+  color: var(--color-accent-text);
+  transition:
+    box-shadow var(--duration-fast) var(--ease-out-quart),
+    color var(--duration-fast) var(--ease-out-quart);
+}
+
+/* Documents: drag-over bloom — vellum opacity blooms to full */
+.rr-upload-zone--drag {
+  background-image: radial-gradient(
+    ellipse 80% 100% at 50% 100%,
+    color-mix(in oklch, var(--material-vellum) 400%, var(--color-accent-quiet))
+      0%,
+    color-mix(in oklch, var(--color-accent) 8%, transparent) 100%
+  );
+  transition: background-image var(--duration-base) var(--ease-out-quart);
+}
+
+/* Documents: file-type chip — subtle border-radius shift on hover */
+.rr-doc-type-chip {
+  transition:
+    border-radius var(--duration-fast) var(--ease-out-quart),
+    background var(--duration-fast) var(--ease-out-quart);
+}
+
+.rr-doc-row:hover .rr-doc-type-chip {
+  border-radius: var(--radius-md);
+  background: color-mix(
+    in oklch,
+    var(--material-foxing) 150%,
+    var(--color-accent-quiet)
+  );
+}
+
+/* Analytics: bar slide-up from baseline — transform-origin: bottom.
+   Overrides the original rr-bar-enter (opacity-only) with a scaleY slide.
+   Each bar gets its stagger delay via --bar-i set inline in the component. */
+.rr-activity-bar {
+  animation: rr-bar-slide var(--duration-base, 200ms)
+    var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+  animation-delay: calc(var(--bar-i, 0) * 30ms);
+}
+
+@keyframes rr-bar-slide {
+  from {
+    opacity: 0;
+    transform: scaleY(0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(var(--bar-scale, 1));
+  }
+}
+
+/* Analytics: daily table row hover — foxing tint deepens */
+.rr-daily-table-row {
+  transition: background var(--duration-fast) var(--ease-out-quart);
+}
+
+.rr-daily-table-row:hover {
+  background: color-mix(
+    in oklch,
+    var(--material-foxing) 120%,
+    var(--color-accent-quiet)
+  ) !important;
+}
+
+/* Analytics: hero number count-up — the .rr-hero-number--counting class
+   is toggled by the component while the RAF counter is running */
+.rr-hero-number--counting {
+  opacity: 0.85;
+}
+
+/* Prompts: title shifts to copper-text on row hover */
+.rr-prompt-row:hover .rr-prompt-title {
+  color: var(--color-accent-text);
+  transition: color var(--duration-fast) var(--ease-out-quart);
+}
+
+/* Prompts: "use →" affordance fades in on hover */
+.rr-prompt-use-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue);
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption); /* 12px */
+  font-style: italic;
+  color: var(--color-accent-text);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-quart);
+  pointer-events: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.rr-prompt-row:hover .rr-prompt-use-hint {
+  opacity: 1;
+}
+
+/* Prompts: new row shimmer on appear — used via .rr-prompt-row--new */
+.rr-prompt-row--new {
+  animation: rr-new-row-shimmer var(--duration-page, 900ms)
+    var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+
+@keyframes rr-new-row-shimmer {
+  0% {
+    background: color-mix(in oklch, var(--material-brass) 12%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   REDUCED MOTION
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .rr-page {
+    animation: none;
+  }
+
+  .rr-activity-bar {
+    animation: none;
+  }
+
+  .rr-doc-processing-dot {
+    animation: none;
+  }
+
+  .rr-memory-input,
+  .rr-memory-pin-btn,
+  .rr-memory-actions,
+  .rr-doc-actions,
+  .rr-icon-btn,
+  .rr-bar-fill {
+    transition: none;
+    transform: none;
+    filter: none;
+  }
+
+  .rr-memory-date::after,
+  .rr-memory-date,
+  .rr-code-chip,
+  .rr-doc-type-chip,
+  .rr-prompt-title,
+  .rr-prompt-use-hint,
+  .rr-daily-table-row {
+    transition: none;
+  }
+
+  .rr-prompt-row--new,
+  .rr-activity-bar {
+    animation: none;
+  }
+
+  /* Analytics hero count-up: skip animation, show final value immediately.
+     The useCountUp hook already handles this via prefersReduced.current. */
+  .rr-hero-number--counting {
+    opacity: 1;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   READING ROOMS MOBILE RESPONSIVE (≤768px)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  /* Page wrapper: reduce padding — GROUP (24px) each side is too wide at 390px.
+     SIBLING-RELAXED (16px) side padding gives adequate reading margin. */
+  .rr-page {
+    padding: var(--space-group) var(--space-sibling-relaxed);
+  }
+
+  /* Page title: now --fs-h1 (24px) on desktop; keep same on mobile.
+     Clamp removed — 24px is already the page-title rung floor. */
+
+  /* Page header: reduce chapter gap below. */
+  .rr-page-header {
+    margin-bottom: var(--space-group-relaxed);
+  }
+
+  /* Input fields: 16px prevents iOS auto-zoom. */
+  .rr-memory-input,
+  .rr-search-input {
+    font-size: 1rem;
+    min-height: 44px;
+  }
+
+  /* Action buttons: 44px minimum touch target. */
+  .rr-memory-pin-btn,
+  .rr-btn,
+  .rr-icon-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Tables: allow horizontal scroll within the page rather than breaking layout. */
+  .rr-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Analytics stat cards: stack to single column on narrow screens. */
+  .rr-stats-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* Stat value size: --fs-stat (28px) is fine on mobile. */
+
+  /* Memory entries: reduce padding. */
+  .rr-memory-entry {
+    padding: var(--space-sibling);
+  }
+
+  /* Document rows: ensure adequate tap height. */
+  .rr-doc-row {
+    min-height: 52px;
+  }
+
+  /* Prompt cards: full-width on mobile. */
+  .rr-prompt-card {
+    padding: var(--space-sibling);
+  }
+
+  /* Section eyebrow labels ("Your Library" / "The Desk" / "The Recipes")
+     are 11px (--fs-micro), below the a11y readable floor. Raised to
+     --fs-label (13px) on mobile. The uppercase + letter-spacing cap
+     treatment is retained; only the base size increases. */
+  .rr-eyebrow {
+    font-size: var(--fs-label); /* 13px — was --fs-micro 11px */
+  }
+
+  /* Memory page helper/instruction text in .rr-empty-hint is 12px.
+     Raised to --fs-body (14px) minimum on mobile for readability. */
+  .rr-empty-hint {
+    font-size: var(--fs-body); /* 14px — was --fs-caption 12px */
+  }
+
+  /* .rr-hint helper text is already 14px (--fs-body); keep it there but
+     ensure it doesn't drop below the floor on narrow viewports. */
+  .rr-hint {
+    font-size: var(--fs-body); /* 14px — confirm floor on mobile */
+  }
+}

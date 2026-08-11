@@ -1,0 +1,171 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * SharePublic — warm-future-library material layer stylesheet.
+ *
+ * "The public library exhibit" — unauthenticated read-only view.
+ * Reuses chat-message.css patterns for the message list.
+ * No sidebar, no composer, no settings nav. Pure exhibit.
+ *
+ * All spacing uses the semantic grammar.
+ * Forbidden: backdrop-filter blur, border-left/right ≥ 2px, gradient text,
+ * card grids, bouncy easing, layout-animated properties.
+ */
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   PAGE SHELL
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Full-page exhibit shell — no sidebar chrome */
+.sp-page {
+  min-height: 100dvh;
+  background: var(--color-bg);
+  color: var(--color-text);
+  display: flex;
+  flex-direction: column;
+  /* Page entrance: opacity fade */
+  animation: rr-page-enter var(--duration-page, 900ms)
+    var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   EXHIBIT HEADER — eyebrow metadata + display title
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Header block — eyebrow → title: GLUE (4px) */
+.sp-header {
+  padding: var(--space-group-relaxed)
+    clamp(var(--space-group), 4vw, var(--space-chapter));
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-glue);
+}
+
+/* Eyebrow — share metadata: "shared by · 2 days ago" */
+/* Hubot Sans 600, --fs-micro, uppercase, copper */
+.sp-eyebrow {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--fs-micro); /* 11px */
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--color-accent-text);
+  line-height: 1;
+}
+
+/* Exhibit title — Hubot Sans 700, --fs-display (40px) */
+.sp-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-display); /* 40px */
+  font-weight: 700;
+  letter-spacing: var(--ls-tight);
+  line-height: var(--lh-display);
+  color: var(--color-text);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MESSAGE LIST — reads-only exhibit
+   SharePublic header → first message: CHAPTER (48px)
+   Message → next message: GROUP (24px) — matches chat.css pattern
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Messages wrapper — max-width chat column, atmospheric canvas */
+.sp-messages {
+  flex: 1;
+  padding: var(--space-chapter)
+    clamp(var(--space-group), 4vw, var(--space-chapter));
+  /* SharePublic header → first message: CHAPTER (48px) — handled by padding-top */
+  max-width: var(--max-chat); /* 820px — matches chat layout */
+  width: 100%;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-group); /* message → message: GROUP (24px) */
+  background: transparent;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   STATUS STATES — loading, not found, error
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Centered status message */
+.sp-status {
+  padding: var(--space-chapter) var(--space-group);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sibling);
+}
+
+.sp-status-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body-lg);
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.sp-status-copy {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  color: var(--color-text-muted);
+  line-height: var(--lh-prose);
+}
+
+/* Empty conversation state */
+.sp-empty {
+  text-align: center;
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-size: var(--fs-body-lg);
+  color: var(--color-text-muted);
+  padding: var(--space-chapter) var(--space-group);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   FOOTER — "Powered by LM Chat" quiet attribution
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Footer — marginalia italic, bottom of exhibit */
+.sp-footer {
+  padding: var(--space-group)
+    clamp(var(--space-group), 4vw, var(--space-chapter));
+  text-align: center;
+  border-top: 1px solid var(--color-border);
+}
+
+/* "Powered by LM Chat" — Hanken Grotesk italic, --fs-marginalia */
+.sp-attribution {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-size: var(--fs-marginalia); /* 12px */
+  color: var(--color-text-subtle);
+  line-height: var(--lh-ui);
+}
+
+/* LM Chat link within attribution */
+.sp-attribution a {
+  color: var(--color-accent-text);
+  text-decoration: none;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.sp-attribution a:hover {
+  text-decoration: underline;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   REDUCED MOTION
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-page {
+    animation: none;
+  }
+}

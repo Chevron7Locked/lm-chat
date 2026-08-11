@@ -1,0 +1,84 @@
+# Headless containerized lm-chat for the L6 (dast-online) gate.
+#
+# Boots a deploy-lmchat:latest container backed by an ephemeral Postgres
+# (tmpfs data, fsync off — same shape as the L5 Postgres) so OWASP ZAP
+# and Nuclei can scan a real running backend without disturbing the
+# admin's dev environment.
+#
+# Port allocation:
+#   - lm-chat:    127.0.0.1:18001 → container :8000
+#   - Postgres:   127.0.0.1:5435  → container :5432
+# Both bound to loopback only — never expose outside the host.
+#
+# Boot / teardown is driven inline by the L6 Makefile recipe via
+# ``docker compose -f tests/security/compose-target.yml``.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: lm-chat-l6-postgres
+    restart: "no"
+    environment:
+      POSTGRES_USER: lm_chat_l6
+      POSTGRES_PASSWORD: l6
+      POSTGRES_DB: lm_chat_l6
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    ports:
+      - "127.0.0.1:5435:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=256MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lm_chat_l6 -d lm_chat_l6"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  lmchat:
+    image: deploy-lmchat:latest
+    container_name: lm-chat-l6-target
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      # Loopback-only: ZAP + Nuclei run with --network host and reach
+      # this via http://localhost:18001. Must not be
+      # exposed outside 127.0.0.1.
+      - "127.0.0.1:18001:8000"
+    environment:
+      # The deploy image's entrypoint runs alembic upgrade head before
+      # starting uvicorn; the L6 recipe relies on that to set up the
+      # schema against this Postgres.
+      DATABASE_URL: "postgresql+asyncpg://lm_chat_l6:l6@postgres:5432/lm_chat_l6"
+      # Pinned secret; deterministic across runs but only ever used
+      # inside this ephemeral container. Length satisfies the 32-byte
+      # minimum the app enforces at startup.
+      LM_CHAT_SECRET: "l6-dast-online-secret-000000000000000000"
+      # Point at the dev host's LM Studio; this is informational only
+      # — ZAP/Nuclei scans do not exercise LM Studio integration.
+      LM_STUDIO_BASE_URL: "http://host.docker.internal:1234"
+      LM_STUDIO_API_KEY: "sk-l6-placeholder-not-real"  # secrets-scan-allow
+      LM_CHAT_HOST: "0.0.0.0"
+      LM_CHAT_PORT: "8000"
+      LM_CHAT_LOG_LEVEL: "WARNING"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s

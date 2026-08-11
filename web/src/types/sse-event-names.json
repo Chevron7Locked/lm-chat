@@ -1,0 +1,31 @@
+{
+  "$comment": "SSOT for every SSE event name the BE can put on the main-chat wire (Item 5, chat-flow remediation 2026-06-12). Derived from CanonicalEvent.type Literal (src/lmchat/lmstudio/types.py) plus the synthetic 'warning'/'followups'/'memory.saved' frames (_format_warning_frame / _format_followups_frame / _format_memory_saved_frame in streaming_service.py; the synthetic 'error' frame shares the Literal's 'error' name). Shared by BE pytest (tests/contracts/test_sse_event_names_contract.py) and FE vitest (web/tests/unit/test_sse_event_names_contract.spec.ts) — both fail loudly if either side drifts.",
+  "event_names": [
+    "chat.start",
+    "message.start",
+    "message.delta",
+    "message.end",
+    "reasoning.start",
+    "reasoning.delta",
+    "reasoning.end",
+    "tool_call.start",
+    "tool_call.name",
+    "tool_call.arguments",
+    "tool_call.success",
+    "tool_call.failure",
+    "tool_call.repeat_warning",
+    "tool_call.failure_streak_warning",
+    "tool_call.name_warning",
+    "chat.end",
+    "error",
+    "warning",
+    "followups",
+    "memory.saved",
+    "model_load.start",
+    "model_load.progress",
+    "model_load.end",
+    "prompt_processing.start",
+    "prompt_processing.progress",
+    "prompt_processing.end"
+  ]
+}
