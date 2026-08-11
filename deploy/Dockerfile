@@ -55,7 +55,8 @@ RUN pnpm build
 # bcrypt) without any apt-get install layer.
 FROM cgr.dev/chainguard/python:latest-dev AS backend-deps
 
-# hadolint ignore=DL3002  # build-only stage — needs root to install deps; the final runtime stage ends USER nonroot.
+# build-only stage — needs root to install deps; the final runtime stage ends USER nonroot.
+# hadolint ignore=DL3002
 USER root
 WORKDIR /build
 
@@ -93,7 +94,8 @@ RUN uv export --frozen --no-dev --extra postgres --no-hashes \
 # - npx/uvx fetch the server package from the registry on FIRST launch, so the
 #   container needs outbound network + a writable cache (configured below).
 #   Air-gapped deploys can't fetch new servers — inherent to how these ship.
-# hadolint ignore=DL3007  # Chainguard publishes a single rolling, continuously-patched ':latest' tag (no semver); a digest pin would defeat the auto-patching.
+# Chainguard publishes a single rolling, continuously-patched ':latest' tag (no semver); a digest pin would defeat the auto-patching.
+# hadolint ignore=DL3007
 FROM cgr.dev/chainguard/wolfi-base:latest AS runtime
 
 # Runtimes: Python 3.14 (the app) + Node/npm (npx-based MCP servers) + uv
