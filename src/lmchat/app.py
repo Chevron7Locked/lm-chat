@@ -724,13 +724,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     "native MCP discovery is ON but found 0 servers — the native "
                     "composer will list none. "
                     + (
-                        "mcp.json exists here but has no mcpServers section."
+                        "The file exists at the path above but has no mcpServers "
+                        "section."
                         if _present
-                        else "mcp.json is NOT at this path — mount LM Studio's "
-                        "mcp.json here (container target "
-                        "/home/nonroot/.lmstudio/mcp.json), or set "
-                        "LM_CHAT_LMSTUDIO_MCP_CONFIG_PATH, or set "
-                        "LM_CHAT_LOCAL_MCP_DISCOVERY_ENABLED=false for split-host."
+                        else "No file at the path above — mount LM Studio's mcp.json "
+                        "there, or set LM_CHAT_LMSTUDIO_MCP_CONFIG_PATH to its "
+                        "location, or set LM_CHAT_LOCAL_MCP_DISCOVERY_ENABLED=false "
+                        "for split-host."
                     )
                 ),
             )
