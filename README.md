@@ -1,8 +1,26 @@
 # LM Chat
 
+> A self-hosted, multi-user chat app built around **LM Studio** — with projects, documents, adaptive memory, and sandboxed MCP tools. Bring a cloud model (OpenAI, OpenRouter, Groq, or any OpenAI-compatible endpoint) when you want one.
+
+[![Release](https://img.shields.io/github/v/release/Chevron7Locked/lm-chat?sort=semver)](https://github.com/Chevron7Locked/lm-chat/releases)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![Container: GHCR](https://img.shields.io/badge/ghcr.io-lm--chat-2496ED?logo=docker&logoColor=white)](https://github.com/Chevron7Locked/lm-chat/pkgs/container/lm-chat)
+
+![LM Chat — the home view](screenshots/v1/01-empty-state-dark.png)
+
 LM Chat is a self-hosted chat application, built around LM Studio and meant to run on your own hardware. It will talk to OpenAI, OpenRouter, Groq, or any OpenAI-compatible endpoint when you want a cloud model, but the local path is the one it is designed around.
 
-![LM Chat](screenshots/v1/01-empty-state-dark.png)
+## Contents
+
+- [Built around LM Studio](#built-around-lm-studio)
+- [What you get](#what-you-get)
+- [Accounts](#accounts)
+- [Install](#install)
+- [Providers and models](#providers-and-models)
+- [Security](#security)
+- [Documentation](#documentation)
+- [License](#license)
 
 ## Built around LM Studio
 
@@ -10,9 +28,8 @@ Many clients reach a local model through a generic OpenAI-compatible endpoint an
 
 LM Chat also handles the ways LM Studio behaves in practice: it re-probes which model is really loaded every few seconds, reconciles the gap between a model's catalog name and the instance id it was loaded under, and sends the API key once you have set one. These cases are easy to miss in a thinner integration, and when they are missed the stream stops without telling you why.
 
-## Accounts
-
-LM Chat is multi-user, in a deliberately small way. The first person to register becomes an admin, and after that the only way in is an invitation, which the admin issues from the admin panel. Each account keeps its own private chats, documents, and memory, while the provider and tool configuration is shared and owned by the admins. There are no permission tiers, groups, or single sign-on to stand up, because it is meant for a handful of trusted people sharing one instance rather than an organization with a directory to manage.
+![A chat with reasoning, a persona chip, and tool servers in the composer](screenshots/v1/02-chat-stargate-dark.png)
+*Reasoning arrives in a collapsible block, a persona chip marks the mode, tool servers line the composer, and code renders inline.*
 
 ## What you get
 
@@ -31,6 +48,20 @@ LM Chat is multi-user, in a deliberately small way. The first person to register
 - **Voice.** Browser speech-to-text (Chrome, Edge, and Safari) drops its transcript into the composer and leaves the sending to you.
 
 ![Slash command palette](screenshots/v1/04-slash-menu-dark.png)
+*Every slash command — sub-agent modes, `/compare`, `/compact`, `/prompt` — one keystroke away.*
+
+![A project: chats, documents, and settings in one place](screenshots/v1/03-project-stargate-dark.png)
+*A project bundles a system prompt, a document knowledge base, and its chats — new chats inherit all of it.*
+
+![Documents dropped in and chunked for retrieval](screenshots/v1/06-documents-dark.png)
+*Drop in `txt`, `md`, `html`, or `pdf`; each file is chunked and retrieved with hybrid keyword + vector search.*
+
+![The MCP Store catalog with one-click install](screenshots/v1/13-mcp-store-dark.png)
+*The MCP Store — one-click tool servers that run sandboxed inside the app's own container (for cloud and compatible endpoints; LM Studio hosts its own).*
+
+## Accounts
+
+LM Chat is multi-user, in a deliberately small way. The first person to register becomes an admin, and after that the only way in is an invitation, which the admin issues from the admin panel. Each account keeps its own private chats, documents, and memory, while the provider and tool configuration is shared and owned by the admins. There are no permission tiers, groups, or single sign-on to stand up, because it is meant for a handful of trusted people sharing one instance rather than an organization with a directory to manage.
 
 ## Install
 
@@ -44,6 +75,12 @@ docker compose -f deploy/docker-compose.yml up -d
 ```
 
 The image builds itself from source the first time it comes up, and it carries a Python, Node, and uv runtime inside so the `npx`- and `uvx`-based MCP servers can run in the container without anything on the host. Your data lives in a named volume at `/data/lmchat.db`, and the app listens on port 8000 unless you move it with `LM_CHAT_HOST_PORT`. Point it at your LM Studio instance, which is at `http://localhost:1234` by default, open the app, register the first account, and you are chatting.
+
+Prefer a prebuilt image? Pull the published container instead of building:
+
+```bash
+docker pull ghcr.io/chevron7locked/lm-chat:latest
+```
 
 If you would rather run it from source:
 

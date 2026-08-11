@@ -1,7 +1,7 @@
 {
   "name": "lmchat-web",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "LM Chat — React 19 + Vite 8 SPA for the LM Chat backend. Self-hosted browser-native client for LM Studio.",
   "license": "Apache-2.0",
   "author": "Kevin O'Neill <dev@chevron7.io>",

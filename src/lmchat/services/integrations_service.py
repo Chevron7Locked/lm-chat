@@ -341,6 +341,13 @@ class IntegrationsService:
         """
         return set(self._read_local_mcp_config_values())
 
+    @property
+    def local_mcp_config_path(self) -> Path | None:
+        """The mcp.json path this service's file-discovery tier reads, or
+        ``None`` when file discovery is disabled. Exposed for the startup
+        diagnostic so a mis-mounted/missing file surfaces in the logs."""
+        return self._local_mcp_config
+
     def _read_local_mcp_config_values(self) -> list[str]:
         """Return ``mcp/<name>`` IDs derived from LM Studio's mcp.json.
 

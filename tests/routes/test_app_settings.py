@@ -217,8 +217,8 @@ async def test_get_app_settings_returns_defaults_when_no_override(
     assert data["subsession_memory_distillation_enabled"]["value"] is False
     assert data["subsession_memory_distillation_enabled"]["is_override"] is False
 
-    # web_search_provider — default "searxng", no override
-    assert data["web_search_provider"]["value"] == "searxng"
+    # web_search_provider — default "ddg", no override
+    assert data["web_search_provider"]["value"] == "ddg"
     assert data["web_search_provider"]["is_override"] is False
 
     # searxng_url — default from config (https://searx.be when no env override), no override
@@ -537,20 +537,20 @@ async def test_web_search_resolver_resolves_override(
 
     engine = await _engine_for(tmp_path)
 
-    # Before override: should return config default ("searxng")
+    # Before override: should return config default ("ddg")
     result = await resolve_web_search_provider(engine)
-    assert result == "searxng"
+    assert result == "ddg"
 
-    # Set override to "ddg"
+    # Set override to "searxng"
     resp = test_client.patch(
         "/api/settings/app",
-        json={"web_search_provider": "ddg"},
+        json={"web_search_provider": "searxng"},
     )
     assert resp.status_code == 200
 
-    # After override: resolver should return "ddg"
+    # After override: resolver should return "searxng"
     result = await resolve_web_search_provider(engine)
-    assert result == "ddg"
+    assert result == "searxng"
 
     # Clear override
     test_client.patch(
@@ -558,7 +558,7 @@ async def test_web_search_resolver_resolves_override(
         json={"web_search_provider": None},
     )
     result = await resolve_web_search_provider(engine)
-    assert result == "searxng"
+    assert result == "ddg"
 
 
 async def test_searxng_url_resolver_resolves_override(
@@ -602,24 +602,24 @@ async def test_searxng_url_resolver_resolves_override(
 async def test_web_search_service_rebinds_provider_at_runtime(
     tmp_path: Path, test_client: TestClient
 ) -> None:
-    """PATCH web_search_provider='ddg' → singleton._provider updates live."""
+    """PATCH web_search_provider='searxng' → singleton._provider updates live."""
     await _setup_admin(tmp_path, test_client)
 
     defaults = get_settings()
 
-    # Initial state: should be config default
+    # Initial state: should be config default ("ddg")
     wss = test_client.app.state.web_search_service  # type: ignore[attr-defined]
-    assert wss._provider == "searxng"
+    assert wss._provider == "ddg"
 
-    # Set override to "ddg"
+    # Set override to "searxng"
     resp = test_client.patch(
         "/api/settings/app",
-        json={"web_search_provider": "ddg"},
+        json={"web_search_provider": "searxng"},
     )
     assert resp.status_code == 200
 
     # Singleton should reflect the new value immediately (no restart).
-    assert wss._provider == "ddg"
+    assert wss._provider == "searxng"
 
     # Clear override → should rebind back to config default.
     resp = test_client.patch(

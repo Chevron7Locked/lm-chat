@@ -169,8 +169,12 @@ EXPOSE 8000
 
 USER nonroot
 
-# ENTRYPOINT is python so HEALTHCHECK/CMD args are appended directly (do NOT
-# prefix with "python" — that becomes a positional script argument).
+# ENTRYPOINT is python so the main CMD's args are appended directly (do NOT
+# prefix CMD with "python" — that becomes a positional script argument).
+# HEALTHCHECK is the exception: Docker execs its CMD directly and does NOT
+# prepend ENTRYPOINT, so the healthcheck below must name "python" explicitly
+# (otherwise it tries to exec a binary literally named "-c" and every probe
+# fails with `exec: "-c": not found`, flapping the container to unhealthy).
 ENTRYPOINT ["python"]
 
 # Deliberately probes /healthz (always 200 — process-liveness only), NOT
@@ -185,7 +189,7 @@ ENTRYPOINT ["python"]
 # there (not here) and never point restart/rotation logic at it — see
 # deploy/k8s/deployment.yaml and deploy/k8s/README.md.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=5 \
-    CMD ["-c", \
+    CMD ["python", "-c", \
          "import urllib.request, sys; r = urllib.request.urlopen('http://localhost:8000/healthz', timeout=2); sys.exit(0 if r.status == 200 else 1)"]
 
 CMD ["-m", "uvicorn", "lmchat.app:app", "--host", "0.0.0.0", "--port", "8000"]

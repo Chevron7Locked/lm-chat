@@ -39,10 +39,17 @@ class Settings(BaseSettings):
 
     # Required — no default; must be set by admin or tests.
     lm_chat_secret: str = Field(default="")
-    lm_chat_single_session: bool = True
+    # False (default): a user may hold multiple concurrent sessions — phone and
+    # desktop stay logged in at once. True: each login revokes the user's other
+    # sessions (one live session per user; see auth_service) — that mode needs a
+    # single worker or a distributed session store to enforce correctly.
+    lm_chat_single_session: bool = False
     lm_chat_trust_forwarded_proto: bool = False
-    # Inject the follow-up-suggestions directive into the
-    # system prompt server-side so the model emits <!--followups:[...]-->.
+    # Follow-up suggestion chips. Generated OUT-OF-BAND after chat.end by a
+    # separate thinking-disabled, non-streaming call (_generate_followups_oob),
+    # NOT a directive in the main answer's system prompt — that was removed in
+    # the OOB decoupling because it poisoned reasoning. This flag only gates the
+    # post-answer chip call.
     lm_chat_followups_enabled: bool = True
     lm_chat_trusted_proxy: str = ""
 
@@ -164,12 +171,14 @@ class Settings(BaseSettings):
     # Override via LM_CHAT_AB_MAX_OUTPUT_TOKENS.
     lm_chat_ab_max_output_tokens: int = Field(default=32_768, ge=1)
 
-    # Web search provider. "searxng" (default) or "ddg".
-    # SearXNG is a meta-search aggregator; default is the public searx.be
-    # instance. Admins running their own SearXNG instance should override
-    # via LM_CHAT_SEARXNG_URL. DDG is an opt-in HTML-scrape fallback for
-    # contexts where a SearXNG instance is unavailable; it is less reliable.
-    lm_chat_web_search_provider: str = Field(default="searxng")
+    # Provider for the app's built-in web_search tool — the search path on the
+    # OpenAI-compatible / cloud endpoint only. (The native LM Studio endpoint
+    # does NOT use this; it gets search from LM Studio's own mcp.json servers,
+    # e.g. mcp/searxng.) "ddg" (default) or "searxng"/"brave".
+    # DDG is the in-house keyless scraper — no server to run — so it is the
+    # default. SearXNG is opt-in for admins who self-host one and set
+    # LM_CHAT_SEARXNG_URL (never point the default at the public searx.be).
+    lm_chat_web_search_provider: str = Field(default="ddg")
     # SearXNG instance URL. Override via LM_CHAT_SEARXNG_URL.
     # Default: https://searx.be (public instance; admins may self-host).
     lm_chat_searxng_url: str = Field(default="https://searx.be")
@@ -239,6 +248,14 @@ class Settings(BaseSettings):
     # McpHost is unconditionally constructed with `config_path=None` and
     # never reads mcp.json, regardless of this setting.
     lm_chat_local_mcp_discovery_enabled: bool = True
+
+    # Override the path the native-mode picker's file-discovery tier reads LM
+    # Studio's MCP config from. Empty (default) = ~/.lmstudio/mcp.json (which in
+    # a container is /home/nonroot/.lmstudio/mcp.json — mount the file there, or
+    # set this to wherever you mounted it). Useful for a non-standard mount
+    # target or a synced copy in a split-host deploy (LM Studio on another host).
+    # Only consulted when lm_chat_local_mcp_discovery_enabled is True.
+    lm_chat_lmstudio_mcp_config_path: str = Field(default="")
 
     # When False (default) integrations discovered from `~/.lmstudio/
     # mcp.json` (tier 2) and from the env list (tier 3) are surfaced

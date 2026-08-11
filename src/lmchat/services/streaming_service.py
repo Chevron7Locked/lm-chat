@@ -3172,19 +3172,20 @@ class StreamingService:
                         update={"previous_response_id": None}
                     )
 
-            # Followups directive: when LM_CHAT_FOLLOWUPS_ENABLED=1, appends
-            # a directive asking the model to emit <!--followups:[...]-->.
-            # Applied BEFORE RAG so the RAG context block ends up above the
-            # directive — directive is always last in the system prompt.
+            # System-prompt composition. NOTE: no followups directive is
+            # injected into the main answer prompt — it was removed in the
+            # OOB-followups decoupling because it poisoned reasoning (~30x).
+            # Chips are generated post-chat.end by a separate thinking-disabled
+            # call (_generate_followups_oob); lm_chat_followups_enabled only
+            # gates that. The block below composes the project/chat prompt,
+            # which must run regardless of that flag so the project prompt
+            # always reaches the LLM.
             from lmchat.config import get_settings as _get_settings
 
             _settings = _get_settings()
 
-            # Must run regardless of lm_chat_followups_enabled, hoisted above
-            # the followups gate so the project prompt always reaches the
-            # LLM. Composition order asserted by
-            # test_streaming_a1_composition.py:
-            #   [RAG_context][project_prompt][chat_prompt][followups_directive][history]
+            # Composition order asserted by test_streaming_a1_composition.py:
+            #   [RAG_context][project_prompt][chat_prompt][history]
             # RAG is prepended later; this builds
             # [project_prompt][chat_prompt] into `_existing_sys`.
             _existing_sys = payload.payload.system_prompt or ""

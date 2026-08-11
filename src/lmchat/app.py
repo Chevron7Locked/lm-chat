@@ -678,10 +678,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # LM Studio does not expose MCP server enumeration over HTTP; this service
     # provides the workaround (env var OR DB table; DB wins when populated).
     # local_mcp_config=None disables file discovery (split-host or test);
-    # otherwise the service uses its default Path.home()/".lmstudio"/"mcp.json".
+    # a non-empty lm_chat_lmstudio_mcp_config_path overrides the location;
+    # otherwise the service uses its default Path.home()/".lmstudio"/"mcp.json"
+    # (in a container: /home/nonroot/.lmstudio/mcp.json — the mount target).
     _integrations_kwargs: dict[str, Any] = {}
     if not settings.lm_chat_local_mcp_discovery_enabled:
         _integrations_kwargs["local_mcp_config"] = None
+    elif settings.lm_chat_lmstudio_mcp_config_path:
+        _integrations_kwargs["local_mcp_config"] = Path(
+            settings.lm_chat_lmstudio_mcp_config_path
+        )
     integrations_service = IntegrationsService(
         engine=engine,
         env_default=settings.lm_chat_available_integrations,
@@ -693,6 +699,43 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "lifespan.p12e_integrations_service_ready",
         env_default_count=len(settings.lm_chat_available_integrations),
     )
+    # Loud native-MCP discovery diagnostic. A mis-mounted or missing mcp.json
+    # used to fail SILENTLY (empty picker, nothing logged), which is why it
+    # recurred on every clean build. Now every boot states the resolved path
+    # and server count, and WARNS when discovery is ON but nothing was found —
+    # so a wrong mount target can't hide until someone hunts for missing tools.
+    if settings.lm_chat_local_mcp_discovery_enabled:
+        _mcp_path = integrations_service.local_mcp_config_path
+        _servers = sorted(integrations_service.live_serveable_ids())
+        if _servers:
+            log.info(
+                "lifespan.mcp_discovery_ok",
+                path=str(_mcp_path),
+                found=len(_servers),
+                servers=_servers,
+            )
+        else:
+            _present = bool(_mcp_path and _mcp_path.is_file())
+            log.warning(
+                "lifespan.mcp_discovery_empty",
+                path=str(_mcp_path),
+                file_present=_present,
+                hint=(
+                    "native MCP discovery is ON but found 0 servers — the native "
+                    "composer will list none. "
+                    + (
+                        "mcp.json exists here but has no mcpServers section."
+                        if _present
+                        else "mcp.json is NOT at this path — mount LM Studio's "
+                        "mcp.json here (container target "
+                        "/home/nonroot/.lmstudio/mcp.json), or set "
+                        "LM_CHAT_LMSTUDIO_MCP_CONFIG_PATH, or set "
+                        "LM_CHAT_LOCAL_MCP_DISCOVERY_ENABLED=false for split-host."
+                    )
+                ),
+            )
+    else:
+        log.info("lifespan.mcp_discovery_disabled")
 
     # Native MCP host — Store-only execution. McpHost NEVER reads
     # ~/.lmstudio/mcp.json; its configured servers come SOLELY from
