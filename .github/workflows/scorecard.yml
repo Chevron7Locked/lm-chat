@@ -13,20 +13,24 @@ on:
     branches:
       - main
 
-permissions:
-  # Required for reading the repository contents.
-  contents: read
-  # Required for SARIF upload to GitHub Security tab.
-  security-events: write
-  # Required by scorecard to read GitHub Actions results.
-  actions: read
-  # Required to read the repo's identity.
-  id-token: write
+# Top-level permissions must be minimal (read-only). scorecard-action's
+# publish step REJECTS a global `security-events: write` with an HTTP 400
+# ("global perm is set to write") — the write perms must be scoped to the job.
+# See https://github.com/ossf/scorecard-action#workflow-restrictions
+permissions: read-all
 
 jobs:
   scorecard:
     name: OpenSSF Scorecard
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required by scorecard to read GitHub Actions results.
+      actions: read
+      # Required for SARIF upload to the GitHub Security tab.
+      security-events: write
+      # Required to publish results to the OpenSSF Scorecard API.
+      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
