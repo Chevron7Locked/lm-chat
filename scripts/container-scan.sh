@@ -156,10 +156,16 @@ section "Step 3: Trivy image scan (HIGH/CRITICAL vuln + secret + misconfig)"
 if check_tool "trivy" "trivy" \
     "https://aquasecurity.github.io/trivy/latest/getting-started/installation/"; then
   echo -e "   ${BOLD}3a — HIGH/CRITICAL CVE gate (exit-code 1 on findings):${RESET}"
+  # --skip-dirs: pip bundles its OWN vendored copies of msgpack, pkg_resources
+  # (setuptools), etc. under pip/_vendor. trivy flags those (e.g. setuptools
+  # 70.3.0 / msgpack 1.1.2) even though the app's ACTUAL packages are patched,
+  # and pip is never invoked at runtime. pip's private vendor tree is not the
+  # app's dependency surface — skip it.
   trivy image \
     --exit-code 1 \
     --severity HIGH,CRITICAL \
     --scanners vuln,secret,config \
+    --skip-dirs '**/pip/_vendor/**' \
     --format json \
     --output "${GATES_DIR}/L4-trivy.json" \
     "${IMAGE_TAG}" 2>/dev/null
@@ -176,6 +182,7 @@ if check_tool "trivy" "trivy" \
     --exit-code 0 \
     --severity UNKNOWN,LOW,MEDIUM \
     --scanners vuln,secret,config \
+    --skip-dirs '**/pip/_vendor/**' \
     --format json \
     --output "${GATES_DIR}/L4-trivy-info.json" \
     "${IMAGE_TAG}" 2>/dev/null || true
