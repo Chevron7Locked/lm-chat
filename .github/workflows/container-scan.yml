@@ -83,14 +83,15 @@ jobs:
           chmod +x /usr/local/bin/hadolint
           hadolint --version
 
-      # ── Install Trivy 0.58.x ──────────────────────────────────────────
-      # Official action instead of `contrib/install.sh` from trivy@main — that
-      # script became unreliable and started failing at the download step
-      # (exit 1 right after resolving v0.58.0) on every run. Pinned to a SHA.
+      # ── Install Trivy ─────────────────────────────────────────────────
+      # Official action, SHA-pinned. Trivy v0.58.0's install is BROKEN — its
+      # release asset/checksum fails install.sh (exit 1 right after the version
+      # resolves), whether called directly or via this action, so we track a
+      # current trivy release instead of the dead pin.
       - name: Install Trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
-          version: v0.58.0
+          version: v0.73.0
           cache: true
 
       # ── Install Dockle v0.4.15 ────────────────────────────────────────
