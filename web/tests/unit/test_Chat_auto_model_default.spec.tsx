@@ -1,37 +1,28 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /**
- * Chat — stale pinned-model auto-switch (2026-07-29 live bug).
+ * Chat — the model picker defaults to "Auto".
  *
- * Root cause: a chat can be pinned to a model whose catalog key no longer
- * exists in LM Studio (operator renamed/replaced the model). The
- * `<select>` can't render a value that isn't one of its options, so it
- * visually falls back to the first loaded model while React state — and
- * therefore the send payload — still holds the dead key. The backend then
- * hard-errors on a model the user never picked ("sees 9b, but errors on
- * 122b").
+ * Pins the "Auto" model-picker behaviour:
  *
- * Fix: Chat.tsx detects (via useChatModelOptions) when the chat's
- * persisted `model_id` is absent from the catalog and auto-switches to a
- * valid model (`updateChat.mutate`) plus surfaces a non-blocking warning
- * toast. This pins that contract:
+ *  1. A chat with NO explicit per-chat override (no memory-tier dropdown pick
+ *     AND no persisted ``chats.model_id``) shows "Auto" in the header picker —
+ *     even when the user HAS a saved default model. "Auto" stands in for that
+ *     default at display time; the send path still resolves it to the default.
+ *  2. Picking a specific model sets the per-chat override (PATCH model_id +
+ *     provider) and the picker then shows that model's composite id.
+ *  3. A chat with an explicit persisted model shows that model, not "Auto".
+ *  4. Selecting "Auto" resets the override — it PATCHes ``clear=model_id``
+ *     (the flat ``model_id=""`` param is ignored server-side) and the picker
+ *     returns to "Auto".
  *
- *  1. Stale pin (not in options) → auto-switch fires: exactly one
- *     `updateChat.mutate({ model_id, provider })` PATCH to the fallback
- *     model, and exactly one warning toast naming the stale model. The
- *     fallback must be a LOADED model — a saved default that is merely
- *     catalog-present but idled-out (loaded: false) is not an acceptable
- *     target, since the backend's explicit-unloaded gate would still
- *     hard-error on it (swapping one unloaded pin for another).
- *  2. Pin already valid (in options) → no PATCH, no toast.
- *  3. Empty/implicit model_id (no explicit pin) → no PATCH, no toast — the
- *     backend already resolves an implicit default; persisting a
- *     masquerade here would reintroduce the documented implicit-default
- *     persistence bug.
- *
- * Mock prelude mirrors test_Chat_selectedModel_chatswitch.spec.tsx.
+ * Mock prelude mirrors test_Chat_selectedModel_chatswitch.spec.tsx; additions:
+ * a saved default model via useLmStudioConfig, a fixture whose model_id the
+ * useUpdateChat spy actually mutates (so the reset's display update is
+ * exercised), and a ModelSelectControl stub that surfaces value + pick/reset
+ * buttons.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -41,7 +32,9 @@ import { AUTO_MODEL_VALUE } from "@/components/chat/shared";
 // jsdom doesn't implement scrollIntoView; Chat's auto-scroll effect crashes
 // without this stub.
 if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
-  Element.prototype.scrollIntoView = function (): void { /* no-op */ };
+  Element.prototype.scrollIntoView = function (): void {
+    /* no-op */
+  };
 }
 
 // ─── Mocks for heavy hooks / network surfaces ────────────────────────────────
@@ -49,23 +42,14 @@ if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
 vi.mock("@/hooks/useViewport", () => ({
   useViewport: () => ({ isMobile: false }),
 }));
-
 vi.mock("@/hooks/useKeyboardInset", () => ({
   useKeyboardInset: () => undefined,
 }));
-
 vi.mock("@/hooks/usePlatform", () => ({
   usePlatform: () => ({ modLabel: "Ctrl", isMac: false, isWindows: false, isLinux: true }),
 }));
-
-vi.mock("@/hooks/useDocumentTitle", () => ({
-  useDocumentTitle: () => undefined,
-}));
-
-vi.mock("@/hooks/useFocusTrap", () => ({
-  useFocusTrap: () => undefined,
-}));
-
+vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: () => undefined }));
+vi.mock("@/hooks/useFocusTrap", () => ({ useFocusTrap: () => undefined }));
 vi.mock("@/hooks/usePresence", () => ({
   usePresence: () => ({
     composerCbs: {},
@@ -74,11 +58,7 @@ vi.mock("@/hooks/usePresence", () => ({
     onlineUsers: [],
   }),
 }));
-
-vi.mock("@/hooks/useMouseParallax", () => ({
-  useMouseParallax: () => undefined,
-}));
-
+vi.mock("@/hooks/useMouseParallax", () => ({ useMouseParallax: () => undefined }));
 vi.mock("@/hooks/useKeyboardShortcuts", () => ({
   useKeyboardShortcuts: () => undefined,
 }));
@@ -104,7 +84,11 @@ vi.mock("@/hooks/useSSE", () => ({
 
 vi.mock("@/hooks/useABStream", () => ({
   useABStream: () => ({
-    state: { status: "idle", paneA: { status: "idle", contentDeltas: [] }, paneB: { status: "idle", contentDeltas: [] } },
+    state: {
+      status: "idle",
+      paneA: { status: "idle", contentDeltas: [] },
+      paneB: { status: "idle", contentDeltas: [] },
+    },
     start: vi.fn(),
     stop: vi.fn(),
   }),
@@ -131,96 +115,76 @@ vi.mock("@/hooks/useModelList", () => ({
   }),
 }));
 
-// Saved default model — present in the catalog but IDLED OUT (loaded:
-// false). This is the crux of the loaded-fallback refinement: the saved
-// default alone is not a safe fallback target if it isn't actually loaded
-// (the backend's explicit-unloaded gate would still hard-error), so the
-// auto-switch must prefer a genuinely LOADED option over the merely
-// catalog-present default.
+// The user HAS a saved default — the whole point of the first test is that the
+// picker still shows "Auto" rather than surfacing this model's name. Mutable so
+// a test can drop the default and assert the no-default prompt path.
+let mockDefaultModel: string | undefined = "default-model";
 vi.mock("@/hooks/useLmStudioConfig", () => ({
-  useLmStudioConfig: () => ({ data: { default_model: "idled-default-7b" } }),
-}));
-
-// The catalog: "pinqwen-9b" is loaded; "idled-default-7b" (the saved
-// default) is present but NOT loaded. "oym-qimi-122b-a10b-k2.6-i1" (a
-// chat's stored pin in the live bug report) is NOT in this list at all —
-// the operator renamed/replaced it in LM Studio.
-const mockChatModelCapabilities = {
-  vision: false,
-  trained_for_tool_use: true,
-  reasoning: null,
-  embedding: false,
-};
-const mockChatModelOptions = [
-  {
-    id: "pinqwen-9b",
-    label: "pinqwen 9b",
-    loaded: true,
-    provider: "lmstudio",
-    capabilities: mockChatModelCapabilities,
-  },
-  {
-    id: "idled-default-7b",
-    label: "idled default 7b (unloaded)",
-    loaded: false,
-    provider: "lmstudio",
-    capabilities: mockChatModelCapabilities,
-  },
-];
-vi.mock("@/hooks/useChatModelOptions", () => ({
-  useChatModelOptions: () => ({
-    options: mockChatModelOptions,
-    groups: [
-      { provider: "lmstudio", label: "LM Studio", options: mockChatModelOptions },
-    ],
-    isLoading: false,
-    isError: false,
+  useLmStudioConfig: () => ({
+    data:
+      mockDefaultModel !== undefined
+        ? { default_model: mockDefaultModel }
+        : {},
   }),
 }));
 
-// Three chats: a stale pin, a valid pin, and an implicit (empty) pin.
-const mockChats = [
-  {
-    id: 1,
-    title: "Stale pin chat",
-    model_id: "oym-qimi-122b-a10b-k2.6-i1",
-    pinned: false,
-    incognito: false,
-    updated_at: "2026-07-29T00:00:00Z",
-    settings: {},
-  },
-  {
-    id: 2,
-    title: "Valid pin chat",
-    model_id: "pinqwen-9b",
-    pinned: false,
-    incognito: false,
-    updated_at: "2026-07-29T00:00:00Z",
-    settings: {},
-  },
-  {
-    id: 3,
-    title: "Implicit default chat",
-    model_id: null,
-    pinned: false,
-    incognito: false,
-    updated_at: "2026-07-29T00:00:00Z",
-    settings: {},
-  },
-];
+// Mutable fixture — the useUpdateChat spy mutates model_id in place so the
+// reset-to-Auto display update is realistically exercised.
+interface ChatFixture {
+  id: number;
+  title: string;
+  model_id: string | null;
+  pinned: boolean;
+  incognito: boolean;
+  updated_at: string;
+  settings: Record<string, unknown>;
+}
 
-// Records every updateChat.mutate call along with the chat id the
-// useUpdateChat hook instance was created for.
+function makeChats(): ChatFixture[] {
+  return [
+    {
+      id: 1,
+      title: "Auto chat",
+      model_id: null, // no explicit override → "Auto"
+      pinned: false,
+      incognito: false,
+      updated_at: "2026-08-11T00:00:00Z",
+      settings: {},
+    },
+    {
+      id: 2,
+      title: "Pinned chat",
+      model_id: "model-x", // explicit override
+      pinned: false,
+      incognito: false,
+      updated_at: "2026-08-11T00:00:00Z",
+      settings: {},
+    },
+  ];
+}
+
+let mockChats: ChatFixture[] = makeChats();
+
 const updateChatCalls = vi.hoisted(
-  () => [] as { chatId: number; payload: unknown }[],
+  () => [] as { chatId: number; payload: Record<string, unknown> }[],
 );
 
 vi.mock("@/hooks/useChats", () => ({
   useChatsDirect: () => ({ data: mockChats, isLoading: false, isError: false }),
   useMessages: () => ({ data: { messages: [] }, refetch: vi.fn() }),
   useUpdateChat: (chatId: number) => ({
-    mutate: (payload: unknown) => {
+    mutate: (payload: Record<string, unknown>) => {
       updateChatCalls.push({ chatId, payload });
+      const row = mockChats.find((c) => c.id === chatId);
+      if (row === undefined) return;
+      // Mirror the backend: a non-empty model_id SETS the pin; clear=model_id
+      // NULLs it. (The flat model_id="" param is ignored server-side.)
+      if (typeof payload.model_id === "string" && payload.model_id !== "") {
+        row.model_id = payload.model_id;
+      }
+      if (typeof payload.clear === "string" && payload.clear.includes("model_id")) {
+        row.model_id = null;
+      }
     },
     mutateAsync: vi.fn(),
     isPending: false,
@@ -249,57 +213,67 @@ vi.mock("@/hooks/useMemory", () => ({
   usePinInsight: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
 }));
 
-// ModelSelectControl stub: surfaces the resolved composite modelId so tests
-// can assert what's actually shown after the auto-switch.
+// ModelSelectControl stub: surfaces the resolved value and two buttons —
+// "pick a model" fires onChange("lmstudio::model-y"); "reset to auto" fires
+// onChange(AUTO_MODEL_VALUE).
 vi.mock("@/components/ModelSelectControl", () => ({
-  ModelSelectControl: ({ value }: { value: string; onChange: (id: string) => void }) =>
+  ModelSelectControl: ({
+    value,
+    onChange,
+  }: {
+    value: string;
+    onChange: (id: string) => void;
+  }) =>
     createElement(
       "div",
       { "data-testid": "mock-model-select" },
       createElement("span", { "data-testid": "model-select-value" }, value),
+      createElement(
+        "button",
+        {
+          type: "button",
+          "data-testid": "model-select-pick-y",
+          onClick: () => {
+            onChange("lmstudio::model-y");
+          },
+        },
+        "pick model-y",
+      ),
+      createElement(
+        "button",
+        {
+          type: "button",
+          "data-testid": "model-select-pick-auto",
+          onClick: () => {
+            onChange("__auto__");
+          },
+        },
+        "reset to auto",
+      ),
     ),
   ModelCapabilityIcons: () => null,
 }));
 
 // Stores ----------------------------------------------------------------------
-
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: () => ({
     user: { id: 1, username: "test", is_admin: false },
     isInitializing: false,
   }),
 }));
-
-// Records every toast push() call so tests can assert the warning notice.
-const toastPushCalls = vi.hoisted(
-  () => [] as { variant: string; message: string }[],
-);
-vi.mock("@/stores/toastStore", () => ({
-  useToast: () => ({
-    push: (opts: { variant: string; message: string }) => {
-      toastPushCalls.push(opts);
-      return "toast-id";
-    },
-  }),
-}));
-
+vi.mock("@/stores/toastStore", () => ({ useToast: () => ({ push: vi.fn() }) }));
 vi.mock("@/stores/titleGenerationStore", () => ({
   useTitleGenerationStore: (selector: (s: { begin: () => void; end: () => void }) => unknown) =>
     selector({ begin: vi.fn(), end: vi.fn() }),
 }));
-
 vi.mock("@/stores/chatSettingsStore", () => ({
-  useChatSettingsStore: () => ({
-    hydrateFromChats: vi.fn(),
-    chatOverrides: {},
-  }),
+  useChatSettingsStore: () => ({ hydrateFromChats: vi.fn(), chatOverrides: {} }),
 }));
 
 // Heavy components stubbed (mirrors test_Chat.spec.tsx).
 vi.mock("@/components/Sidebar", () => ({
   Sidebar: () => createElement("div", { "data-testid": "mock-sidebar" }, "sidebar"),
 }));
-
 vi.mock("@/components/Composer", () => ({
   Composer: () =>
     createElement(
@@ -308,67 +282,52 @@ vi.mock("@/components/Composer", () => ({
       createElement("textarea", { "aria-label": "Message" }),
     ),
 }));
-
 vi.mock("@/components/ChatMessage", () => ({
   ChatMessage: () => createElement("div", { "data-testid": "mock-chatmessage" }),
 }));
-
 vi.mock("@/components/ABCompareView", () => ({
   ABCompareView: () => createElement("div", { "data-testid": "mock-abcompare" }),
 }));
-
 vi.mock("@/components/ThinkingIndicator", () => ({
   ThinkingIndicator: () => createElement("div", { "data-testid": "mock-thinking" }),
 }));
-
 vi.mock("@/components/LmStudioStatusBadge", () => ({
   LmStudioStatusBadge: () => createElement("div", { "data-testid": "mock-lm-badge" }),
 }));
-
 vi.mock("@/components/PinNavStrip", () => ({
   PinNavStrip: () => createElement("div", { "data-testid": "mock-pinnav" }),
 }));
-
 vi.mock("@/components/PinnedMessagesPanel", () => ({
   PinnedMessagesPanel: () => createElement("div", { "data-testid": "mock-pinned-panel" }),
 }));
-
 vi.mock("@/components/BrandMark", () => ({
   BRAND_NAME: "LMChat",
   BrandMark: () => createElement("div", { "data-testid": "mock-brandmark" }),
 }));
-
 vi.mock("@/components/OverflowMenu", () => ({
   OverflowMenu: () => createElement("div", { "data-testid": "mock-overflow" }),
 }));
-
 vi.mock("@/components/ReasoningToggle", () => ({
   ReasoningToggle: () => createElement("div", { "data-testid": "mock-reasoning-toggle" }),
 }));
-
 vi.mock("@/components/InterruptedRow", () => ({
   InterruptedRow: () => createElement("div", { "data-testid": "mock-interrupted" }),
   clearOrphanedSSEKeys: vi.fn(),
   loadOrphanedResponseId: () => null,
 }));
-
 vi.mock("@/components/SlashPalette", () => ({
   SlashPalette: () => createElement("div", { "data-testid": "mock-slash-palette" }),
 }));
-
 vi.mock("@/components/SlashMenu", () => ({
   SlashMenu: () => createElement("div", { "data-testid": "mock-slash-menu" }),
   BUILTIN_COMMANDS: [],
 }));
-
 vi.mock("@/components/KeyboardHelp", () => ({
   KeyboardHelp: () => createElement("div", { "data-testid": "mock-keyboardhelp" }),
 }));
-
 vi.mock("@/components/ChatHeaderMenu", () => ({
   ChatHeaderMenu: () => createElement("div", { "data-testid": "mock-chatheadermenu" }),
 }));
-
 vi.mock("@/components/ui/Drawer", () => ({
   Drawer: ({ children }: { children: React.ReactNode }) =>
     createElement("div", { "data-testid": "mock-drawer" }, children),
@@ -406,53 +365,69 @@ function shownModel(): string {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("Chat — stale pinned-model auto-switch", () => {
+describe("Chat — model picker defaults to Auto", () => {
   beforeEach(() => {
     __resetChatScopedMemoryForTests();
     updateChatCalls.length = 0;
-    toastPushCalls.length = 0;
+    mockChats = makeChats();
+    mockDefaultModel = "default-model";
     vi.clearAllMocks();
   });
 
-  it("auto-switches to the LOADED model, not the merely-catalog-present (but idled) saved default", () => {
+  it("shows Auto when the chat has no override — even with a saved default model", () => {
     renderChat("/chats/1");
-
-    // savedDefaultModel is "idled-default-7b" — present in the catalog but
-    // loaded:false. The fix must skip it and land on "pinqwen-9b", the
-    // first genuinely loaded option. (Pre-fix behavior would have picked
-    // "idled-default-7b" here, since it only checked catalog presence —
-    // that's exactly the bug this refinement closes.)
-    expect(shownModel()).toBe("lmstudio::pinqwen-9b");
-
-    expect(updateChatCalls).toEqual([
-      { chatId: 1, payload: { model_id: "pinqwen-9b", provider: "lmstudio" } },
-    ]);
-
-    expect(toastPushCalls).toHaveLength(1);
-    expect(toastPushCalls[0]?.variant).toBe("warning");
-    expect(toastPushCalls[0]?.message).toContain("oym-qimi-122b-a10b-k2.6-i1");
-    expect(toastPushCalls[0]?.message).toContain("pinqwen-9b");
-    expect(toastPushCalls[0]?.message).not.toContain("idled-default-7b");
-  });
-
-  it("does NOT fire when the persisted model is already a valid catalog entry", () => {
-    renderChat("/chats/2");
-
-    expect(shownModel()).toBe("lmstudio::pinqwen-9b");
-    expect(updateChatCalls).toHaveLength(0);
-    expect(toastPushCalls).toHaveLength(0);
-  });
-
-  it("does NOT fire for an empty/implicit model_id (backend-resolved default)", () => {
-    renderChat("/chats/3");
-
-    // No explicit per-chat override → the picker shows "Auto" (it resolves to
-    // the saved default at send time; the DISPLAY no longer surfaces the
-    // default model's name). Critically, the auto-switch effect stays quiet:
-    // the implicit-default path must be left untouched regardless of the
-    // default's loaded state — no PATCH, no toast.
     expect(shownModel()).toBe(AUTO_MODEL_VALUE);
+    // Rendering an Auto chat never PATCHes anything.
     expect(updateChatCalls).toHaveLength(0);
-    expect(toastPushCalls).toHaveLength(0);
+  });
+
+  it("picking a model sets the per-chat override and shows it (composite id)", () => {
+    renderChat("/chats/1");
+    expect(shownModel()).toBe(AUTO_MODEL_VALUE);
+
+    fireEvent.click(screen.getByTestId("model-select-pick-y"));
+    expect(shownModel()).toBe("lmstudio::model-y");
+    expect(updateChatCalls).toEqual([
+      { chatId: 1, payload: { model_id: "model-y", provider: "lmstudio" } },
+    ]);
+  });
+
+  it("a chat with an explicit persisted model shows that model, not Auto", () => {
+    renderChat("/chats/2");
+    expect(shownModel()).toBe("lmstudio::model-x");
+    expect(updateChatCalls).toHaveLength(0);
+  });
+
+  it("selecting Auto resets the override via clear=model_id and returns to Auto", () => {
+    renderChat("/chats/2");
+    expect(shownModel()).toBe("lmstudio::model-x");
+
+    fireEvent.click(screen.getByTestId("model-select-pick-auto"));
+    // Persisted override cleared through the explicit-NULL path.
+    expect(updateChatCalls).toEqual([
+      { chatId: 2, payload: { clear: "model_id" } },
+    ]);
+    // Picker returns to Auto (the fixture's model_id is now NULL).
+    expect(shownModel()).toBe(AUTO_MODEL_VALUE);
+  });
+
+  it("with NO default configured, a no-override chat prompts (value '') rather than Auto", () => {
+    // "Auto" only makes sense when there's a default to resolve to. With no
+    // default AND no override, the picker value falls to "" so the header
+    // prompts "Select a model…" (the composer would otherwise block the send).
+    mockDefaultModel = undefined;
+    renderChat("/chats/1");
+    expect(shownModel()).toBe("");
+    expect(updateChatCalls).toHaveLength(0);
+  });
+
+  it("selecting Auto on an already-Auto chat is a no-op (no PATCH)", () => {
+    renderChat("/chats/1");
+    expect(shownModel()).toBe(AUTO_MODEL_VALUE);
+
+    fireEvent.click(screen.getByTestId("model-select-pick-auto"));
+    // Nothing persisted to clear → no network call.
+    expect(updateChatCalls).toHaveLength(0);
+    expect(shownModel()).toBe(AUTO_MODEL_VALUE);
   });
 });

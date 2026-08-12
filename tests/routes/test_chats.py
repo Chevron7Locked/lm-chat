@@ -563,6 +563,45 @@ def test_patch_chat_model_id_persists(test_client: TestClient) -> None:
     assert detail_resp.json()["model_id"] == model
 
 
+def test_patch_chat_clear_model_id_resets_to_auto(test_client: TestClient) -> None:
+    """PATCH ``clear=model_id`` → NULLs the per-chat override ("Auto" reset).
+
+    The picker shows "Auto" whenever a chat has no explicit override, and the
+    reset affordance selects "Auto". Because a flat ``model_id=""`` param is
+    intentionally ignored server-side (it only SETS a non-empty pin), the reset
+    must travel through the explicit-NULL ``clear=`` path.
+    """
+    _register_and_login(test_client)
+    chat = _create_chat(test_client)
+
+    # Pin a model first.
+    model = "qwen3.6-35b-test-model"
+    set_resp = test_client.patch(
+        f"/api/chats/{chat['id']}", data={"model_id": model}
+    )
+    assert set_resp.status_code == 200, set_resp.text
+    assert set_resp.json()["model_id"] == model
+
+    # A flat empty model_id must NOT clear the pin (guarded server-side).
+    noop_resp = test_client.patch(
+        f"/api/chats/{chat['id']}", data={"model_id": ""}
+    )
+    assert noop_resp.status_code == 200, noop_resp.text
+    assert noop_resp.json()["model_id"] == model
+
+    # clear=model_id resets it back to NULL.
+    clear_resp = test_client.patch(
+        f"/api/chats/{chat['id']}", data={"clear": "model_id"}
+    )
+    assert clear_resp.status_code == 200, clear_resp.text
+    assert clear_resp.json()["model_id"] is None
+
+    # Persisted: list + detail both reflect the cleared state.
+    detail_resp = test_client.get(f"/api/chats/{chat['id']}")
+    assert detail_resp.status_code == 200
+    assert detail_resp.json()["model_id"] is None
+
+
 # ---------------------------------------------------------------------------
 # DELETE /api/chats/{chat_id}
 # ---------------------------------------------------------------------------

@@ -605,9 +605,10 @@ async def patch_chat(
     project_id: int | None = Form(default=None),
     # Comma-separated list of fields to explicitly NULL. Required because
     # FastAPI's Form(default=None) coerces empty form fields to None and
-    # we can't distinguish "omit" from "clear" otherwise. Only field
-    # currently clearable via this path is ``project_id`` (detach a chat
-    # from its current project).
+    # we can't distinguish "omit" from "clear" otherwise. Clearable fields:
+    # ``project_id`` (detach a chat from its current project) and ``model_id``
+    # (reset the per-chat model override back to "Auto" — the flat model_id
+    # param below only SETS a non-empty pin, so clearing must come through here).
     clear: str | None = Form(default=None),
     # Chat provider selection.  Sets ``chat.settings.provider`` so the
     # streaming layer routes to the chosen provider.  Must match a registered
@@ -810,7 +811,13 @@ async def patch_chat(
         # / documents routes' parsers (shared parser — one parser, three routes).
         from lmchat.routes._form_utils import parse_clear  # noqa: PLC0415
 
-        clear_set = parse_clear(clear, allowed=frozenset({"project_id"}))
+        clear_set = parse_clear(clear, allowed=frozenset({"project_id", "model_id"}))
+        if "model_id" in clear_set:
+            # Reset the per-chat model override back to "Auto" (NULL model_id).
+            # The flat ``model_id`` form param only SETS a non-empty pin
+            # (guarded above), so an explicit reset must arrive via clear=.
+            await chat_service.clear_model_id(chat_id, user_id=user.id)
+            chat = await chat_service.get(chat_id, user_id=user.id)
         if "project_id" in clear_set:
             # Pass ``projects_service`` so the service can capture the
             # detach snapshot (project name + system_prompt_hash) in

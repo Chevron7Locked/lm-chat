@@ -10,6 +10,7 @@ import { OverflowMenu } from "@/components/OverflowMenu";
 import { LmStudioStatusBadge } from "@/components/LmStudioStatusBadge";
 import { ChatHeaderMenu } from "@/components/ChatHeaderMenu";
 import type { PanelView } from "./shared";
+import { AUTO_MODEL_VALUE, AUTO_MODEL_LABEL } from "./shared";
 
 // ─── TopBar ──────────────────────────────────────────────────────────────────
 
@@ -17,6 +18,10 @@ interface TopBarProps {
   title: string;
   modelId: string;
   onModelChange: (id: string) => void;
+  /** True when the user has a configured default model, so "Auto" has
+   *  something to resolve to. When false the picker prompts the user to
+   *  choose a model instead of offering "Auto". */
+  hasDefaultModel?: boolean | undefined;
   /** Render a hamburger that toggles the mobile sidebar drawer. */
   onMobileMenuClick?: (() => void) | undefined;
   pinned: boolean;
@@ -70,6 +75,7 @@ export function TopBar({
   title,
   modelId,
   onModelChange,
+  hasDefaultModel,
   onMobileMenuClick,
   pinned,
   onPinToggle,
@@ -128,6 +134,22 @@ export function TopBar({
       name: o.label,
       loaded: o.loaded,
     }));
+  // Healthy state (LM Studio reachable + at least one model available): the
+  // picker's leading entry is a selectable "Auto" — the chat has no explicit
+  // per-chat model override, so it resolves to the user's default model at
+  // send time. "Auto" is only offered when a default actually exists to
+  // resolve to (``hasDefaultModel``); otherwise the composer would block the
+  // send, so we keep the "Select a model…" prompt. The other informative
+  // placeholders cover the states where nothing can be sent at all (no model
+  // loaded / unreachable / still loading).
+  const healthy =
+    lmStatus !== "no_models" &&
+    lmStatus !== "error" &&
+    showLoadedFirst.length > 0;
+  const showAuto = healthy && hasDefaultModel === true;
+  const autoOption = showAuto
+    ? { value: AUTO_MODEL_VALUE, label: AUTO_MODEL_LABEL }
+    : undefined;
   const placeholderLabel =
     lmStatus === "no_models"
       ? "No model loaded — open Settings"
@@ -135,7 +157,9 @@ export function TopBar({
         ? "LM Studio unreachable"
         : showLoadedFirst.length === 0
           ? "Loading models…"
-          : "Select a model…";
+          : showAuto
+            ? ""
+            : "Select a model…";
 
   // Single-row mobile header — 72px floor on most mobile widths,
   // collapsing to 56px (iOS standard nav height) at ≤480px.
@@ -145,13 +169,15 @@ export function TopBar({
   if (isMobile) {
     const activeModelName = showLoadedFirst.find((m) => m.id === modelId)?.name;
     const modelPillLabel =
-      activeModelName !== undefined && activeModelName !== ""
-        ? activeModelName
-        : lmStatus === "no_models"
-          ? "no model · open settings"
-          : lmStatus === "error"
-            ? "LM Studio unreachable"
-            : "select model";
+      modelId === AUTO_MODEL_VALUE
+        ? AUTO_MODEL_LABEL
+        : activeModelName !== undefined && activeModelName !== ""
+          ? activeModelName
+          : lmStatus === "no_models"
+            ? "no model · open settings"
+            : lmStatus === "error"
+              ? "LM Studio unreachable"
+              : "select model";
 
     return (
       <header className="lmchat-topbar-shell--mobile">
@@ -195,6 +221,7 @@ export function TopBar({
             value={modelId}
             onChange={onModelChange}
             placeholder={placeholderLabel}
+            autoOption={autoOption}
             className="lmchat-model-select--mobile-wide"
             testId="chat-header-model-select"
             title={modelPillLabel}
@@ -315,6 +342,7 @@ export function TopBar({
         value={modelId}
         onChange={onModelChange}
         placeholder={placeholderLabel}
+        autoOption={autoOption}
         testId="chat-header-model-select"
         options={chatModelOptions}
         {...(chatModelGroups.length > 1 ? { groups: chatModelGroups } : {})}

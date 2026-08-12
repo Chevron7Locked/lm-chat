@@ -96,6 +96,7 @@ import { useMouseParallax } from "@/hooks/useMouseParallax";
 import type { ComposerPresenceCbs } from "@/components/Composer";
 import { storeResponseId, loadResponseId, clearResponseId } from "@/lib/responseId";
 import type { PanelView } from "@/components/chat/shared";
+import { AUTO_MODEL_VALUE } from "@/components/chat/shared";
 import { TopBar } from "@/components/chat/TopBar";
 import { MobileDock } from "@/components/chat/MobileDock";
 import { MobileSidebarShell } from "@/components/chat/MobileSidebarShell";
@@ -1123,12 +1124,58 @@ export default function Chat() {
             currentChat?.title ??
             (chatId !== null ? `Chat ${String(chatId)}` : BRAND_NAME)
           }
+          hasDefaultModel={savedDefaultModel !== undefined}
           modelId={(() => {
-            const mid = selectedModel ?? currentChat?.model_id ?? savedDefaultModel ?? "";
-            const prov = currentChat?.settings?.provider ?? "lmstudio";
-            return mid ? `${prov}::${mid}` : "";
+            // No explicit per-chat override = no memory-tier dropdown pick
+            // (selectedModel) AND no persisted chats.model_id (null or "").
+            const picked = selectedModel ?? currentChat?.model_id ?? "";
+            if (picked !== "") {
+              const prov = currentChat?.settings?.provider ?? "lmstudio";
+              return `${prov}::${picked}`;
+            }
+            // Show "Auto" for the no-override case — it stands in for the
+            // user's default, which the send path (Composer `modelId` prop +
+            // resolveTurnModel) still resolves to savedDefaultModel at dispatch
+            // time. The DISPLAY deliberately does NOT surface the default's
+            // name. When there's no default configured at all, fall to "" so
+            // the picker prompts "Select a model…" (Auto would resolve to
+            // nothing and the composer blocks the send).
+            return savedDefaultModel !== undefined ? AUTO_MODEL_VALUE : "";
           })()}
           onModelChange={(compositeId: string) => {
+            // "Auto" reset: drop the per-chat override so the picker + send
+            // path fall back to the user's default model. Clear the memory-tier
+            // pick AND the persisted chats.model_id (via clear=model_id — the
+            // flat model_id="" param is ignored server-side by design).
+            if (compositeId === AUTO_MODEL_VALUE) {
+              const prevSelected = selectedModel;
+              setSelectedModel(undefined);
+              const hasPersisted =
+                currentChat?.model_id != null && currentChat.model_id !== "";
+              if (chatId !== null && hasPersisted) {
+                updateChat.mutate(
+                  { clear: "model_id" },
+                  {
+                    onError: (err) => {
+                      // Rollback optimistic clear.
+                      setSelectedModel(prevSelected);
+                      const detail =
+                        (err as { detail?: unknown }).detail ??
+                        (err instanceof Error ? err.message : String(err));
+                      const suffix =
+                        typeof detail === "string" && detail.length > 0
+                          ? ` — ${detail}`
+                          : "";
+                      push({
+                        variant: "error",
+                        message: `Model couldn't be reset${suffix}`,
+                      });
+                    },
+                  },
+                );
+              }
+              return;
+            }
             // Decode composite "<provider>::<model_id>" — split on FIRST :: only.
             const sepIdx = compositeId.indexOf("::");
             const provider = sepIdx >= 0 ? compositeId.slice(0, sepIdx) : "lmstudio";

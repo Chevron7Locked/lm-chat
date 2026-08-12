@@ -162,6 +162,15 @@ export type ModelSelectControlProps = {
    * first entry. Pass an empty string to omit the placeholder.
    */
   placeholder?: string;
+  /**
+   * Optional SELECTABLE leading option — rendered before the placeholder and
+   * the option groups. Unlike ``placeholder`` (a disabled hint the user can
+   * never re-select), this is a real choice the user can pick, which is what
+   * powers the chat picker's "Auto" entry: selecting it resets the chat back
+   * to the user's default model. Its ``value`` must match the control's
+   * ``value`` for the native ``<select>`` to display it as the current choice.
+   */
+  autoOption?: { value: string; label: string } | undefined;
   /** Optional extra className merged with the canonical class. */
   className?: string;
   /** Optional ``data-testid`` for Playwright + vitest selectors. */
@@ -196,6 +205,7 @@ export function ModelSelectControl(
     groups,
     isLoading = false,
     placeholder,
+    autoOption,
     className,
     testId,
     title,
@@ -302,6 +312,14 @@ export function ModelSelectControl(
           </option>
         ) : (
           <>
+            {autoOption !== undefined && (
+              // Selectable "Auto" entry — first so it reads as the default /
+              // reset choice. Rendered independently of the placeholder and
+              // the loaded-split / grouped branches below so it survives every
+              // rendering mode (a bare prepend to `options` would be dropped by
+              // the loaded/unloaded filters or ignored when `groups` is set).
+              <option value={autoOption.value}>{autoOption.label}</option>
+            )}
             {placeholder !== undefined && placeholder !== "" && (
               <option value="" disabled>
                 {placeholder}

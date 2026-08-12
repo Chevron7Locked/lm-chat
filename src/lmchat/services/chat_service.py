@@ -1150,6 +1150,40 @@ class ChatService:
             model_id=model_id,
         )
 
+    async def clear_model_id(self, chat_id: int, *, user_id: int) -> None:
+        """Reset the per-chat model override back to "Auto".
+
+        Sets ``chats.model_id`` to NULL so the frontend picker shows "Auto"
+        and the send path falls through to the user's default model. Symmetric
+        with :meth:`set_model_id`; reached via the PATCH ``clear=model_id``
+        path (the flat ``model_id=""`` param is intentionally ignored so an
+        implicit default is never persisted as an explicit pin).
+
+        Args:
+            chat_id: PK of the chat.
+            user_id: Must be the owning user.
+
+        Raises:
+            ChatNotFoundError: If missing or owned by another user.
+        """
+        await self._get_chat_row(chat_id, user_id=user_id)
+
+        async def _update() -> None:
+            async with self._engine.begin() as conn:
+                await conn.execute(
+                    update(chats)
+                    .where(chats.c.id == chat_id, chats.c.user_id == user_id)
+                    .values(model_id=None)
+                )
+
+        await with_write_retry(_update)
+
+        log.info(
+            "chat.model_id_cleared",
+            chat_id=chat_id,
+            user_id=user_id,
+        )
+
     async def pin(self, chat_id: int, *, user_id: int, pinned: bool) -> None:
         """Set the pinned flag on *chat_id*.
 

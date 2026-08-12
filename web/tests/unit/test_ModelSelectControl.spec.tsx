@@ -79,6 +79,60 @@ describe("ModelSelectControl", () => {
     expect(screen.queryByText("Pick a model")).toBeNull();
   });
 
+  it("renders autoOption as a SELECTABLE first option (distinct from the disabled placeholder)", () => {
+    const { container } = render(
+      <ModelSelectControl
+        ariaLabel="Model"
+        value="__auto__"
+        onChange={() => {}}
+        autoOption={{ value: "__auto__", label: "Auto" }}
+        options={[
+          { id: "a", label: "Alpha", loaded: true },
+          { id: "b", label: "Beta", loaded: false },
+        ]}
+      />,
+    );
+    const auto = screen.getByText("Auto") as HTMLOptionElement;
+    // Selectable (NOT disabled) — the user must be able to pick it to reset.
+    expect(auto.disabled).toBe(false);
+    expect(auto.value).toBe("__auto__");
+    // Rendered as the very first option, ahead of the loaded/not-loaded split.
+    const firstOption = container.querySelector("option");
+    expect(firstOption?.textContent).toBe("Auto");
+    // Survives the loaded/unloaded optgroup split (a bare prepend would vanish).
+    const select = screen.getByLabelText("Model") as HTMLSelectElement;
+    expect(select.value).toBe("__auto__");
+  });
+
+  it("fires onChange with the autoOption value when the user re-selects Auto", () => {
+    const onChange = vi.fn();
+    render(
+      <ModelSelectControl
+        ariaLabel="Model"
+        value="a"
+        onChange={onChange}
+        autoOption={{ value: "__auto__", label: "Auto" }}
+        options={[{ id: "a", label: "Alpha" }]}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "__auto__" },
+    });
+    expect(onChange).toHaveBeenCalledWith("__auto__");
+  });
+
+  it("renders no Auto entry when autoOption is omitted", () => {
+    render(
+      <ModelSelectControl
+        ariaLabel="Model"
+        value="a"
+        onChange={() => {}}
+        options={[{ id: "a", label: "Alpha" }]}
+      />,
+    );
+    expect(screen.queryByText("Auto")).toBeNull();
+  });
+
   it("renders a flat option list when no loaded/not-loaded split exists", () => {
     const { container } = render(
       <ModelSelectControl

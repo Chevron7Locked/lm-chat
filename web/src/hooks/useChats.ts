@@ -267,8 +267,10 @@ interface UpdateChatBody {
   active_preset?: string | undefined;
   /** Move chat into a project. */
   project_id?: number | undefined;
-  /** Clear-field list. Only ``project_id`` is
-   *  accepted by this endpoint. */
+  /** Comma-separated list of fields to explicitly NULL. Accepted names:
+   *  ``project_id`` (detach from project) and ``model_id`` (reset the
+   *  per-chat model override back to "Auto" — the flat ``model_id=""`` param
+   *  is ignored server-side, so clearing must go through this path). */
   clear?: string | undefined;
   /** Multi-provider: provider slug for the model (e.g. "openrouter", "lmstudio"). */
   provider?: string | undefined;
@@ -492,6 +494,10 @@ export function useUpdateChat(chatId: number) {
       if (body.active_preset !== undefined)
         params.set("active_preset", body.active_preset);
       if (body.provider !== undefined) params.set("provider", body.provider);
+      // Explicit-NULL list (e.g. "model_id" to reset the picker to "Auto",
+      // "project_id" to detach). FastAPI can't tell an omitted form field
+      // from an empty one, so clears must be named here rather than sent as "".
+      if (body.clear !== undefined) params.set("clear", body.clear);
       return toChatSummary(
         await api.request<ChatWire>(`/api/chats/${String(chatId)}`, {
           method: "PATCH",
