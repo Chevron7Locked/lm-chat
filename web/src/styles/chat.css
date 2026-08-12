@@ -3099,3 +3099,177 @@
   color: var(--color-text-muted);
   margin-top: var(--space-glue);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   FOCUS MODE — reversible full-screen reading surface
+   Toggled by the `.is-focus-mode` class on `.lmchat-chat-shell` (⌘/Ctrl+. , the
+   TopBar toggle, or Esc). Hides the sidebar + top chrome, narrows the
+   conversation to a comfortable reading measure, and floats the composer.
+   Off = EXACTLY today's layout (every focus rule is class-scoped; nothing
+   leaks when the class is absent).
+   Motion: transform + opacity ONLY (never width/height/margin/padding),
+   ~220ms ease-out-quart, applied via `.lmchat-focus-animated` — a class Chat
+   adds only when motion is allowed (see useFocusMode). A prefers-reduced-motion
+   guard suppresses the transitions at the CSS layer too.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Focus-mode tokens live on the base shell so BOTH `.is-focus-mode` (state)
+   and `.lmchat-focus-animated` (motion) rules resolve them. --focus-measure is
+   the ~68ch reading measure shared by the reading column + floating composer. */
+.lmchat-chat-shell {
+  --focus-measure: 68ch;
+  --focus-motion-duration: 220ms;
+}
+
+/* Sidebar slot: slide out + fade, removed from flow so the reading column
+   re-centres on the full width. The position switch is instant; only transform
+   + opacity animate. */
+.is-focus-mode .lmchat-sidebar-slot {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  z-index: 60;
+  transform: translateX(-100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Desktop top chrome: slide up + fade, out of flow. Hovering the top-edge
+   sentinel (or keyboard focus landing inside) brings it back down so the model
+   picker + toggle stay reachable — the "don't strand the user" escape hatch.
+   The mobile bar (.lmchat-topbar-shell--mobile) is a separate class and stays
+   put — mobile chrome is already minimal and carries the model pill. */
+.is-focus-mode .lmchat-topbar-shell {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: 72;
+  transform: translateY(-100%);
+  opacity: 0;
+}
+/* The `:not(.lmchat-focus-reveal-locked)` guard suppresses the reveal for the
+   brief post-enter beat (see useFocusMode) so the bar recedes fully on enter
+   even while the cursor rests on the in-topbar toggle. */
+.is-focus-mode:not(.lmchat-focus-reveal-locked)
+  .lmchat-main-column:has(.lmchat-focus-hover-zone:hover)
+  .lmchat-topbar-shell,
+.is-focus-mode:not(.lmchat-focus-reveal-locked) .lmchat-topbar-shell:hover,
+.is-focus-mode:not(.lmchat-focus-reveal-locked) .lmchat-topbar-shell:focus-within {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+/* Top-edge reveal sentinel — inert (hidden) outside focus mode. */
+.lmchat-focus-hover-zone {
+  display: none;
+}
+.is-focus-mode .lmchat-focus-hover-zone {
+  display: block;
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: var(--spacing-md); /* 16px reveal lip */
+  z-index: 71;
+  pointer-events: auto;
+}
+
+/* Reading column: narrow to the comfortable measure; stays centred via the
+   existing margin-inline: auto. Extra top clearance keeps the first message
+   from tucking under the fixed "Exit focus" pill (top: --spacing-md + ~30px tall)
+   and doubles as intentional calm whitespace. scroll-padding keeps the same
+   clearance when the user scrolls a message to the top. */
+.is-focus-mode .lmchat-messages-area {
+  max-width: var(--focus-measure);
+  padding-block-start: calc(var(--space-chapter) + var(--space-sibling));
+  scroll-padding-block-start: calc(var(--space-chapter) + var(--space-sibling));
+}
+
+/* Composer: float free of the full-width divider + tint. It is already pinned
+   to the column bottom by flex; here we drop the wrapper's border-top + bg,
+   re-cap the inner to the reading measure, and lift the bar with a soft low
+   shadow. --color-surface + 1px --color-border already come from
+   .lmchat-composer-bar. */
+.is-focus-mode .lmchat-composer-wrapper {
+  border-top: none;
+  background: transparent;
+}
+.is-focus-mode .lmchat-composer-inner {
+  max-width: var(--focus-measure);
+}
+.is-focus-mode .lmchat-composer-bar {
+  box-shadow: var(--shadow-md);
+}
+
+/* Slim, always-reachable exit affordance — hidden outside focus mode. */
+.lmchat-focus-exit {
+  display: none;
+}
+.is-focus-mode .lmchat-focus-exit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-glue);
+  position: fixed;
+  top: var(--spacing-md);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 74;
+  padding: var(--padding-btn-sm-y) var(--space-sibling);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-md);
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  cursor: pointer;
+  transition: opacity var(--duration-fast) var(--ease-out-quart);
+}
+.is-focus-mode .lmchat-focus-exit:hover {
+  color: var(--color-text);
+}
+.lmchat-focus-exit__label {
+  line-height: 1;
+}
+/* Politely retreat while the top chrome is revealed (it carries its own toggle
+   + model picker, so the pill would be redundant and overlap). */
+.is-focus-mode:has(.lmchat-topbar-shell:hover) .lmchat-focus-exit,
+.is-focus-mode:has(.lmchat-topbar-shell:focus-within) .lmchat-focus-exit {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Icon-only TopBar toggle — square up the padding vs the text buttons. */
+.lmchat-topbar-btn--icon {
+  padding-inline: var(--space-glue-relaxed);
+}
+
+/* Mobile: keep the compact top bar (it carries the model pill), hide the
+   MobileDock, and let the composer float. */
+@media (max-width: 768px) {
+  .is-focus-mode .lmchat-mobile-dock {
+    display: none;
+  }
+  .is-focus-mode .lmchat-focus-exit {
+    /* Below the compact mobile top bar so it never covers the title/controls. */
+    top: calc(var(--topbar-height) + var(--spacing-sm));
+  }
+}
+
+/* Motion — applied ONLY when motion is allowed (the `.lmchat-focus-animated`
+   class is present). transform + opacity only; the transition stays on the
+   base elements so BOTH enter (class added) and exit (class removed) animate. */
+.lmchat-focus-animated .lmchat-sidebar-slot,
+.lmchat-focus-animated .lmchat-topbar-shell {
+  transition:
+    transform var(--focus-motion-duration) var(--ease-out-quart),
+    opacity var(--focus-motion-duration) var(--ease-out-quart);
+}
+
+/* Belt-and-suspenders: never animate under reduced-motion, even if the
+   animated class is present (globals.css also carries a global catch-all). */
+@media (prefers-reduced-motion: reduce) {
+  .lmchat-focus-animated .lmchat-sidebar-slot,
+  .lmchat-focus-animated .lmchat-topbar-shell {
+    transition: none;
+  }
+}

@@ -86,6 +86,7 @@ import { useToast } from "@/stores/toastStore";
 import { useCompactions } from "@/hooks/useCompactions";
 import { useHydrateChatPresets, useChatPresetStore } from "@/hooks/useChatPreset";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useFocusMode } from "@/hooks/useFocusMode";
 import { InterruptedRow } from "@/components/InterruptedRow";
 import { SlashPalette } from "@/components/SlashPalette";
 import { BUILTIN_COMMANDS } from "@/components/SlashMenu";
@@ -100,6 +101,7 @@ import { AUTO_MODEL_VALUE } from "@/components/chat/shared";
 import { TopBar } from "@/components/chat/TopBar";
 import { MobileDock } from "@/components/chat/MobileDock";
 import { MobileSidebarShell } from "@/components/chat/MobileSidebarShell";
+import { FocusModeExit } from "@/components/chat/FocusModeExit";
 import { RightPanel } from "@/components/chat/RightPanel";
 import { ConfirmDialog } from "@/components/chat/ConfirmDialog";
 import { EmptyState } from "@/components/chat/EmptyState";
@@ -153,6 +155,12 @@ export default function Chat() {
   // Cmd/Ctrl+Shift+E increments this counter; ChatHeaderMenu's
   // useEffect reacts to the change by opening its dropdown.
   const [exportMenuSignal, setExportMenuSignal] = useState(0);
+  // Reversible full-screen focus mode — session-only. Hides the sidebar +
+  // top chrome and floats the composer (driven by the `is-focus-mode` class
+  // on the shell). `motionEnabled` gates the transition class so
+  // reduced-motion users get an instant enter/exit.
+  const { focusMode, setFocusMode, toggleFocusMode, motionEnabled, revealLocked } =
+    useFocusMode();
 
   // Orphan/interrupted stream detection.
   // On mount (or when chatId changes), check if localStorage has an orphaned
@@ -983,13 +991,23 @@ export default function Chat() {
     },
     onEscape: () => {
       // Esc closes whichever overlay is topmost — help first, then palette,
-      // then panel.  The Esc priority chain mirrors v0.5.x.
+      // then panel, then finally exits focus mode.  The Esc priority chain
+      // mirrors v0.5.x; focus mode sits last so an open overlay closes before
+      // the whole focus surface tears down.
       if (keyboardHelpOpen) {
         setKeyboardHelpOpen(false);
         return;
       }
       if (slashPaletteOpen) {
         setSlashPaletteOpen(false);
+        return;
+      }
+      if (panelView !== null) {
+        setPanelView(null);
+        return;
+      }
+      if (focusMode) {
+        setFocusMode(false);
         return;
       }
       setPanelView(null);
@@ -1016,6 +1034,8 @@ export default function Chat() {
       if (chatId === null) return;
       setExportMenuSignal((n) => n + 1);
     },
+    // Cmd/Ctrl+. — toggle focus mode.
+    onToggleFocusMode: toggleFocusMode,
   });
 
   // A/B compare model labels — resolved once here to avoid optional-chain
@@ -1100,7 +1120,13 @@ export default function Chat() {
   }
 
   return (
-    <div className="lmchat-app-shell lmchat-chat-shell">
+    <div
+      className={`lmchat-app-shell lmchat-chat-shell${
+        focusMode ? " is-focus-mode" : ""
+      }${motionEnabled ? " lmchat-focus-animated" : ""}${
+        revealLocked ? " lmchat-focus-reveal-locked" : ""
+      }`}
+    >
       <MobileSidebarShell
         isMobile={isMobile}
         mobileDrawerOpen={mobileDrawerOpen}
@@ -1115,6 +1141,10 @@ export default function Chat() {
 
       {/* Center column */}
       <main id="main-content" tabIndex={-1} className="lmchat-main-column">
+        {/* Focus mode: a thin top-edge sentinel. Hovering it slides the hidden
+            top chrome back down so the model picker stays reachable (see
+            chat.css .lmchat-focus-hover-zone). Inert outside focus mode. */}
+        <div className="lmchat-focus-hover-zone" aria-hidden />
         {/* R1b: surface the LM Studio 401 / key-pruned state on the chat view
             (Chat lives outside AppShell, so its banner never reached here). */}
         <LmStudioAuthBanner />
@@ -1266,6 +1296,8 @@ export default function Chat() {
           }
           exportMessages={messagesData?.messages ?? []}
           exportMenuSignal={exportMenuSignal}
+          focusMode={focusMode}
+          onToggleFocusMode={toggleFocusMode}
         />
 
         {/* Pin-nav strip — only when this chat has pins. */}
@@ -1523,6 +1555,14 @@ export default function Chat() {
           }}
         />
       )}
+
+      {/* Slim, always-reachable exit affordance — only visible in focus mode. */}
+      <FocusModeExit
+        active={focusMode}
+        onExit={() => {
+          setFocusMode(false);
+        }}
+      />
     </div>
   );
 }

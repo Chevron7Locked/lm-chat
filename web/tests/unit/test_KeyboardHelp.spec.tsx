@@ -51,6 +51,13 @@ describe("KeyboardHelp", () => {
     expect(screen.getAllByText("Esc").length).toBeGreaterThanOrEqual(1);
   });
 
+  it("lists the focus-mode toggle shortcut", () => {
+    render(<KeyboardHelp open onClose={() => undefined} />);
+    expect(screen.getByText("Toggle focus mode")).toBeTruthy();
+    // {mod:true,key:"."} renders as "Ctrl+." in jsdom (non-Mac).
+    expect(screen.getByText("Ctrl+.")).toBeTruthy();
+  });
+
   it("lists every built-in slash command", () => {
     render(<KeyboardHelp open onClose={() => undefined} />);
     for (const cmd of BUILTIN_COMMANDS) {

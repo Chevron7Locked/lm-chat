@@ -12,7 +12,7 @@
  *   - no model loaded / unreachable → the informative disabled placeholder.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { createElement } from "react";
 
 // ─── Hook mocks ──────────────────────────────────────────────────────────────
@@ -157,5 +157,94 @@ describe("TopBar — Auto entry + placeholder gating", () => {
     renderTopBar({ hasDefaultModel: true, modelId: AUTO_MODEL_VALUE });
     expect(autoLabel()).toBe("");
     expect(placeholder()).toBe("No model loaded — open Settings");
+  });
+});
+
+describe("TopBar — focus-mode toggle", () => {
+  beforeEach(() => {
+    mockLmStatus = "connected";
+    mockOptions = [
+      {
+        id: "alpha",
+        label: "Alpha",
+        loaded: true,
+        provider: "lmstudio",
+        capabilities: {
+          vision: false,
+          trained_for_tool_use: false,
+          reasoning: null,
+          embedding: false,
+        },
+      },
+    ];
+    vi.clearAllMocks();
+  });
+
+  function renderWithFocus(props: {
+    focusMode: boolean;
+    onToggleFocusMode: () => void;
+  }) {
+    return render(
+      createElement(TopBar, {
+        title: "Chat",
+        modelId: AUTO_MODEL_VALUE,
+        onModelChange: vi.fn(),
+        hasDefaultModel: true,
+        pinned: false,
+        onPinToggle: vi.fn(),
+        onDelete: vi.fn(),
+        onFork: vi.fn(),
+        onSettingsOpen: vi.fn(),
+        onMemoryOpen: vi.fn(),
+        onDocumentsOpen: vi.fn(),
+        onPinsOpen: vi.fn(),
+        pinsOpen: false,
+        panelView: null,
+        chatId: 1,
+        focusMode: props.focusMode,
+        onToggleFocusMode: props.onToggleFocusMode,
+      }),
+    );
+  }
+
+  it("renders an 'Enter focus mode' toggle that fires onToggleFocusMode", () => {
+    const onToggleFocusMode = vi.fn();
+    renderWithFocus({ focusMode: false, onToggleFocusMode });
+    const btn = screen.getByTestId("topbar-focus-toggle");
+    expect(btn.getAttribute("aria-label")).toBe("Enter focus mode");
+    expect(btn.getAttribute("data-active")).toBe("false");
+    fireEvent.click(btn);
+    expect(onToggleFocusMode).toHaveBeenCalledOnce();
+  });
+
+  it("reflects the active (copper) state when focus mode is on", () => {
+    renderWithFocus({ focusMode: true, onToggleFocusMode: vi.fn() });
+    const btn = screen.getByTestId("topbar-focus-toggle");
+    expect(btn.getAttribute("aria-label")).toBe("Exit focus mode");
+    expect(btn.getAttribute("aria-pressed")).toBe("true");
+    expect(btn.getAttribute("data-active")).toBe("true");
+  });
+
+  it("omits the toggle entirely when no handler is provided", () => {
+    render(
+      createElement(TopBar, {
+        title: "Chat",
+        modelId: AUTO_MODEL_VALUE,
+        onModelChange: vi.fn(),
+        hasDefaultModel: true,
+        pinned: false,
+        onPinToggle: vi.fn(),
+        onDelete: vi.fn(),
+        onFork: vi.fn(),
+        onSettingsOpen: vi.fn(),
+        onMemoryOpen: vi.fn(),
+        onDocumentsOpen: vi.fn(),
+        onPinsOpen: vi.fn(),
+        pinsOpen: false,
+        panelView: null,
+        chatId: 1,
+      }),
+    );
+    expect(screen.queryByTestId("topbar-focus-toggle")).toBeNull();
   });
 });

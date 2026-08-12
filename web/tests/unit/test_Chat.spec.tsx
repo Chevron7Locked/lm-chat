@@ -13,7 +13,7 @@
  * smoke + auth-gate.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -490,6 +490,35 @@ describe("Chat (warning toasts — T0-1)", () => {
     rerender(chatRouteTree("/chats/1"));
     expect(warningCalls()).toHaveLength(2);
     expect(warningCalls()[1]?.[0]?.message).toBe("Second warning.");
+  });
+});
+
+describe("Chat (focus mode)", () => {
+  beforeEach(() => {
+    mockAuthState.user = { id: 1, username: "test", is_admin: false };
+    mockAuthState.isInitializing = false;
+    mockSSEState = { ..._idleSSEState };
+    vi.clearAllMocks();
+  });
+
+  it("toggles the is-focus-mode shell class via the TopBar toggle, then exits via the affordance", async () => {
+    await renderChat("/chats/1");
+    const shell = document.querySelector(".lmchat-chat-shell");
+    expect(shell).not.toBeNull();
+    // Off = today's layout: no focus class.
+    expect(shell?.classList.contains("is-focus-mode")).toBe(false);
+    // The always-reachable exit affordance is absent until focus mode is on.
+    expect(screen.queryByTestId("focus-mode-exit")).toBeNull();
+
+    // Enter focus mode via the TopBar toggle button.
+    fireEvent.click(screen.getByTestId("topbar-focus-toggle"));
+    expect(shell?.classList.contains("is-focus-mode")).toBe(true);
+
+    // The slim exit affordance is now visible; clicking it leaves focus mode
+    // and the shell returns to exactly the base classes.
+    fireEvent.click(screen.getByTestId("focus-mode-exit"));
+    expect(shell?.classList.contains("is-focus-mode")).toBe(false);
+    expect(screen.queryByTestId("focus-mode-exit")).toBeNull();
   });
 });
 

@@ -10,6 +10,7 @@
  *   Cmd/Ctrl+Shift+S    — toggle sidebar collapse
  *   Cmd/Ctrl+,          — open Settings
  *   Cmd/Ctrl+Shift+E    — open the chat export menu
+ *   Cmd/Ctrl+.          — toggle focus mode
  *   ?                   — open keyboard help modal (only fires
  *                         when no editable element has focus)
  *   Esc                 — close panels / toasts / slash menu
@@ -42,6 +43,8 @@ interface ShortcutHandlers {
   onShowHelp?: (() => void) | undefined;
   /** Called when Cmd/Ctrl+Shift+E is pressed (export chat). */
   onExportChat?: (() => void) | undefined;
+  /** Called when Cmd/Ctrl+. is pressed (toggle focus mode). */
+  onToggleFocusMode?: (() => void) | undefined;
 }
 
 const THEME_CYCLE: Theme[] = ["dark", "light", "system"];
@@ -118,6 +121,13 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers): void {
       if (mod && !e.shiftKey && e.key === ",") {
         e.preventDefault();
         handlers.onOpenSettings?.();
+        return;
+      }
+
+      // Cmd/Ctrl+. — toggle focus mode.
+      if (mod && !e.shiftKey && e.key === ".") {
+        e.preventDefault();
+        handlers.onToggleFocusMode?.();
         return;
       }
 

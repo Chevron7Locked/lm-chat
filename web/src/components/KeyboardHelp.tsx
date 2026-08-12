@@ -51,6 +51,7 @@ export const SHORTCUTS: ShortcutEntry[] = [
     description: "Toggle sidebar",
   },
   { chord: { mod: true, key: "," }, description: "Open settings" },
+  { chord: { mod: true, key: "." }, description: "Toggle focus mode" },
   { chord: { mod: true, key: "K" }, description: "Focus chat filter" },
   { chord: { mod: true, key: "/" }, description: "Open command palette" },
   { chord: { mod: true, key: "Enter" }, description: "Send message" },

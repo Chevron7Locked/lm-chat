@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Lock, Menu } from "lucide-react";
+import { Lock, Menu, Maximize2, Minimize2 } from "lucide-react";
 import { useViewport } from "@/hooks/useViewport";
 import { useModelList } from "@/hooks/useModelList";
 import { useChatModelOptions } from "@/hooks/useChatModelOptions";
@@ -69,6 +69,10 @@ interface TopBarProps {
     | undefined;
   /** Counter that opens the export menu when it changes. */
   exportMenuSignal?: number | undefined;
+  /** Whether the chat surface is in focus mode (drives the toggle's state). */
+  focusMode?: boolean | undefined;
+  /** Toggle the reversible full-screen focus mode. Undefined hides the toggle. */
+  onToggleFocusMode?: (() => void) | undefined;
 }
 
 export function TopBar({
@@ -96,6 +100,8 @@ export function TopBar({
   exportChat,
   exportMessages,
   exportMenuSignal,
+  focusMode,
+  onToggleFocusMode,
 }: TopBarProps) {
   // Consume the LM Studio model list through the
   // state-machine-aware hook so the dropdown surfaces loaded vs unloaded
@@ -238,6 +244,16 @@ export function TopBar({
         </span>
         <OverflowMenu
           actions={[
+            ...(onToggleFocusMode !== undefined
+              ? [
+                  {
+                    label:
+                      focusMode === true ? "Exit focus mode" : "Focus mode",
+                    onClick: onToggleFocusMode,
+                    active: focusMode === true,
+                  },
+                ]
+              : []),
             {
               label: "Settings",
               onClick: () => {
@@ -353,6 +369,39 @@ export function TopBar({
           into the ⋯ overflow to match the mobile pattern. */}
       <div className="lmchat-topbar-action-row">
         <>
+          {onToggleFocusMode !== undefined && (
+            <button
+              type="button"
+              onClick={(e) => {
+                const entering = focusMode !== true;
+                onToggleFocusMode();
+                // The toggle lives INSIDE the topbar. On enter, leaving focus
+                // here would pin the bar open via `:focus-within`, defeating
+                // the mode. Blur so the chrome recedes; Esc, the exit pill, and
+                // ⌘. all remain available. On exit we keep focus for keyboard
+                // users (the bar is returning anyway).
+                if (entering) e.currentTarget.blur();
+              }}
+              aria-label={
+                focusMode === true ? "Exit focus mode" : "Enter focus mode"
+              }
+              aria-pressed={focusMode === true}
+              title={
+                focusMode === true
+                  ? "Exit focus mode (⌘. / Esc)"
+                  : "Focus mode (⌘.)"
+              }
+              className="atelier-btn lmchat-topbar-btn lmchat-topbar-btn--icon"
+              data-active={focusMode === true ? "true" : "false"}
+              data-testid="topbar-focus-toggle"
+            >
+              {focusMode === true ? (
+                <Minimize2 size={15} aria-hidden />
+              ) : (
+                <Maximize2 size={15} aria-hidden />
+              )}
+            </button>
+          )}
           <TopBarBtn
             onClick={onMemoryOpen}
             label="Memory"

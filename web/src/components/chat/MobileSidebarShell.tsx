@@ -44,7 +44,9 @@ export function MobileSidebarShell({
               ? mobileDrawerOpen
                 ? "lmchat-mobile-sidebar-shell"
                 : "lmchat-mobile-sidebar-shell lmchat-mobile-sidebar-shell--closing"
-              : undefined
+              : // Desktop: a stable hook class so focus mode can slide the
+                // whole sidebar slot out of flow (see chat.css .is-focus-mode).
+                "lmchat-sidebar-slot"
           }
           onAnimationEnd={(e) => {
             // Only the shell's own slide-out — ignore bubbled child
