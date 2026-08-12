@@ -49,10 +49,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.sql.functions import coalesce
 
 from lmchat.db.retry import with_write_retry
-from lmchat.db.schema import audit_log, messages
+from lmchat.db.schema import audit_log, messages, sub_session_messages, sub_sessions
 from lmchat.logging import get_logger
 from lmchat.services._active_streams import is_active
 from lmchat.services._stream_state import finalize_pending
+from lmchat.services.streaming_service import _transition_sub_session_status
 
 log = get_logger(__name__)
 
@@ -146,6 +147,67 @@ async def _recover_pending(
             )
 
 
+async def _recover_pending_sub_sessions(
+    *,
+    engine: AsyncEngine,
+    finalization_timeout_sec: int,
+) -> None:
+    """Sub-session analogue of :func:`_recover_pending` (D5).
+
+    ``_stream_reaper`` only ever queried the ``messages`` table; durable
+    sub-sessions (migration 0045) live in ``sub_session_messages`` and
+    would otherwise never be swept. Same state logic (stuck
+    ``pending_finalization`` rows recovered via the shared
+    ``finalize_pending`` primitive, table-parameterized), PLUS the
+    sub-session-specific step of moving the parent ``sub_sessions.status``
+    to ``aborted`` — the reaper recovering a row it never watched is, by
+    definition, not the stream's own graceful teardown.
+    """
+    cutoff = datetime.now(UTC) - timedelta(seconds=finalization_timeout_sec)
+
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            select(
+                sub_session_messages.c.id,
+                sub_session_messages.c.sub_session_id,
+            ).where(
+                sub_session_messages.c.state == "pending_finalization",
+                sub_session_messages.c.created_at < cutoff,
+            )
+        )
+        pending_rows = result.fetchall()
+
+    for row in pending_rows:
+        msg_id: int = row.id
+        sub_session_id: int = row.sub_session_id
+        try:
+            won = await finalize_pending(
+                engine=engine, message_id=msg_id, table=sub_session_messages
+            )
+            if won:
+                log.info(
+                    "reaper.sub_session_finalize_recovered",
+                    message_id=msg_id,
+                    sub_session_id=sub_session_id,
+                )
+                await _transition_sub_session_status(
+                    engine, sub_session_id=sub_session_id, to_status="aborted"
+                )
+            else:
+                log.info(
+                    "reaper.sub_session_finalize_already_done",
+                    message_id=msg_id,
+                    sub_session_id=sub_session_id,
+                )
+        except Exception as exc:
+            log.error(
+                "reaper.sub_session_finalize_failed",
+                message_id=msg_id,
+                sub_session_id=sub_session_id,
+                error=str(exc),
+            )
+
+
 async def _finalize_stuck_drafts(
     *,
     engine: AsyncEngine,
@@ -227,6 +289,89 @@ async def _finalize_stuck_drafts(
             chat_id=row[1],
             stuck_after_minutes=stuck_after_minutes,
         )
+
+
+async def _finalize_stuck_sub_session_drafts(
+    *,
+    engine: AsyncEngine,
+    stuck_after_minutes: int,
+) -> None:
+    """Sub-session analogue of :func:`_finalize_stuck_drafts` (D5).
+
+    Same ``COALESCE(last_activity_at, created_at)`` age logic and the same
+    ``is_active`` skip (joined through to the parent chat_id — a live
+    ``/research`` sub-session bumps ``last_activity_at`` via the ported
+    ``_CoalesceTimer``, exactly like the main chat, so a healthy multi-
+    minute run is never force-finalized mid-stream). Additionally sets the
+    parent ``sub_sessions.status='aborted'`` for each row reaped — D9: a
+    session the reaper had to intervene on was never gracefully completed.
+    """
+    cutoff = datetime.now(UTC) - timedelta(minutes=stuck_after_minutes)
+    activity_col = coalesce(
+        sub_session_messages.c.last_activity_at, sub_session_messages.c.created_at
+    )
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            select(
+                sub_session_messages.c.id,
+                sub_session_messages.c.sub_session_id,
+                sub_sessions.c.chat_id,
+            )
+            .select_from(sub_session_messages.join(sub_sessions))
+            .where(
+                sub_session_messages.c.state == "draft",
+                activity_col < cutoff,
+            )
+        )
+        rows = result.fetchall()
+    if not rows:
+        return
+
+    # Skip drafts whose parent chat_id has an in-process stream (main-chat
+    # OR another sub-session — _active_streams is refcounted per chat_id).
+    live_rows = [r for r in rows if not is_active(r.chat_id)]
+    if live_rows:
+        log.debug(
+            "reaper.sub_session_skipped_active_streams",
+            skipped_count=len(rows) - len(live_rows),
+            stuck_count=len(live_rows),
+        )
+    rows = live_rows
+    if not rows:
+        return
+
+    stuck_ids = [r.id for r in rows]
+
+    async def _flip_batch() -> None:
+        async with engine.begin() as conn:
+            await conn.execute(
+                sa_update(sub_session_messages)
+                .where(
+                    sub_session_messages.c.id.in_(stuck_ids),
+                    sub_session_messages.c.state == "draft",
+                )
+                .values(state="final")
+            )
+
+    await with_write_retry(_flip_batch)
+    for row in rows:
+        log.warning(
+            "reaper.stuck_sub_session_draft_finalized",
+            message_id=row.id,
+            sub_session_id=row.sub_session_id,
+            chat_id=row.chat_id,
+            stuck_after_minutes=stuck_after_minutes,
+        )
+        try:
+            await _transition_sub_session_status(
+                engine, sub_session_id=row.sub_session_id, to_status="aborted"
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.error(
+                "reaper.sub_session_status_transition_failed",
+                sub_session_id=row.sub_session_id,
+                error=str(exc),
+            )
 
 
 async def _reap_old_drafts(
@@ -324,6 +469,13 @@ async def run_reaper(
        atomically for each.
     2. Deletes ``draft`` rows older than *draft_max_age_hours* hours and
        writes one ``stream.draft_reaped`` audit-log row per deleted row.
+    3. Runs the SAME two sweeps (1 and a stuck-draft finalize) over durable
+       sub-sessions' ``sub_session_messages`` (D5, migration 0045),
+       additionally setting the parent ``sub_sessions.status='aborted'``
+       for every row it recovers or finalizes. The 24h delete pass
+       (step 2) is NOT extended to sub-sessions — a stuck sub-session
+       draft is force-finalized (not deleted) by the 5-minute sweep, so
+       there is no "reaped into a void" data-loss window to close there.
 
     ``asyncio.CancelledError`` is caught after the current tick completes
     (not mid-tick), so in-progress cleanup is not interrupted.
@@ -365,6 +517,15 @@ async def run_reaper(
             await _reap_old_drafts(
                 engine=engine,
                 draft_max_age_hours=draft_max_age_hours,
+            )
+            # Durable sub-sessions (D5) — same two sweeps, parallel table.
+            await _recover_pending_sub_sessions(
+                engine=engine,
+                finalization_timeout_sec=finalization_timeout_sec,
+            )
+            await _finalize_stuck_sub_session_drafts(
+                engine=engine,
+                stuck_after_minutes=draft_stuck_after_minutes,
             )
         except asyncio.CancelledError:
             # CancelledError during tick work: log and exit cleanly.

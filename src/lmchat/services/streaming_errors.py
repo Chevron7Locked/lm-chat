@@ -7,6 +7,8 @@ Public surface
 --------------
 - ``StreamingServiceError`` — base; catch-all for streaming-service failures.
 - ``StreamInProgressError``  — another draft/pending row exists; → HTTP 409.
+- ``SubSessionStreamInProgressError`` — a sub-session draft/pending row
+  exists for the chat_id; → HTTP 409. Independent of the main-chat check.
 - ``StreamUpstreamError``    — adapter surfaced an upstream failure.
 - ``StreamIdleTimeoutError`` — application-level idle timeout fired.
 - ``StreamRateLimitError``   — per-user stream bucket exhausted; → HTTP 429.
@@ -40,6 +42,21 @@ class StreamInProgressError(StreamingServiceError):
             f"A stream is already in progress for chat_id={chat_id!r}. "
             "Only one concurrent stream per chat is allowed."
         )
+
+
+class SubSessionStreamInProgressError(StreamInProgressError):
+    """A sub-session draft or pending_finalization row exists for chat_id.
+
+    Distinct subclass (not the bare main-chat ``StreamInProgressError``)
+    so the route layer can tell "a MAIN-CHAT stream is in progress" apart
+    from "a SUB-SESSION stream is in progress" while reusing the same 409
+    mapping shape and ``chat_id`` attribute. D4 (durable sub-sessions,
+    migration 0045): sub-session concurrency is independent of the
+    main-chat single-stream invariant — this is raised by the
+    sub-session's OWN in-progress check
+    (``streaming_service._assert_no_sub_session_stream_in_progress``),
+    never by ``StreamingService._assert_no_in_progress_stream``.
+    """
 
 
 class StreamUpstreamError(StreamingServiceError):

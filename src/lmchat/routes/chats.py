@@ -16,19 +16,22 @@ Error mapping
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy.ext.asyncio import AsyncEngine
 
+from lmchat.db.schema import sub_session_messages
 from lmchat.logging import get_logger
-from lmchat.metrics import STREAMS_SALVAGED
+from lmchat.metrics import STREAMS_FAILED, STREAMS_SALVAGED
 from lmchat.routes._dependencies import (
     get_chat_service_dep,
     get_engine_dep,
@@ -39,12 +42,22 @@ from lmchat.routes._dependencies import (
     require_user,
 )
 from lmchat.routes.projects import ProjectResponse
+from lmchat.services._active_streams import mark_active, mark_inactive
+from lmchat.services._stream_state import safe_abort_draft
 from lmchat.services.auth_service import User
 from lmchat.services.integrations_service import IntegrationsService
+from lmchat.services.streaming_errors import SubSessionStreamInProgressError
 from lmchat.services.streaming_service import (
     StreamingService,
+    _accumulate_tool_call,
+    _assert_no_sub_session_stream_in_progress,
+    _CoalesceTimer,
+    _create_sub_session_with_draft,
+    _finalize_message_impl,
     _grammar_degrade_eligible,
     _grammar_degrade_warning,
+    _release_stuck_draft_impl,
+    _transition_sub_session_status,
 )
 
 if TYPE_CHECKING:
@@ -112,6 +125,28 @@ def _sub_session_reset_tool_rounds(chat_id: int) -> None:
     across turns until an mtp_suspected event or LRU eviction resets it.
     """
     _sub_session_tool_rounds.reset(chat_id)
+
+
+# ---------------------------------------------------------------------------
+# Sub-session per-chat stream lock (D4, durable sub-sessions — migration 0045)
+# ---------------------------------------------------------------------------
+# A sub-session stream gets its OWN in-progress check + lock, scoped to
+# sub_session_messages via _assert_no_sub_session_stream_in_progress —
+# independent of StreamingService's main-chat _chat_locks /
+# _assert_no_in_progress_stream (D4: a main-chat stream and a sub-session
+# stream may run concurrently on one chat_id). Keyed per-chat (not
+# per-sub_session_id) because P2 creates a fresh sub_sessions row on every
+# /stream or /finalize call (no continuation param yet — that's P3/P4's
+# `sub_session_id` append param) and because only one sub-session is
+# active per chat at a time by product design (SCOPE.md "out of scope").
+# Plain unbounded dict, matching the existing _sub_session_tool_rounds /
+# StreamingService._chat_locks precedent (process-local, single-replica).
+_sub_session_stream_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_sub_session_stream_lock(chat_id: int) -> asyncio.Lock:
+    """Return (creating if absent) the per-chat sub-session stream lock."""
+    return _sub_session_stream_locks.setdefault(chat_id, asyncio.Lock())
 
 
 # ---------------------------------------------------------------------------
@@ -1255,8 +1290,7 @@ def _parse_document_ids(raw: str | None) -> list[int]:
             raise HTTPException(
                 status_code=_HTTP_422,
                 detail=(
-                    "document_ids must be a comma-separated list of "
-                    f"integers (bad token {token!r})"
+                    f"document_ids must be a comma-separated list of integers (bad token {token!r})"
                 ),
             ) from exc
     # De-dup while preserving first-seen order.
@@ -1364,9 +1398,7 @@ async def promote_chat_to_project(
         raise HTTPException(status_code=_HTTP_404, detail="chat not found") from exc
 
     if chat.project_id is not None:
-        raise HTTPException(
-            status_code=_HTTP_409, detail="chat is already in a project"
-        )
+        raise HTTPException(status_code=_HTTP_409, detail="chat is already in a project")
     if chat.incognito:
         raise HTTPException(
             status_code=_HTTP_422,
@@ -1388,9 +1420,7 @@ async def promote_chat_to_project(
     for doc_id in doc_ids:
         doc = await get_document(document_id=doc_id, user_id=user.id, engine=engine)
         if doc is None:
-            raise HTTPException(
-                status_code=_HTTP_404, detail=f"document {doc_id} not found"
-            )
+            raise HTTPException(status_code=_HTTP_404, detail=f"document {doc_id} not found")
         if doc.project_id is not None:
             raise HTTPException(
                 status_code=_HTTP_409,
@@ -1469,9 +1499,7 @@ async def promote_chat_to_project(
 
     fresh_project = await projects_svc.get(user_id=user.id, project_id=project.id)
     if fresh_project is None:
-        raise RuntimeError(
-            f"project {project.id!r} vanished immediately after creation"
-        )
+        raise RuntimeError(f"project {project.id!r} vanished immediately after creation")
     return PromoteToProjectResponse(
         **ProjectResponse.from_project(fresh_project).model_dump(),
         moved_document_count=moved,
@@ -1580,9 +1608,7 @@ async def list_chat_compactions(
         HTTPException: 404 if chat not found or not owned by user.
     """
     try:
-        spans: list[Compaction] = await chat_service.list_compactions(
-            chat_id, user_id=user.id
-        )
+        spans: list[Compaction] = await chat_service.list_compactions(chat_id, user_id=user.id)
     except ChatNotFoundError as exc:
         raise HTTPException(status_code=_HTTP_404, detail="chat not found") from exc
 
@@ -1618,9 +1644,7 @@ async def list_compaction_messages(
                        not owned by user) — existence never leaks.
     """
     try:
-        return await chat_service.get_compaction_messages(
-            chat_id, compaction_id, user_id=user.id
-        )
+        return await chat_service.get_compaction_messages(chat_id, compaction_id, user_id=user.id)
     except ChatNotFoundError as exc:
         raise HTTPException(status_code=_HTTP_404, detail="chat not found") from exc
 
@@ -2146,6 +2170,62 @@ _SUB_SESSION_FINALIZE_PROMPT: Final[str] = (
     "this session. Use markdown where appropriate."
 )
 
+# sub_sessions.preset_id is NOT NULL, but neither /sub-session/stream nor
+# /finalize currently receives a preset identifier from the FE — the
+# system_prompt is fully composed client-side (web/src/lib/presets.ts)
+# with no discriminator field on the wire, and P2 is BE-only (no FE
+# changes). preset_id is accepted as an optional Form field on both
+# routes below (purely additive — an untouched FE simply never sends it)
+# so P3/P4 can wire the FE to send the real preset id; until then every
+# durable sub-session row is persisted with this sentinel. Documented
+# limitation, not silently wrong: the column always holds a real string.
+_SUB_SESSION_PRESET_ID_UNSPECIFIED: Final[str] = "unspecified"
+
+# Disconnect poll interval for the sub-session watcher — mirrors
+# StreamingService._DISCONNECT_POLL_SEC (streaming_service.py). This is
+# ONLY the watcher's polling cadence; sub-sessions do NOT get the main
+# chat's idle-timeout / dead-man-hedge machinery (not requested — PLAN.md
+# §2b explicitly scopes this down).
+_SUB_SESSION_DISCONNECT_POLL_SEC: Final[float] = 0.5
+
+
+class _SubSessionStreamDone(Exception):
+    """Sentinel raised inside the TaskGroup on normal completion.
+
+    Mirrors ``streaming_service._StreamDone``: raising it cancels the
+    sibling disconnect-watcher task; the ``except*`` clause right below
+    the ``async with asyncio.TaskGroup()`` converts the resulting
+    ExceptionGroup back into linear control flow.
+    """
+
+
+class _SubSessionPersistContext(NamedTuple):
+    """Non-incognito persistence context for a durable sub-session stream.
+
+    Constructing one AT ALL is the "persist this stream" signal —
+    ``_sub_session_sse`` branches on ``persist is None`` vs not. Built by
+    the route handlers (``sub_session_stream`` / ``sub_session_finalize``)
+    via ``_resolve_sub_session_dispatch`` after the incognito gate (D6).
+    """
+
+    engine: AsyncEngine
+    chat_id: int
+    preset_id: str
+
+
+def _sub_session_derive_title(messages: list[dict[str, str]]) -> str | None:
+    """Derive ``sub_sessions.title`` from the first user turn (truncated).
+
+    Returns ``None`` (column NULL, FE falls back to the preset label per
+    the schema comment) when there is no non-empty leading user turn.
+    """
+    for msg in messages:
+        if msg.get("role") != "user":
+            continue
+        text = (msg.get("content") or "").strip()
+        return text[:200] if text else None
+    return None
+
 
 async def _sub_session_sse(
     *,
@@ -2157,6 +2237,274 @@ async def _sub_session_sse(
     prior_tool_rounds: int = 0,
     chat_id: int | None = None,
     on_final: Callable[[str, str], None] | None = None,
+    request: Request | None = None,
+    persist: _SubSessionPersistContext | None = None,
+) -> AsyncIterator[bytes]:
+    """Durable-teardown funnel around :func:`_sub_session_core`.
+
+    ``persist is None`` — incognito chats (D6), or any call site that
+    passes neither ``request`` nor ``persist`` (every direct call in
+    ``tests/services/test_sub_session_ephemeral.py`` and
+    ``tests/routes/test_sub_session_streaming.py``) — is the ORIGINAL
+    zero-persist path: ``_sub_session_core`` runs unwrapped, byte-identical
+    to the pre-durability generator (no lock, no draft row, no disconnect
+    watcher, no ``StreamInProgressError``).
+
+    ``persist`` set restructures the call around ONE funnel, mirroring
+    ``StreamingService.stream_chat``'s discipline (streaming_service.py
+    ~3007-4723) exactly:
+
+    1. Inside the per-chat sub-session lock (D4): the in-progress check
+       (:func:`_assert_no_sub_session_stream_in_progress`) and the
+       ``sub_sessions``/``sub_session_messages`` draft-row creation
+       (:func:`_create_sub_session_with_draft`) are ATOMIC — one
+       transaction, so a double-submit can never insert two drafts.
+    2. A disconnect-watcher task polls ``request.receive()`` (never
+       ``is_disconnected()``, which never fires on a write-only SSE
+       response — see ``streaming_service.py`` ~3955) alongside
+       ``_sub_session_core`` inside an ``asyncio.TaskGroup``.
+    3. A SINGLE outer ``finally`` finalizes-or-salvages the draft row
+       EXACTLY once via ``asyncio.shield`` — idempotent: a no-op once
+       ``_sub_session_core``'s ``on_success`` callback already moved the
+       row past ``draft`` on a graceful terminal — and transitions
+       ``sub_sessions.status`` to ``final`` (graceful) or ``aborted``
+       (disconnect, error, GeneratorExit, or a reaper sweep later).
+
+    Mobile hard-kill caveat (documented, not hidden): a CLEAN disconnect
+    is salvaged by the watcher above; a hard process-kill (mobile OS
+    killing the tab) sends no ``http.disconnect`` frame at all — that
+    draft is only salvaged later by the reaper's extended sweep (D5),
+    recovering whatever the last ``_CoalesceTimer`` flush wrote. Content
+    survives up to that last flush; the final unflushed delta window can
+    still be lost. Strictly better than today's total loss on any exit.
+
+    Raises:
+        SubSessionStreamInProgressError: If a sub-session stream is
+            already in progress for this chat_id — raised INSIDE the lock,
+            before any row is created. The route layer must eagerly prime
+            this generator by one step (``await gen.__anext__()``) to
+            surface it as HTTP 409 before committing to a
+            ``StreamingResponse``, mirroring ``routes/streaming.py``'s
+            identical priming of ``StreamingService.stream_chat``.
+    """
+    if persist is None:
+        async for frame in _sub_session_core(
+            lm_client=lm_client,
+            model_id=model_id,
+            system_prompt=system_prompt,
+            messages=messages,
+            integrations=integrations,
+            prior_tool_rounds=prior_tool_rounds,
+            chat_id=chat_id,
+            on_final=on_final,
+        ):
+            yield frame
+        return
+
+    if request is None:
+        raise ValueError("_sub_session_sse: request is required when persist is set")
+
+    engine = persist.engine
+    lock = _get_sub_session_stream_lock(persist.chat_id)
+    async with lock:
+        await _assert_no_sub_session_stream_in_progress(engine, chat_id=persist.chat_id)
+        user_text = messages[-1].get("content", "") if messages else ""
+        sub_session_id, msg_id = await _create_sub_session_with_draft(
+            engine,
+            chat_id=persist.chat_id,
+            preset_id=persist.preset_id,
+            title=_sub_session_derive_title(messages),
+            model_id=model_id,
+            user_text=user_text,
+        )
+
+    log.info(
+        "sub_session.stream.persist_start",
+        chat_id=persist.chat_id,
+        sub_session_id=sub_session_id,
+        msg_id=msg_id,
+        preset_id=persist.preset_id,
+    )
+
+    # Shared with the disconnect watcher + _sub_session_core via closure —
+    # single-threaded event loop, no locking needed (mirrors _state in
+    # StreamingService.stream_chat).
+    _pstate: dict[str, object] = {"done": False}
+    _graceful: dict[str, bool] = {"value": False}
+    coalesce = _CoalesceTimer(engine=engine, message_id=msg_id, table=sub_session_messages)
+
+    async def _on_success(
+        content: str, reasoning: str, tool_calls: list[dict[str, object]] | None
+    ) -> None:
+        """Finalize the GRACEFUL terminal exactly once (Bucket A exits).
+
+        Called by ``_sub_session_core`` at every terminal that actually
+        yields a real ``sub.complete`` frame. A no-op-safe idempotent
+        transition (draft -> pending_finalization -> final); the outer
+        ``finally``'s salvage below only ever fires for rows this never
+        touched (still ``draft``).
+        """
+        await coalesce.flush()
+        ok = await _finalize_message_impl(
+            engine,
+            msg_id=msg_id,
+            response_id=None,
+            final_content=content,
+            final_reasoning=reasoning,
+            stop_reason=None,
+            tool_calls=tool_calls,
+            table=sub_session_messages,
+        )
+        if ok:
+            _graceful["value"] = True
+
+    async def _watch_disconnect() -> None:
+        """Watch for client disconnect via receive(); abort the draft.
+
+        See the main-chat ``_watch_disconnect`` (streaming_service.py
+        ~3941) for the full rationale — mirrored here without the
+        idle-timeout dead-man-hedge (not requested for sub-sessions).
+        """
+        assert request is not None
+        while not _pstate["done"]:
+            try:
+                _msg = await asyncio.wait_for(
+                    request.receive(), timeout=_SUB_SESSION_DISCONNECT_POLL_SEC
+                )
+            except TimeoutError:
+                continue
+            if _msg is not None and _msg.get("type") == "http.disconnect":
+                log.info(
+                    "sub_session.stream.disconnected",
+                    chat_id=persist.chat_id,
+                    sub_session_id=sub_session_id,
+                    msg_id=msg_id,
+                )
+                # shield(): the TaskGroup cancels this watcher the instant
+                # _sub_session_core tears down on disconnect, which could
+                # cancel this UPDATE mid-flight. Belt-and-suspenders — the
+                # real guarantee is the shielded salvage in the finally
+                # below.
+                aborted = await asyncio.shield(
+                    safe_abort_draft(engine=engine, message_id=msg_id, table=sub_session_messages)
+                )
+                if aborted:
+                    STREAMS_FAILED.labels(reason="client_disconnect").inc()
+                return
+
+    mark_active(persist.chat_id)
+    try:
+        try:
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(
+                    _watch_disconnect(),
+                    name=f"sub_session_disconnect_watcher_{msg_id}",
+                )
+                async for frame in _sub_session_core(
+                    lm_client=lm_client,
+                    model_id=model_id,
+                    system_prompt=system_prompt,
+                    messages=messages,
+                    integrations=integrations,
+                    prior_tool_rounds=prior_tool_rounds,
+                    chat_id=chat_id,
+                    on_final=on_final,
+                    coalesce=coalesce,
+                    on_success=_on_success,
+                    persist_state=_pstate,
+                ):
+                    yield frame
+                _pstate["done"] = True
+                raise _SubSessionStreamDone()
+        except* _SubSessionStreamDone:
+            pass  # Normal completion — TaskGroup cancelled the watcher.
+        except* GeneratorExit:
+            # A consumer that stops iterating (Starlette exhausting the
+            # response, or a test aclose()) throws GeneratorExit into
+            # whichever `yield` is suspended INSIDE the TaskGroup —
+            # asyncio.TaskGroup wraps it into a BaseExceptionGroup like any
+            # other body exception (it is not a CancelledError special
+            # case). GeneratorExit is a BaseException, not an Exception
+            # subclass, so it would otherwise fall through both except*
+            # clauses above unmatched and re-propagate AS a
+            # BaseExceptionGroup — which violates the async-generator
+            # close() contract (a generator must exit via GeneratorExit,
+            # StopAsyncIteration, or a genuine new exception, never a
+            # wrapping group) and would surface as a confusing crash on
+            # teardown instead of a clean close. Swallowing it here lets
+            # the function fall through to the finally below (salvage +
+            # mark_inactive) and then return normally — exactly the
+            # "clean up, then close" idiom `except GeneratorExit: ...`
+            # (no re-raise) is for.
+            pass
+        except* Exception as eg:
+            # Re-raise the first non-_SubSessionStreamDone exception so the
+            # caller (StreamingResponse) surfaces it correctly.
+            for exc in eg.exceptions:
+                if not isinstance(exc, _SubSessionStreamDone):
+                    raise exc from None
+    finally:
+        # SINGLE guaranteed-once teardown — runs for every exit including
+        # GeneratorExit (client disconnect closes the response stream).
+        _acc_content = _pstate.get("acc_content")
+        _acc_reasoning = _pstate.get("acc_reasoning")
+        _acc_tools = _pstate.get("acc_tool_calls")
+        try:
+            # Salvages whatever _sub_session_core mirrored into _pstate: a
+            # no-op on a graceful terminal (row already FINAL via
+            # _on_success, WHERE state='draft' matches 0 rows); persists
+            # the partial answer on a non-graceful terminal (hard error,
+            # disconnect, or an exhausted-without-terminal exit that never
+            # called _on_success).
+            await asyncio.shield(
+                _release_stuck_draft_impl(
+                    engine,
+                    msg_id,
+                    sub_session_id,
+                    "sub_session_lifecycle_teardown",
+                    table=sub_session_messages,
+                    salvage_content=(_acc_content if isinstance(_acc_content, str) else None),
+                    salvage_reasoning=(_acc_reasoning if isinstance(_acc_reasoning, str) else None),
+                    salvage_tool_calls=(_acc_tools if isinstance(_acc_tools, list) else None),
+                    had_tool_calls=bool(_acc_tools),
+                    tool_rounds=len(_acc_tools) if isinstance(_acc_tools, list) else 0,
+                )
+            )
+        except asyncio.CancelledError:
+            # The shielded release still ran to completion; only the outer
+            # await was cancelled. Swallow — no caller is left to
+            # propagate to in this terminal teardown.
+            pass
+
+        # D9: final on a graceful _on_success finalize; aborted on every
+        # other exit (disconnect / error / exception / GeneratorExit). A
+        # later reaper sweep (D5) is a clean no-op — the conditional
+        # UPDATE only ever fires from 'active'.
+        _final_status = "final" if _graceful["value"] else "aborted"
+        try:
+            await asyncio.shield(
+                _transition_sub_session_status(
+                    engine, sub_session_id=sub_session_id, to_status=_final_status
+                )
+            )
+        except asyncio.CancelledError:
+            pass
+        mark_inactive(persist.chat_id)
+
+
+async def _sub_session_core(
+    *,
+    lm_client: LmstudioStreamingClient,
+    model_id: str,
+    system_prompt: str,
+    messages: list[dict[str, str]],
+    integrations: list[str] | None = None,
+    prior_tool_rounds: int = 0,
+    chat_id: int | None = None,
+    on_final: Callable[[str, str], None] | None = None,
+    coalesce: _CoalesceTimer | None = None,
+    on_success: Callable[[str, str, list[dict[str, object]] | None], Awaitable[None]] | None = None,
+    persist_state: dict[str, object] | None = None,
 ) -> AsyncIterator[bytes]:
     """Bridge a sub-session through the canonical LM Studio pipeline.
 
@@ -2178,10 +2526,11 @@ async def _sub_session_sse(
     - ``error``                        → ``sub.error``
         (``{code, message}`` — canonical error contract)
 
-    The sub-session has clean-context lifetime: no DB writes, no chat
-    history hydration, no memory ingestion — only the system prompt and
-    the provided messages reach the model. :class:`StreamingService` is
-    intentionally not used; its persistence model is wrong here.
+    The sub-session has clean-context GENERATION lifetime: no chat history
+    hydration, no memory ingestion — only the system prompt and the
+    provided messages reach the model. This is the SSE event-translation
+    core, unchanged by durable sub-sessions (migration 0045) — the
+    persistence wiring lives one level up, in :func:`_sub_session_sse`.
 
     ``on_final`` is fired exactly once, at whichever ``sub.complete``-style
     terminal resolves final content, with ``(content, kind)`` where ``kind``
@@ -2190,6 +2539,31 @@ async def _sub_session_sse(
     byte-scan wrapper only fired on non-empty ``sub.complete`` frames, and this
     preserves that. Lets the caller run distillation structurally instead of
     byte-scanning frames.
+
+    Durable-persistence hooks (all optional; None = the original
+    zero-persist behavior, still exercised directly by
+    ``tests/services/test_sub_session_ephemeral.py`` and
+    ``tests/routes/test_sub_session_streaming.py``):
+
+    - ``coalesce``: when set, every ``message.delta``/``tool_call.*`` event
+      also feeds the SAME ``_CoalesceTimer`` discipline ``stream_chat``
+      uses, flushing content to the draft row + bumping
+      ``last_activity_at`` so the reaper's extended sub-session sweep
+      never force-finalizes a healthy multi-minute run.
+    - ``on_success``: awaited with ``(content, reasoning, tool_calls)``
+      at every terminal that yields a real ``sub.complete`` (the caller's
+      single finalize point for a GRACEFUL outcome — mirrors
+      ``stream_chat`` calling ``_finalize_message`` inline on
+      ``chat.end``). NOT called on any ``sub.error`` terminal or on a
+      tool-turn-no-answer — those leave the draft row alone so the
+      OUTER ``_sub_session_sse`` finally's salvage-or-noop is the single
+      place that resolves them (to ``aborted``).
+    - ``persist_state``: mutable dict mirroring the freshest accumulated
+      ``content`` / ``reasoning`` / ``tool_calls`` (keys ``"acc_content"``,
+      ``"acc_reasoning"``, ``"acc_tool_calls"``) so a FAILURE-shaped exit
+      (hard error, disconnect, exception) still gives the outer salvage
+      something real to persist instead of an empty bubble — mirrors
+      ``stream_chat``'s ``_state["acc_content"]`` mirror.
     """
     from lmchat.lmstudio.types import (
         CanonicalChatRequest,
@@ -2213,6 +2587,47 @@ async def _sub_session_sse(
                 error=str(_exc),
                 error_type=type(_exc).__name__,
             )
+
+    # Durable-persistence hooks (all no-ops when the caller passed None —
+    # every original zero-persist call site, see the docstring above).
+    # Hoisted into small closures (rather than inline `if coalesce is not
+    # None: ...` at each of the ~10 call sites below) purely to keep this
+    # already-large function's control-flow graph within pyright's
+    # per-function complexity budget — behaviorally identical to inlining.
+
+    async def _persist_content_delta(delta_text: str) -> None:
+        """Feed one message.delta chunk to the coalesce timer + persist_state.
+
+        Called AFTER the caller has already appended *delta_text* to
+        ``accumulated`` — the persist_state mirror reads the POST-append
+        joined string via closure.
+        """
+        if coalesce is not None:
+            coalesce.add(delta_text)
+            if coalesce.should_flush():
+                await coalesce.flush()
+        if persist_state is not None:
+            persist_state["acc_content"] = "".join(accumulated)
+
+    def _persist_reasoning_delta() -> None:
+        """Mirror the post-append reasoning buffer into persist_state.
+
+        Not coalesced to the draft row (mirrors the main-chat pump:
+        reasoning is never shown incrementally) — only kept fresh for a
+        non-graceful terminal's salvage.
+        """
+        if persist_state is not None:
+            persist_state["acc_reasoning"] = "".join(accumulated_reasoning)
+
+    async def _persist_touch_tool_activity() -> None:
+        """Bump last_activity_at on a tool_call event (no content delta)."""
+        if coalesce is not None:
+            await coalesce.touch_activity()
+
+    async def _persist_success(content: str, reasoning: str) -> None:
+        """Finalize the draft on a GRACEFUL terminal (Bucket A exits)."""
+        if on_success is not None:
+            await on_success(content, reasoning, accumulated_tool_calls or None)
 
     # Build a canonical request. The sub-session uses the compat-style
     # conversation shape: a system prompt plus an alternating turn list.
@@ -2262,6 +2677,15 @@ async def _sub_session_sse(
     # in reasoning_content emits sub.complete with final_content="" and the
     # user sees "thinking, then it stopped" (confirmed 2026-06-12).
     accumulated_reasoning: list[str] = []
+    # Durable sub-sessions: FE ToolCall-shape accumulator (mirrors
+    # streaming_service._apply_tool_call_delta, minus its main-chat-only
+    # round-counting side effect — that's handled below via
+    # _sub_session_increment_tool_round). Persisted at every graceful
+    # terminal via on_success; mirrored into persist_state so a
+    # non-graceful exit's salvage keeps whatever tool cards had run.
+    accumulated_tool_calls: list[dict[str, object]] = []
+    if persist_state is not None:
+        persist_state["acc_tool_calls"] = accumulated_tool_calls
     # Per-event-type tally — feeds the MTP tool-round gate and the
     # user-facing error/diagnostic messages below.
     _event_tally: dict[str, int] = {}
@@ -2299,6 +2723,7 @@ async def _sub_session_sse(
                 _event_tally[etype] = _event_tally.get(etype, 0) + 1
                 if etype == "message.delta" and event.content:
                     accumulated.append(event.content)
+                    await _persist_content_delta(event.content)
                     yield (
                         b"event: sub.delta\ndata: "
                         + json.dumps({"delta": event.content}).encode()
@@ -2308,6 +2733,7 @@ async def _sub_session_sse(
                     yield b"event: sub.reasoning.start\ndata: {}\n\n"
                 elif etype == "reasoning.delta" and event.content:
                     accumulated_reasoning.append(event.content)
+                    _persist_reasoning_delta()
                     yield (
                         b"event: sub.reasoning.delta\ndata: "
                         + json.dumps({"delta": event.content}).encode()
@@ -2358,6 +2784,8 @@ async def _sub_session_sse(
                     payload: dict[str, object] = {}
                     if tc is not None:
                         payload = tc.model_dump()
+                        _accumulate_tool_call(accumulated_tool_calls, etype, tc)
+                    await _persist_touch_tool_activity()
                     yield (
                         b"event: sub."
                         + etype.encode()
@@ -2377,8 +2805,10 @@ async def _sub_session_sse(
                     tc_payload: dict[str, object] = {}
                     if tc is not None:
                         tc_payload = tc.model_dump()
+                        _accumulate_tool_call(accumulated_tool_calls, etype, tc)
                     if event.error:
                         tc_payload["error"] = event.error
+                    await _persist_touch_tool_activity()
                     yield (
                         b"event: sub.tool_call.failure\ndata: "
                         + json.dumps(tc_payload).encode()
@@ -2429,9 +2859,7 @@ async def _sub_session_sse(
                             + json.dumps(
                                 {
                                     "code": "tool_schema_parse_failed",
-                                    "message": _grammar_degrade_warning(
-                                        _original_integrations
-                                    ),
+                                    "message": _grammar_degrade_warning(_original_integrations),
                                 }
                             ).encode()
                             + b"\n\n"
@@ -2476,6 +2904,7 @@ async def _sub_session_sse(
                             ).encode()
                             + b"\n\n"
                         )
+                        await _persist_success("".join(accumulated), "".join(accumulated_reasoning))
                         _fire_on_final("".join(accumulated), "partial")
                         return
 
@@ -2589,6 +3018,7 @@ async def _sub_session_sse(
                         + json.dumps({"final_content": _terminal.content}).encode()
                         + b"\n\n"
                     )
+                    await _persist_success(_terminal.content, _terminal.reasoning or "")
                     _fire_on_final(_terminal.content, "complete")
                     return
                 # streaming-3: proactive per-turn tool-loop cap. Shares the
@@ -2664,6 +3094,11 @@ async def _sub_session_sse(
                             + json.dumps({"final_content": _cap_terminal.content}).encode()
                             + b"\n\n"
                         )
+                        # Persist whatever the client just saw via sub.complete —
+                        # a capped turn is still a resolved terminal from the
+                        # DB's perspective (unlike distillation below, which
+                        # only wants genuine user-facing substance).
+                        await _persist_success(_cap_terminal.content, _cap_terminal.reasoning or "")
                         # Distill ONLY a genuinely salvaged answer. A "graceful"
                         # terminal carries a system no-answer hint, not user
                         # content — distilling it would pollute memory. This also
@@ -2739,9 +3174,7 @@ async def _sub_session_sse(
                         + json.dumps(
                             {
                                 "code": "tool_schema_parse_failed",
-                                "message": _grammar_degrade_warning(
-                                    _original_integrations
-                                ),
+                                "message": _grammar_degrade_warning(_original_integrations),
                             }
                         ).encode()
                         + b"\n\n"
@@ -2792,6 +3225,7 @@ async def _sub_session_sse(
                 + json.dumps({"final_content": _exhausted_terminal.content}).encode()
                 + b"\n\n"
             )
+            await _persist_success(_exhausted_terminal.content, _exhausted_terminal.reasoning or "")
             _fire_on_final(_exhausted_terminal.content, "complete")
             # Normal (non-degrade) terminal — leave the retry loop.
             break
@@ -2866,6 +3300,236 @@ async def _sub_session_sse(
         )
 
 
+class _SubSessionDispatch(NamedTuple):
+    """Result of the shared ownership/incognito/provider/model resolution.
+
+    ``_resolve_sub_session_dispatch`` is the single call site both
+    ``sub_session_stream`` and ``sub_session_finalize`` now use — was a
+    ~120-line block duplicated verbatim across the two handlers so the
+    incognito gate (D6) had to land in exactly one place.
+    """
+
+    dispatch_client: LmstudioStreamingClient
+    wire_model_id: str
+    is_cloud: bool
+    incognito: bool
+
+
+async def _resolve_sub_session_dispatch(
+    *,
+    request: Request,
+    chat_id: int,
+    user: User,
+    model_id: str,
+    provider: str | None,
+    integrations_list: list[str],
+    wrap_agentic: bool,
+    log_site: str,
+) -> _SubSessionDispatch:
+    """Ownership + incognito (D6) + provider + LM Studio model resolution.
+
+    ``wrap_agentic``: ``/stream`` wraps the resolved provider in
+    ``maybe_wrap_agentic`` (MCP tool loop + app-executed web_search, and
+    resolves the openai_compat dispatch target when no explicit provider
+    was sent); ``/finalize`` is tool-less by design (it only appends the
+    closing summary directive) and passes ``False`` to skip both — the
+    ONE behavioral difference between the two original handlers, and the
+    only thing ``wrap_agentic`` gates.
+
+    Args:
+        log_site: Log-event prefix (``"sub_session"`` for /stream,
+            ``"sub_session_finalize"`` for /finalize) — preserves each
+            handler's original event names exactly.
+
+    Raises:
+        HTTPException: 404 if the chat is missing or not owned by *user*;
+            422 if LM Studio resolution finds no model loaded.
+    """
+    async with request.app.state.streaming_service._engine.connect() as conn:
+        from sqlalchemy import select as _select  # noqa: PLC0415
+
+        from lmchat.db.schema import chats as _chats  # noqa: PLC0415
+
+        row = (
+            await conn.execute(
+                _select(_chats.c.id, _chats.c.incognito).where(
+                    _chats.c.id == chat_id,
+                    _chats.c.user_id == user.id,
+                )
+            )
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=_HTTP_404, detail="chat not found")
+    incognito = bool(row.incognito)
+
+    lm_client: LmstudioStreamingClient = request.app.state.lm_streaming_client
+
+    # Cloud-provider routing. Resolve the effective provider FIRST — before
+    # any LM Studio model resolution — so the cloud path never touches the
+    # LM Studio loaded-instance lookup (which would either 422 or substitute
+    # a local model id in place of the cloud model id, corrupting the
+    # request sent to the cloud provider). When provider is absent /
+    # "lmstudio" / unresolved, fall back to the default lm_client — keeping
+    # the existing LM Studio path byte-identical.
+    from lmchat.services.lmstudio_streaming_client import (  # noqa: PLC0415
+        LmstudioStreamingClient as _LmstudioStreamingClient,
+    )
+
+    _effective_provider = (provider or "").strip()
+    _dispatch_client = lm_client
+    _is_cloud = False
+    if _effective_provider and _effective_provider != "lmstudio":
+        _registry = getattr(request.app.state, "provider_registry", None)
+        if _registry is not None:
+            _resolved = _registry.get(_effective_provider)
+            if _resolved is not None:
+                _effective_resolved = _resolved
+                if wrap_agentic:
+                    # B3: when cloud + MCP integrations, wrap in the agentic
+                    # loop (single source of truth in mcp/agentic.py).
+                    # cloud-without-integrations and LM Studio paths are
+                    # untouched.
+                    from lmchat.mcp.agentic import maybe_wrap_agentic  # noqa: PLC0415
+
+                    _effective_resolved = await maybe_wrap_agentic(
+                        _resolved,
+                        integrations_list,
+                        request.app.state,
+                        log_ctx={"site": log_site, "chat_id": chat_id},
+                    )
+                _dispatch_client = _LmstudioStreamingClient(adapter=_effective_resolved)  # type: ignore[arg-type]
+                _is_cloud = True
+                log.info(
+                    f"{log_site}.provider_routing",
+                    chat_id=chat_id,
+                    provider=_effective_provider,
+                    model_id=model_id,
+                )
+            else:
+                log.warning(
+                    f"{log_site}.provider_unknown_fallback_lmstudio",
+                    chat_id=chat_id,
+                    provider=_effective_provider,
+                )
+    elif wrap_agentic:
+        # openai_compat parity (mirrors streaming_service.py's
+        # _resolve_provider_and_context_mode lmstudio branch): native
+        # endpoint mode (the default) leaves this a no-op — _dispatch_client
+        # stays lm_client, chain path byte-identical. openai_compat
+        # re-presents the SAME live LM Studio adapter as an
+        # OpenAICompatProvider and wraps it in maybe_wrap_agentic so mcp/*
+        # integrations AND the app-executed web_search tool reach the
+        # sub-session, same as a cloud provider would above. _is_cloud stays
+        # False — the model still needs the LOADED-instance wire-id
+        # resolution below (openai_compat routes by loaded label, not the
+        # catalog key); only a real cloud model id skips that. /finalize
+        # never reaches this branch (wrap_agentic=False) — it stays on the
+        # plain lm_client, matching its original tool-less behavior.
+        _registry = getattr(request.app.state, "provider_registry", None)
+        if _registry is not None:
+            from lmchat.services.lm_studio_overrides_service import (  # noqa: PLC0415
+                resolve_lm_studio_endpoint_mode,
+            )
+
+            _endpoint_mode = await resolve_lm_studio_endpoint_mode(engine=get_engine_dep(request))
+            if _endpoint_mode == "openai_compat":
+                _lmstudio_native = _registry.get("lmstudio")
+                if _lmstudio_native is not None:
+                    _compat = _lmstudio_native.as_openai_compat_provider()  # type: ignore[attr-defined]
+
+                    # Increment 4 parity: app-executed web_search, gated
+                    # behind openai_compat exactly like the main path.
+                    _builtin_registry_arg = None
+                    _builtin_ctx_arg = None
+                    _web_search_service = getattr(request.app.state, "web_search_service", None)
+                    if _web_search_service is not None:
+                        from lmchat.services.builtin_tools import (  # noqa: PLC0415
+                            BUILTIN_TOOL_REGISTRY,
+                            BuiltinToolContext,
+                        )
+
+                        _builtin_registry_arg = BUILTIN_TOOL_REGISTRY
+                        _builtin_ctx_arg = BuiltinToolContext(
+                            web_search_service=_web_search_service
+                        )
+
+                    from lmchat.mcp.agentic import maybe_wrap_agentic  # noqa: PLC0415
+
+                    _wrapped = await maybe_wrap_agentic(
+                        _compat,
+                        integrations_list,
+                        request.app.state,
+                        log_ctx={"site": log_site, "chat_id": chat_id},
+                        builtin_registry=_builtin_registry_arg,
+                        builtin_ctx=_builtin_ctx_arg,
+                    )
+                    _dispatch_client = _LmstudioStreamingClient(adapter=_wrapped)  # type: ignore[arg-type]
+                    log.info(
+                        f"{log_site}.lmstudio_openai_compat_dispatch",
+                        chat_id=chat_id,
+                        model_id=model_id,
+                    )
+
+    # Resolve the stored model key to a LOADED loaded_instance_id, falling
+    # back to another loaded LLM when the pinned model has idled out of LM
+    # Studio. chats.model_id (and what the FE sends) is the stable key;
+    # shipping it raw when the model is unloaded (and JIT is disabled)
+    # hard-errors the whole sub-session — this stranded finished /research
+    # runs (2026-06-17).
+    #
+    # SKIPPED for cloud providers: the cloud model id (e.g.
+    # "openai/gpt-4o-mini") must reach the cloud provider verbatim; running
+    # it through LM Studio resolution would either 422 ("no model loaded")
+    # or substitute a local loaded-instance id — both corrupt the cloud
+    # request. Mirrors how streaming_service.py gates resolution behind
+    # context_mode=="chain" for the main replay path.
+    wire_model_id = model_id
+    if not _is_cloud:
+        try:
+            _models_svc = request.app.state.models_service
+            _res = await _models_svc.resolve_to_loaded_or_fallback(model_id)
+            if _res.wire_id is None:
+                raise HTTPException(
+                    status_code=_HTTP_422,
+                    detail=(
+                        "No language model is loaded in LM Studio. Load a model "
+                        "(or enable JIT loading) and try again."
+                    ),
+                )
+            wire_model_id = _res.wire_id
+            if _res.substituted:
+                log.info(
+                    f"{log_site}.model_substituted",
+                    chat_id=chat_id,
+                    requested=model_id,
+                    used=_res.fallback_key,
+                )
+            elif wire_model_id != model_id:
+                log.info(
+                    f"{log_site}.model_id_resolved",
+                    chat_id=chat_id,
+                    stored_key=model_id,
+                    wire_id=wire_model_id,
+                )
+        except HTTPException:
+            raise
+        except Exception as _exc:  # noqa: BLE001
+            log.warning(
+                f"{log_site}.model_resolve_failed",
+                model_id=model_id,
+                error=str(_exc),
+            )
+            # Fall through with the raw value — LM Studio will surface a
+            # clear 400.
+
+    return _SubSessionDispatch(
+        dispatch_client=_dispatch_client,
+        wire_model_id=wire_model_id,
+        is_cloud=_is_cloud,
+        incognito=incognito,
+    )
+
+
 @router.post("/{chat_id}/sub-session/stream")
 async def sub_session_stream(
     chat_id: int,
@@ -2875,6 +3539,7 @@ async def sub_session_stream(
     project_id: str | None = Form(None),
     integrations: str | None = Form(None),
     provider: str | None = Form(default=None),
+    preset_id: str | None = Form(default=None),
     request: Request = None,  # type: ignore[assignment]
     user: User = Depends(require_user),
     integrations_service: IntegrationsService = Depends(get_integrations_service_dep),
@@ -2882,7 +3547,11 @@ async def sub_session_stream(
     """Stream a sub-session completion with clean context (no chat history).
 
     The sub-session uses ONLY [system_prompt, ...messages_json] — the main
-    chat history is never loaded.  Nothing is persisted to the DB.
+    chat history is never loaded. Durable sub-sessions (migration 0045):
+    the turn is persisted through the SAME draft->pending_finalization->
+    final/aborted_by_client state machine the main chat uses, UNLESS the
+    chat is incognito (D6) — an incognito chat keeps today's zero-persist
+    path exactly.
 
     Used by the frontend slash-command sub-session panel so that each mode
     (/research, /code, etc.) operates in a clean, isolated context.
@@ -2894,6 +3563,12 @@ async def sub_session_stream(
     irrelevant; project context flows into persistent main-chat turns via
     the project-prompt hoist at ``streaming_service.py:836-862``, never
     into the ephemeral sub-session pipeline.
+
+    Raises:
+        HTTPException: 409 (``code=stream_in_progress``) if a sub-session
+            stream is already in flight for this chat_id (D4) — independent
+            of, and never blocked by, an in-progress MAIN-chat stream on
+            the same chat_id.
     """
     if project_id is not None and project_id != "":
         raise HTTPException(
@@ -2927,24 +3602,6 @@ async def sub_session_stream(
                 ),
             },
         )
-
-    # Verify chat ownership (session belongs to this user even though we
-    # don't load its history).
-    async with request.app.state.streaming_service._engine.connect() as conn:
-        from sqlalchemy import select as _select
-
-        from lmchat.db.schema import chats as _chats
-
-        row = (
-            await conn.execute(
-                _select(_chats.c.id).where(
-                    _chats.c.id == chat_id,
-                    _chats.c.user_id == user.id,
-                )
-            )
-        ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=_HTTP_404, detail="chat not found")
 
     try:
         messages: list[dict[str, str]] = json.loads(messages_json)
@@ -3067,163 +3724,21 @@ async def sub_session_stream(
         msg_count=len(messages),
     )
 
-    lm_client: LmstudioStreamingClient = request.app.state.lm_streaming_client
-
-    # Sub-session cloud-provider routing.
-    # Resolve the effective provider FIRST — before any LM Studio model
-    # resolution — so the cloud path never touches the LM Studio loaded-instance
-    # lookup (which would either 422 or substitute a local model id in place of
-    # the cloud model id, corrupting the request sent to the cloud provider).
-    # When provider is absent / "lmstudio" / unresolved, fall back to the
-    # default lm_client — keeping the existing LM Studio path byte-identical.
-    from lmchat.services.lmstudio_streaming_client import (  # noqa: PLC0415
-        LmstudioStreamingClient as _LmstudioStreamingClient,
+    # Ownership + incognito (D6) + cloud-provider routing + LM Studio
+    # wire-id resolution — single shared helper (was duplicated ~120 lines
+    # verbatim across /stream and /finalize).
+    _dispatch = await _resolve_sub_session_dispatch(
+        request=request,
+        chat_id=chat_id,
+        user=user,
+        model_id=model_id,
+        provider=provider,
+        integrations_list=integrations_list,
+        wrap_agentic=True,
+        log_site="sub_session",
     )
-
-    _effective_provider = (provider or "").strip()
-    _dispatch_client = lm_client  # default: LM Studio path unchanged
-    _is_cloud = False
-    if _effective_provider and _effective_provider != "lmstudio":
-        _registry = getattr(request.app.state, "provider_registry", None)
-        if _registry is not None:
-            _resolved = _registry.get(_effective_provider)
-            if _resolved is not None:
-                # B3: when cloud + MCP integrations, wrap in the agentic loop
-                # (single source of truth in mcp/agentic.py).
-                # cloud-without-integrations and LM Studio paths are untouched.
-                from lmchat.mcp.agentic import maybe_wrap_agentic  # noqa: PLC0415
-
-                _effective_resolved = await maybe_wrap_agentic(
-                    _resolved,
-                    integrations_list,
-                    request.app.state,
-                    log_ctx={"site": "sub_session", "chat_id": chat_id},
-                )
-                _dispatch_client = _LmstudioStreamingClient(adapter=_effective_resolved)  # type: ignore[arg-type]
-                _is_cloud = True
-                log.info(
-                    "sub_session.provider_routing",
-                    chat_id=chat_id,
-                    provider=_effective_provider,
-                    model_id=model_id,
-                )
-            else:
-                log.warning(
-                    "sub_session.provider_unknown_fallback_lmstudio",
-                    chat_id=chat_id,
-                    provider=_effective_provider,
-                )
-    else:
-        # openai_compat parity (mirrors streaming_service.py's
-        # _resolve_provider_and_context_mode lmstudio branch, applied here
-        # exactly like the cloud branch above): native endpoint mode (the
-        # default) leaves this a no-op — _dispatch_client stays lm_client,
-        # chain path byte-identical. openai_compat re-presents the SAME
-        # live LM Studio adapter as an OpenAICompatProvider and wraps it in
-        # maybe_wrap_agentic so mcp/* integrations AND the app-executed
-        # web_search tool reach the sub-session, same as a cloud provider
-        # would above. _is_cloud stays False — the model still needs the
-        # LOADED-instance wire-id resolution below (openai_compat routes by
-        # loaded label, not the catalog key); only a real cloud model id
-        # skips that.
-        _registry = getattr(request.app.state, "provider_registry", None)
-        if _registry is not None:
-            from lmchat.services.lm_studio_overrides_service import (  # noqa: PLC0415
-                resolve_lm_studio_endpoint_mode,
-            )
-
-            _endpoint_mode = await resolve_lm_studio_endpoint_mode(
-                engine=get_engine_dep(request)
-            )
-            if _endpoint_mode == "openai_compat":
-                _lmstudio_native = _registry.get("lmstudio")
-                if _lmstudio_native is not None:
-                    _compat = _lmstudio_native.as_openai_compat_provider()  # type: ignore[attr-defined]
-
-                    # Increment 4 parity: app-executed web_search, gated
-                    # behind openai_compat exactly like the main path.
-                    _builtin_registry_arg = None
-                    _builtin_ctx_arg = None
-                    _web_search_service = getattr(
-                        request.app.state, "web_search_service", None
-                    )
-                    if _web_search_service is not None:
-                        from lmchat.services.builtin_tools import (  # noqa: PLC0415
-                            BUILTIN_TOOL_REGISTRY,
-                            BuiltinToolContext,
-                        )
-
-                        _builtin_registry_arg = BUILTIN_TOOL_REGISTRY
-                        _builtin_ctx_arg = BuiltinToolContext(
-                            web_search_service=_web_search_service
-                        )
-
-                    from lmchat.mcp.agentic import maybe_wrap_agentic  # noqa: PLC0415
-
-                    _wrapped = await maybe_wrap_agentic(
-                        _compat,
-                        integrations_list,
-                        request.app.state,
-                        log_ctx={"site": "sub_session", "chat_id": chat_id},
-                        builtin_registry=_builtin_registry_arg,
-                        builtin_ctx=_builtin_ctx_arg,
-                    )
-                    _dispatch_client = _LmstudioStreamingClient(adapter=_wrapped)  # type: ignore[arg-type]
-                    log.info(
-                        "sub_session.lmstudio_openai_compat_dispatch",
-                        chat_id=chat_id,
-                        model_id=model_id,
-                    )
-
-    # Resolve the stored model key to a LOADED loaded_instance_id, falling back
-    # to another loaded LLM when the pinned model has idled out of LM Studio.
-    # chats.model_id (and what the FE sends) is the stable key; shipping it raw
-    # when the model is unloaded (and JIT is disabled) hard-errors the whole
-    # sub-session — this stranded finished /research runs (2026-06-17).
-    #
-    # This block is SKIPPED for cloud providers: the cloud model id (e.g.
-    # "openai/gpt-4o-mini") must reach the cloud provider verbatim; running it
-    # through LM Studio resolution would either 422 ("no model loaded") or
-    # substitute a local loaded-instance id — both corrupt the cloud request.
-    # Mirrors how streaming_service.py gates resolution behind
-    # context_mode=="chain" for the main replay path.
-    wire_model_id = model_id
-    if not _is_cloud:
-        try:
-            _models_svc = request.app.state.models_service
-            _res = await _models_svc.resolve_to_loaded_or_fallback(model_id)
-            if _res.wire_id is None:
-                raise HTTPException(
-                    status_code=_HTTP_422,
-                    detail=(
-                        "No language model is loaded in LM Studio. Load a model "
-                        "(or enable JIT loading) and try again."
-                    ),
-                )
-            wire_model_id = _res.wire_id
-            if _res.substituted:
-                log.info(
-                    "sub_session.model_substituted",
-                    chat_id=chat_id,
-                    requested=model_id,
-                    used=_res.fallback_key,
-                )
-            elif wire_model_id != model_id:
-                log.info(
-                    "sub_session.model_id_resolved",
-                    chat_id=chat_id,
-                    stored_key=model_id,
-                    wire_id=wire_model_id,
-                )
-        except HTTPException:
-            raise
-        except Exception as _exc:  # noqa: BLE001
-            log.warning(
-                "sub_session.model_resolve_failed",
-                model_id=model_id,
-                error=str(_exc),
-            )
-            # Fall through with the raw value — LM Studio will surface a clear 400.
+    _dispatch_client = _dispatch.dispatch_client
+    wire_model_id = _dispatch.wire_model_id
 
     # Load the persisted cross-turn tool-round count so the
     # MTP gate inside LmstudioAdapter sees the correct cumulative value.
@@ -3300,7 +3815,18 @@ async def sub_session_stream(
                 name=f"sub_session_memory_distill_{chat_id}",
             )
 
-    _sse_inner = _sub_session_sse(
+    # Durable sub-sessions (D6): a non-incognito chat persists this turn;
+    # an incognito chat passes persist=None — _sub_session_sse then runs
+    # the ORIGINAL zero-persist path, byte-identical to before.
+    persist_ctx: _SubSessionPersistContext | None = None
+    if not _dispatch.incognito:
+        persist_ctx = _SubSessionPersistContext(
+            engine=get_engine_dep(request),
+            chat_id=chat_id,
+            preset_id=preset_id or _SUB_SESSION_PRESET_ID_UNSPECIFIED,
+        )
+
+    gen = _sub_session_sse(
         lm_client=_dispatch_client,
         model_id=wire_model_id,
         system_prompt=system_prompt,
@@ -3309,10 +3835,35 @@ async def sub_session_stream(
         prior_tool_rounds=prior_rounds,
         chat_id=chat_id,
         on_final=_on_final,
+        request=request,
+        persist=persist_ctx,
     )
 
+    # _sub_session_sse is an async generator; the per-chat sub-session lock
+    # + in-progress check (D4) run before the first yield when persist is
+    # set, but generators execute lazily — prime it here (mirrors
+    # routes/streaming.py's identical StreamingService.stream_chat priming)
+    # so SubSessionStreamInProgressError surfaces as HTTP 409 before
+    # committing to a StreamingResponse.
+    try:
+        first_frame = await gen.__anext__()
+    except StopAsyncIteration:
+        first_frame = None
+    except SubSessionStreamInProgressError as exc:
+        raise HTTPException(
+            status_code=_HTTP_409,
+            detail={"code": "stream_in_progress", "chat_id": exc.chat_id},
+        ) from exc
+
+    async def _prepend_first_frame() -> AsyncIterator[bytes]:
+        """Yield the eagerly-fetched first frame then the remainder of gen."""
+        if first_frame is not None:
+            yield first_frame
+        async for frame in gen:
+            yield frame
+
     return StreamingResponse(
-        _sse_inner,
+        _prepend_first_frame(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -3329,6 +3880,7 @@ async def sub_session_finalize(
     messages_json: str = Form(...),
     project_id: str | None = Form(None),
     provider: str | None = Form(default=None),
+    preset_id: str | None = Form(default=None),
     request: Request = None,  # type: ignore[assignment]
     user: User = Depends(require_user),
     message_service: object = Depends(_get_message_service),
@@ -3341,6 +3893,12 @@ async def sub_session_finalize(
 
     Same project_id reject as /stream — the finalize stream is part of the
     same ephemeral pipeline so it inherits the not-projectable contract.
+    Same incognito gate (D6) as /stream: a non-incognito chat persists this
+    closing turn through the SAME durable state machine.
+
+    Raises:
+        HTTPException: 409 (``code=stream_in_progress``) if a sub-session
+            stream is already in flight for this chat_id (D4).
     """
     if project_id is not None and project_id != "":
         raise HTTPException(
@@ -3367,23 +3925,6 @@ async def sub_session_finalize(
             },
         )
 
-    # Ownership check (reuses same pattern as /sub-session/stream).
-    async with request.app.state.streaming_service._engine.connect() as conn:
-        from sqlalchemy import select as _select
-
-        from lmchat.db.schema import chats as _chats
-
-        row = (
-            await conn.execute(
-                _select(_chats.c.id).where(
-                    _chats.c.id == chat_id,
-                    _chats.c.user_id == user.id,
-                )
-            )
-        ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=_HTTP_404, detail="chat not found")
-
     try:
         messages: list[dict[str, str]] = json.loads(messages_json)
     except json.JSONDecodeError as exc:
@@ -3392,95 +3933,66 @@ async def sub_session_finalize(
     # Append the finalization directive.
     finalize_messages = [*messages, {"role": "user", "content": _SUB_SESSION_FINALIZE_PROMPT}]
 
-    lm_client: LmstudioStreamingClient = request.app.state.lm_streaming_client
+    # Ownership + incognito (D6) + provider routing + LM Studio wire-id
+    # resolution — same shared helper /stream uses. wrap_agentic=False: the
+    # finalize summary is tool-less by design, so this ONLY routes the
+    # provider (no agentic/tool wrapping, no openai_compat resolution) —
+    # byte-identical to the original handler's narrower behavior.
+    _dispatch = await _resolve_sub_session_dispatch(
+        request=request,
+        chat_id=chat_id,
+        user=user,
+        model_id=model_id,
+        provider=provider,
+        integrations_list=[],
+        wrap_agentic=False,
+        log_site="sub_session_finalize",
+    )
+    _dispatch_client = _dispatch.dispatch_client
+    wire_model_id = _dispatch.wire_model_id
 
-    # Cloud-provider routing for finalize (mirror of the equivalent
-    # block in sub_session_stream). Resolve the effective provider FIRST — the
-    # cloud model id (e.g. "openai/gpt-4o-mini") must reach the cloud provider
-    # verbatim; running it through LM Studio's loaded-instance resolution below
-    # would 422 ("no model loaded") or substitute a LOCAL loaded-instance id,
-    # both of which corrupt the cloud request (this stranded cloud /research
-    # finalize entirely). The finalize summary is tool-less, so this ONLY
-    # routes the provider — no agentic/tool wrapping (unlike the stream path).
-    _effective_provider = (provider or "").strip()
-    _dispatch_client = lm_client  # default: LM Studio path unchanged
-    _is_cloud = False
-    if _effective_provider and _effective_provider != "lmstudio":
-        _registry = getattr(request.app.state, "provider_registry", None)
-        if _registry is not None:
-            _resolved = _registry.get(_effective_provider)
-            if _resolved is not None:
-                from lmchat.services.lmstudio_streaming_client import (  # noqa: PLC0415
-                    LmstudioStreamingClient as _LmstudioStreamingClient,
-                )
+    # Durable sub-sessions (D6): same persist/incognito split as /stream.
+    # chat_id is intentionally NOT forwarded to _sub_session_core below
+    # (matches the original handler, which never passed it) — the MTP
+    # cross-turn tool-round registry is a /stream-only concern; finalize
+    # is a single tool-less turn. persist.chat_id (the outer wrapper's
+    # concern) is independent of that and always the real chat_id.
+    persist_ctx: _SubSessionPersistContext | None = None
+    if not _dispatch.incognito:
+        persist_ctx = _SubSessionPersistContext(
+            engine=get_engine_dep(request),
+            chat_id=chat_id,
+            preset_id=preset_id or _SUB_SESSION_PRESET_ID_UNSPECIFIED,
+        )
 
-                _dispatch_client = _LmstudioStreamingClient(adapter=_resolved)  # type: ignore[arg-type]
-                _is_cloud = True
-                log.info(
-                    "sub_session_finalize.provider_routing",
-                    chat_id=chat_id,
-                    provider=_effective_provider,
-                    model_id=model_id,
-                )
-            else:
-                log.warning(
-                    "sub_session_finalize.provider_unknown_fallback_lmstudio",
-                    chat_id=chat_id,
-                    provider=_effective_provider,
-                )
+    gen = _sub_session_sse(
+        lm_client=_dispatch_client,
+        model_id=wire_model_id,
+        system_prompt=system_prompt,
+        messages=finalize_messages,
+        request=request,
+        persist=persist_ctx,
+    )
 
-    # Resolve stored model key → a LOADED loaded_instance_id, falling back to
-    # another loaded LLM when the pinned model has idled out (same pattern as
-    # sub_session_stream). Summarization is model-agnostic, so a finished
-    # research run is never stranded just because its model unloaded.
-    #
-    # SKIPPED for cloud providers: the cloud model id must reach the cloud
-    # provider verbatim; LM Studio resolution would 422 or substitute a local
-    # loaded-instance id. Mirrors sub_session_stream + the main replay path.
-    wire_model_id = model_id
-    if not _is_cloud:
-        try:
-            _models_svc = request.app.state.models_service
-            _res = await _models_svc.resolve_to_loaded_or_fallback(model_id)
-            if _res.wire_id is None:
-                raise HTTPException(
-                    status_code=_HTTP_422,
-                    detail=(
-                        "No language model is loaded in LM Studio. Load a model "
-                        "(or enable JIT loading) and try again."
-                    ),
-                )
-            wire_model_id = _res.wire_id
-            if _res.substituted:
-                log.info(
-                    "sub_session_finalize.model_substituted",
-                    chat_id=chat_id,
-                    requested=model_id,
-                    used=_res.fallback_key,
-                )
-            elif wire_model_id != model_id:
-                log.info(
-                    "sub_session_finalize.model_id_resolved",
-                    chat_id=chat_id,
-                    stored_key=model_id,
-                    wire_id=wire_model_id,
-                )
-        except HTTPException:
-            raise
-        except Exception as _exc:  # noqa: BLE001
-            log.warning(
-                "sub_session_finalize.model_resolve_failed",
-                model_id=model_id,
-                error=str(_exc),
-            )
+    # Eager priming — see sub_session_stream's identical comment.
+    try:
+        first_frame = await gen.__anext__()
+    except StopAsyncIteration:
+        first_frame = None
+    except SubSessionStreamInProgressError as exc:
+        raise HTTPException(
+            status_code=_HTTP_409,
+            detail={"code": "stream_in_progress", "chat_id": exc.chat_id},
+        ) from exc
+
+    async def _prepend_first_frame() -> AsyncIterator[bytes]:
+        if first_frame is not None:
+            yield first_frame
+        async for frame in gen:
+            yield frame
 
     return StreamingResponse(
-        _sub_session_sse(
-            lm_client=_dispatch_client,
-            model_id=wire_model_id,
-            system_prompt=system_prompt,
-            messages=finalize_messages,
-        ),
+        _prepend_first_frame(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -31,12 +31,12 @@ from typing import TYPE_CHECKING, Any, Final, NamedTuple
 _LOCAL_TZ = datetime.now().astimezone().tzinfo
 
 from pydantic import BaseModel
-from sqlalchemy import func, insert, select
+from sqlalchemy import Table, func, insert, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from lmchat.db.retry import with_write_retry
-from lmchat.db.schema import chats, compactions, messages
+from lmchat.db.schema import chats, compactions, messages, sub_session_messages, sub_sessions
 from lmchat.lmstudio.oob_text import oob_message_text
 from lmchat.lmstudio.types import CanonicalChatRequest, CanonicalEvent, CanonicalToolCall
 from lmchat.logging import get_logger
@@ -61,7 +61,10 @@ from lmchat.services.capability_legend import render_capability_legend
 from lmchat.services.chat_service import ChatNotFoundError
 from lmchat.services.lm_studio_overrides_service import resolve_lm_studio_endpoint_mode
 from lmchat.services.lmstudio_streaming_client import LmstudioStreamingClient
-from lmchat.services.streaming_errors import StreamInProgressError
+from lmchat.services.streaming_errors import (
+    StreamInProgressError,
+    SubSessionStreamInProgressError,
+)
 from lmchat.services.system_guide import (
     ensure_section_embeddings_background as _guide_ensure_section_embeddings_background,
 )
@@ -446,11 +449,21 @@ class _CoalesceTimer:
 
     Callers call ``add(text)`` on each delta and ``should_flush()`` /
     ``flush()`` on the timer tick.
+
+    Parameterized on ``table`` (default ``messages``) so the SAME
+    coalesce-and-touch-activity discipline drives durable sub-sessions
+    (``sub_session_messages``, migration 0045) — without periodic
+    ``last_activity_at`` bumps the reaper's extended sub-session sweep
+    would force-finalize a healthy multi-minute ``/research`` run at the
+    5-minute inactivity mark.
     """
 
-    def __init__(self, *, engine: AsyncEngine, message_id: int) -> None:
+    def __init__(
+        self, *, engine: AsyncEngine, message_id: int, table: Table = messages
+    ) -> None:
         self._engine = engine
         self._message_id = message_id
+        self._table = table
         self._buf: list[str] = []
         self._last_flush = monotonic()
         # Throttled separately from flush to avoid one DB transaction per
@@ -480,12 +493,13 @@ class _CoalesceTimer:
 
         message_id = self._message_id
         engine = self._engine
+        table = self._table
 
         async def _update() -> None:
             async with engine.begin() as conn:
                 row = (
                     await conn.execute(
-                        select(messages.c.content).where(messages.c.id == message_id)
+                        select(table.c.content).where(table.c.id == message_id)
                     )
                 ).fetchone()
                 if row is None:
@@ -497,8 +511,8 @@ class _CoalesceTimer:
                 from datetime import datetime as _dt
 
                 await conn.execute(
-                    messages.update()
-                    .where(messages.c.id == message_id)
+                    table.update()
+                    .where(table.c.id == message_id)
                     .values(content=new_content, last_activity_at=_dt.now(UTC))
                 )
 
@@ -536,6 +550,7 @@ class _CoalesceTimer:
 
         message_id = self._message_id
         engine = self._engine
+        table = self._table
 
         from datetime import UTC  # noqa: PLC0415
         from datetime import datetime as _dt
@@ -543,8 +558,8 @@ class _CoalesceTimer:
         async def _touch() -> None:
             async with engine.begin() as conn:
                 await conn.execute(
-                    messages.update()
-                    .where(messages.c.id == message_id)
+                    table.update()
+                    .where(table.c.id == message_id)
                     .values(last_activity_at=_dt.now(UTC))
                 )
 
@@ -556,6 +571,344 @@ class _CoalesceTimer:
                 message_id=message_id,
                 error=str(exc),
             )
+
+
+# ---------------------------------------------------------------------------
+# Draft finalize / salvage — table-parameterized (durable sub-sessions,
+# migration 0045).
+#
+# Extracted as module-level functions (not bound to ``self``) so the
+# route layer (``routes/chats.py::_sub_session_sse``) can drive the exact
+# SAME finalize/salvage logic against ``sub_session_messages`` with only an
+# ``AsyncEngine`` in hand — no ``StreamingService`` instance required.
+# ``StreamingService._finalize_message`` / ``_release_stuck_draft`` below
+# are thin wrappers over these for the main-chat call sites, unchanged.
+# ---------------------------------------------------------------------------
+
+
+async def _finalize_message_impl(
+    engine: AsyncEngine,
+    *,
+    msg_id: int,
+    response_id: str | None,
+    final_content: str,
+    final_reasoning: str,
+    stop_reason: str | None = None,
+    tool_calls: list[dict[str, object]] | None = None,
+    table: Table = messages,
+) -> bool:
+    """Flush final content + reasoning + response_id into *table*.
+
+    Transitions draft -> pending_finalization -> final. Returns False if
+    the draft -> pending transition lost the race (the reaper recovers)
+    or the second transition fails; True once ``final`` is reached.
+
+    See :meth:`StreamingService._finalize_message` for the main-chat
+    wrapper's full docstring — behavior is identical, just table-agnostic.
+    """
+    step1_holder: list[int] = []
+
+    async def _update_to_pending() -> None:
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                table.update()
+                .where(
+                    table.c.id == msg_id,
+                    table.c.state == PersistState.DRAFT.value,
+                )
+                .values(
+                    content=final_content,
+                    reasoning_content=final_reasoning or None,  # NULL when empty
+                    response_id=response_id,
+                    stop_reason=stop_reason,
+                    tool_calls=tool_calls,
+                    state=PersistState.PENDING_FINALIZATION.value,
+                )
+            )
+            step1_holder.append(result.rowcount)
+
+    try:
+        await with_write_retry(_update_to_pending)
+    except Exception as exc:
+        log.error(
+            "stream.pending_transition_failed",
+            msg_id=msg_id,
+            table=table.name,
+            error=str(exc),
+        )
+        STREAMS_FAILED.labels(reason="db_commit_failed").inc()
+        return False
+
+    if not step1_holder or step1_holder[0] == 0:
+        log.warning(
+            "stream.pending_transition_race_lost",
+            msg_id=msg_id,
+            table=table.name,
+            note="Row was already moved by disconnect handler or reaper.",
+        )
+        return False
+
+    try:
+        won = await finalize_pending(engine=engine, message_id=msg_id, table=table)
+    except Exception as exc:
+        log.error(
+            "stream.finalize_failed",
+            msg_id=msg_id,
+            table=table.name,
+            error=str(exc),
+        )
+        STREAMS_FAILED.labels(reason="db_commit_failed").inc()
+        return False
+
+    if won:
+        log.info("stream.finalized", msg_id=msg_id, table=table.name)
+        STREAMS_COMPLETED.inc()
+        return True
+    else:
+        log.info(
+            "stream.finalize_race_lost",
+            msg_id=msg_id,
+            table=table.name,
+            note="Reaper concurrently finalized this row.",
+        )
+        return False
+
+
+async def _release_stuck_draft_impl(
+    engine: AsyncEngine,
+    msg_id: int,
+    chat_id: int,
+    reason: str,
+    *,
+    table: Table = messages,
+    salvage_content: str | None = None,
+    salvage_reasoning: str | None = None,
+    salvage_tool_calls: list[dict[str, object]] | None = None,
+    had_tool_calls: bool = False,
+    tool_rounds: int = 0,
+) -> None:
+    """Force-transition a draft row in *table* to FINAL on a terminal error.
+
+    See :meth:`StreamingService._release_stuck_draft` for the main-chat
+    wrapper's full docstring — behavior is identical, just table-agnostic.
+    ``chat_id`` carries the sub_session_id when *table* is
+    ``sub_session_messages`` — it is log-only, never a query predicate.
+    """
+    values: dict[str, object] = {"state": PersistState.FINAL.value}
+    salvaged_kind: str | None = None
+    if salvage_content is not None or salvage_reasoning is not None:
+        terminal = resolve_terminal_content(
+            salvage_content or "",
+            salvage_reasoning or "",
+            had_tool_calls=had_tool_calls,
+            tool_rounds=tool_rounds,
+        )
+        # Only write recovered substance — never blank out content already
+        # coalesced onto the row.
+        if terminal.content:
+            values["content"] = terminal.content
+        if terminal.reasoning:
+            values["reasoning_content"] = terminal.reasoning
+        if salvage_tool_calls:
+            values["tool_calls"] = salvage_tool_calls
+        if "content" in values or "reasoning_content" in values:
+            values["stop_reason"] = reason
+            salvaged_kind = terminal.kind
+    try:
+        async with engine.begin() as conn:
+            upd = await conn.execute(
+                sa_update(table)
+                .where(
+                    table.c.id == msg_id,
+                    table.c.state == PersistState.DRAFT.value,
+                )
+                .values(**values)
+            )
+        if upd.rowcount and upd.rowcount > 0:
+            log.warning(
+                "stream.stuck_draft_released",
+                msg_id=msg_id,
+                chat_id=chat_id,
+                table=table.name,
+                reason=reason,
+                salvaged_kind=salvaged_kind,
+            )
+    except Exception as exc:  # noqa: BLE001
+        # The reaper is the safety net — log and continue rather than
+        # let the cleanup itself throw and obscure the original error.
+        log.error(
+            "stream.stuck_draft_release_failed",
+            msg_id=msg_id,
+            chat_id=chat_id,
+            table=table.name,
+            reason=reason,
+            error=str(exc),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Durable sub-sessions (migration 0045) — session-row + draft creation,
+# in-progress check, and session-status transition. Free functions (engine-
+# only, no StreamingService instance) so ``routes/chats.py`` can drive them
+# with just the request's AsyncEngine.
+# ---------------------------------------------------------------------------
+
+
+async def _assert_no_sub_session_stream_in_progress(
+    engine: AsyncEngine, *, chat_id: int
+) -> None:
+    """Raise :class:`SubSessionStreamInProgressError` if *chat_id* has a
+    sub-session draft/pending_finalization row in flight.
+
+    Must be called INSIDE the per-chat sub-session lock (D4) so the check
+    and the subsequent draft insertion are atomic — mirrors why
+    ``StreamingService._assert_no_in_progress_stream`` must hold the main
+    chat lock. Scoped to sub-sessions only: independent of, and never
+    blocked by, an in-progress MAIN-chat stream on the same chat_id.
+    """
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            select(sub_session_messages.c.id)
+            .select_from(sub_session_messages.join(sub_sessions))
+            .where(
+                sub_sessions.c.chat_id == chat_id,
+                sub_session_messages.c.state.in_(
+                    [PersistState.DRAFT.value, PersistState.PENDING_FINALIZATION.value]
+                ),
+            )
+        )
+        row = result.fetchone()
+    if row is not None:
+        raise SubSessionStreamInProgressError(chat_id)
+
+
+async def _create_sub_session_with_draft(
+    engine: AsyncEngine,
+    *,
+    chat_id: int,
+    preset_id: str,
+    title: str | None,
+    model_id: str,
+    user_text: str,
+) -> tuple[int, int]:
+    """Atomically create a ``sub_sessions`` row + its opening user/draft pair.
+
+    Mirrors :meth:`StreamingService._create_draft`'s pattern for the main
+    chat: three inserts in ONE transaction — the ``sub_sessions`` parent
+    row (``status='active'``), the user turn (``state='final'``), and the
+    assistant draft (``state='draft'``) — so a process crash between
+    commits never leaves an orphaned parent row or a draft with no
+    matching user turn. Uses ``sub_session_id`` (not ``chat_id``) as the
+    FK on ``sub_session_messages`` — the column differs from ``messages``,
+    so this is a dedicated sibling rather than a table-parameterized
+    ``_create_draft``.
+
+    Returns:
+        ``(sub_session_id, draft_msg_id)``.
+    """
+    ids: list[int] = []
+
+    async def _insert() -> None:
+        async with engine.begin() as conn:
+            sess_result = await conn.execute(
+                insert(sub_sessions).values(
+                    chat_id=chat_id,
+                    preset_id=preset_id,
+                    title=title,
+                    status="active",
+                    model_id=model_id,
+                )
+            )
+            sess_pk = sess_result.inserted_primary_key
+            if sess_pk is None:
+                raise RuntimeError("INSERT into sub_sessions returned no PK")
+            sub_session_id = int(sess_pk[0])
+
+            await conn.execute(
+                insert(sub_session_messages).values(
+                    sub_session_id=sub_session_id,
+                    role="user",
+                    content=user_text,
+                    state=PersistState.FINAL.value,
+                )
+            )
+            draft_result = await conn.execute(
+                insert(sub_session_messages).values(
+                    sub_session_id=sub_session_id,
+                    role="assistant",
+                    content="",
+                    state=PersistState.DRAFT.value,
+                    model_id=model_id,
+                )
+            )
+            draft_pk = draft_result.inserted_primary_key
+            if draft_pk is None:
+                raise RuntimeError("INSERT into sub_session_messages (draft) returned no PK")
+            ids.append(sub_session_id)
+            ids.append(int(draft_pk[0]))
+
+    await with_write_retry(_insert)
+    sub_session_id, msg_id = ids[0], ids[1]
+    log.info(
+        "sub_session.draft_created",
+        chat_id=chat_id,
+        sub_session_id=sub_session_id,
+        msg_id=msg_id,
+        preset_id=preset_id,
+        model_id=model_id,
+    )
+    return sub_session_id, msg_id
+
+
+async def _transition_sub_session_status(
+    engine: AsyncEngine, *, sub_session_id: int, to_status: str
+) -> bool:
+    """Atomically move ``sub_sessions.status`` from ``active`` to *to_status*.
+
+    D9: ``active`` -> ``final`` on graceful completion, ``active`` ->
+    ``aborted`` on disconnect/error/reaper. A single conditional
+    ``UPDATE ... WHERE status='active'`` — whichever caller (the stream's
+    own teardown, the disconnect watcher, or the reaper) gets there first
+    wins; later callers are clean no-ops, so this is safe to call from
+    more than one teardown path without an explicit lock.
+
+    Returns:
+        ``True`` if this call performed the transition, ``False`` if the
+        row was already out of ``active`` (or absent).
+    """
+    result_holder: list[int] = []
+
+    async def _do_update() -> None:
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                sub_sessions.update()
+                .where(
+                    sub_sessions.c.id == sub_session_id,
+                    sub_sessions.c.status == "active",
+                )
+                .values(status=to_status)
+            )
+            result_holder.append(result.rowcount)
+
+    try:
+        await with_write_retry(_do_update)
+    except Exception as exc:  # noqa: BLE001
+        log.error(
+            "sub_session.status_transition_failed",
+            sub_session_id=sub_session_id,
+            to_status=to_status,
+            error=str(exc),
+        )
+        return False
+
+    won = bool(result_holder) and result_holder[0] == 1
+    log.info(
+        "sub_session.status_transition",
+        sub_session_id=sub_session_id,
+        to_status=to_status,
+        won=won,
+    )
+    return won
 
 
 # SSE frame formatting
@@ -1592,6 +1945,7 @@ class StreamingService:
         final_reasoning: str,  # reasoning persistence
         stop_reason: str | None = None,  # drives the FE Continue chip
         tool_calls: list[dict[str, object]] | None = None,  # accumulated tool-call list
+        table: Table = messages,
     ) -> bool:
         """Flush final content + reasoning + response_id.
 
@@ -1605,70 +1959,22 @@ class StreamingService:
 
         ``stop_reason`` ("stop" | "length" | None) drives the FE Continue
         chip on reload; ``tool_calls`` (FE ToolCall shape, or None) is what
-        ToolCallCards re-render from.
+        ToolCallCards re-render from. ``table`` (default ``messages``) is a
+        thin passthrough to :func:`_finalize_message_impl` — the durable
+        sub-session path (``routes/chats.py``) calls the free function
+        directly with ``table=sub_session_messages`` instead, since it does
+        not have a ``StreamingService`` instance in hand.
         """
-        step1_holder: list[int] = []
-
-        async def _update_to_pending() -> None:
-            async with self._engine.begin() as conn:
-                result = await conn.execute(
-                    messages.update()
-                    .where(
-                        messages.c.id == msg_id,
-                        messages.c.state == PersistState.DRAFT.value,
-                    )
-                    .values(
-                        content=final_content,
-                        reasoning_content=final_reasoning or None,  # NULL when empty
-                        response_id=response_id,
-                        stop_reason=stop_reason,
-                        tool_calls=tool_calls,
-                        state=PersistState.PENDING_FINALIZATION.value,
-                    )
-                )
-                step1_holder.append(result.rowcount)
-
-        try:
-            await with_write_retry(_update_to_pending)
-        except Exception as exc:
-            log.error(
-                "stream.pending_transition_failed",
-                msg_id=msg_id,
-                error=str(exc),
-            )
-            STREAMS_FAILED.labels(reason="db_commit_failed").inc()
-            return False
-
-        if not step1_holder or step1_holder[0] == 0:
-            log.warning(
-                "stream.pending_transition_race_lost",
-                msg_id=msg_id,
-                note="Row was already moved by disconnect handler or reaper.",
-            )
-            return False
-
-        try:
-            won = await finalize_pending(engine=self._engine, message_id=msg_id)
-        except Exception as exc:
-            log.error(
-                "stream.finalize_failed",
-                msg_id=msg_id,
-                error=str(exc),
-            )
-            STREAMS_FAILED.labels(reason="db_commit_failed").inc()
-            return False
-
-        if won:
-            log.info("stream.finalized", msg_id=msg_id)
-            STREAMS_COMPLETED.inc()
-            return True
-        else:
-            log.info(
-                "stream.finalize_race_lost",
-                msg_id=msg_id,
-                note="Reaper concurrently finalized this row.",
-            )
-            return False
+        return await _finalize_message_impl(
+            self._engine,
+            msg_id=msg_id,
+            response_id=response_id,
+            final_content=final_content,
+            final_reasoning=final_reasoning,
+            stop_reason=stop_reason,
+            tool_calls=tool_calls,
+            table=table,
+        )
 
     async def _release_stuck_draft(
         self,
@@ -1676,6 +1982,7 @@ class StreamingService:
         chat_id: int,
         reason: str,
         *,
+        table: Table = messages,
         salvage_content: str | None = None,
         salvage_reasoning: str | None = None,
         salvage_tool_calls: list[dict[str, object]] | None = None,
@@ -1700,55 +2007,25 @@ class StreamingService:
         Defensive: only updates rows currently in DRAFT for *msg_id*, so a
         concurrent ``_finalize_message`` win is safe (rowcount=0). Content is
         only overwritten when the salvage actually recovered something.
+
+        ``table`` (default ``messages``) is a thin passthrough to
+        :func:`_release_stuck_draft_impl`; ``chat_id`` carries the
+        sub_session_id when a caller passes ``table=sub_session_messages``
+        (log-only, never a query predicate — see the free function's
+        docstring).
         """
-        values: dict[str, object] = {"state": PersistState.FINAL.value}
-        salvaged_kind: str | None = None
-        if salvage_content is not None or salvage_reasoning is not None:
-            terminal = resolve_terminal_content(
-                salvage_content or "",
-                salvage_reasoning or "",
-                had_tool_calls=had_tool_calls,
-                tool_rounds=tool_rounds,
-            )
-            # Only write recovered substance — never blank out content already
-            # coalesced onto the row.
-            if terminal.content:
-                values["content"] = terminal.content
-            if terminal.reasoning:
-                values["reasoning_content"] = terminal.reasoning
-            if salvage_tool_calls:
-                values["tool_calls"] = salvage_tool_calls
-            if "content" in values or "reasoning_content" in values:
-                values["stop_reason"] = reason
-                salvaged_kind = terminal.kind
-        try:
-            async with self._engine.begin() as conn:
-                upd = await conn.execute(
-                    sa_update(messages)
-                    .where(
-                        messages.c.id == msg_id,
-                        messages.c.state == PersistState.DRAFT.value,
-                    )
-                    .values(**values)
-                )
-            if upd.rowcount and upd.rowcount > 0:
-                log.warning(
-                    "stream.stuck_draft_released",
-                    msg_id=msg_id,
-                    chat_id=chat_id,
-                    reason=reason,
-                    salvaged_kind=salvaged_kind,
-                )
-        except Exception as exc:  # noqa: BLE001
-            # The reaper is the safety net — log and continue rather than
-            # let the cleanup itself throw and obscure the original error.
-            log.error(
-                "stream.stuck_draft_release_failed",
-                msg_id=msg_id,
-                chat_id=chat_id,
-                reason=reason,
-                error=str(exc),
-            )
+        await _release_stuck_draft_impl(
+            self._engine,
+            msg_id,
+            chat_id,
+            reason,
+            table=table,
+            salvage_content=salvage_content,
+            salvage_reasoning=salvage_reasoning,
+            salvage_tool_calls=salvage_tool_calls,
+            had_tool_calls=had_tool_calls,
+            tool_rounds=tool_rounds,
+        )
 
     async def _load_replay_history(
         self,

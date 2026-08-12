@@ -25,7 +25,7 @@ from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from lmchat.db.retry import with_write_retry
-from lmchat.db.schema import chat_shares, chats, compactions, messages
+from lmchat.db.schema import chat_shares, chats, compactions, messages, sub_sessions
 from lmchat.db.scope import project_scope_clause
 from lmchat.lmstudio.oob_text import oob_message_text
 from lmchat.logging import get_logger
@@ -1485,6 +1485,11 @@ class ChatService:
         The LM Studio ``response_id`` chain lives on message rows, so a
         cleared chat naturally starts fresh on the next turn.
 
+        Also deletes the chat's ``sub_sessions`` rows (D8, migration 0045)
+        — cascades to ``sub_session_messages`` via ``ON DELETE CASCADE`` —
+        so "clear chat" doesn't silently retain old sub-session history
+        while wiping the main thread.
+
         Returns:
             The number of messages removed.
 
@@ -1511,6 +1516,11 @@ class ChatService:
                     # archived span with nothing left to reference is moot.
                     await conn.execute(
                         delete(compactions).where(compactions.c.chat_id == chat_id)
+                    )
+                    # And the chat's durable sub-sessions (D8) — cascades to
+                    # sub_session_messages automatically via the FK.
+                    await conn.execute(
+                        delete(sub_sessions).where(sub_sessions.c.chat_id == chat_id)
                     )
 
             await with_write_retry(_clear)

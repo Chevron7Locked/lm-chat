@@ -912,6 +912,12 @@ def _make_distill_app(
     app.state.lm_streaming_client = _lm_client
     app.state.models_service = _mock_models_svc
     app.state.streaming_service = _ShimWithDistill(db_engine)
+    # Durable sub-sessions (P2): get_engine_dep(request) reads
+    # app.state.engine directly (not via Depends — see the identical
+    # comment on the `test_client` fixture above), so the sub-session
+    # route's persistence wiring needs this set too, else it falls
+    # through to the process-global ./lmchat.db singleton.
+    app.state.engine = db_engine
 
     return app
 

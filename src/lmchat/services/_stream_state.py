@@ -17,12 +17,17 @@ Public surface
   the caller won the race, ``False`` otherwise.
 - ``safe_abort_draft()`` — convenience wrapper: draft → aborted_by_client.
 - ``finalize_pending()`` — convenience wrapper: pending_finalization → final.
+
+All three accept an optional ``table`` (default ``messages``) so the SAME
+state machine drives ``sub_session_messages`` durability (durable
+sub-sessions, migration 0045) — both tables share the identical ``id``/
+``state`` column shape, so this is a genuine table swap, not a fork.
 """
 from __future__ import annotations
 
 from enum import StrEnum
 
-from sqlalchemy import update
+from sqlalchemy import Table, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from lmchat.db.retry import with_write_retry
@@ -52,10 +57,11 @@ async def transition(
     message_id: int,
     from_state: PersistState,
     to_state: PersistState,
+    table: Table = messages,
 ) -> bool:
     """Atomically move ``message_id`` from *from_state* to *to_state*.
 
-    Issues a single ``UPDATE messages SET state=:to WHERE id=:mid AND
+    Issues a single ``UPDATE <table> SET state=:to WHERE id=:mid AND
     state=:from`` inside a write-retried transaction.  The caller wins
     the race if and only if ``rowcount == 1``; a ``rowcount`` of 0 means
     the row was already in a different state (another coroutine got there
@@ -63,9 +69,12 @@ async def transition(
 
     Args:
         engine:       The async SQLAlchemy engine to use.
-        message_id:   Primary key of the row in ``messages``.
+        message_id:   Primary key of the row in *table*.
         from_state:   Expected current state; the WHERE predicate.
         to_state:     Desired new state; the SET value.
+        table:        Target table; ``messages`` (default) for the main
+            chat, ``sub_session_messages`` for durable sub-sessions. Both
+            share the same ``id``/``state`` column shape.
 
     Returns:
         ``True`` if exactly one row was updated (caller won).
@@ -80,10 +89,10 @@ async def transition(
     async def _do_update() -> None:
         async with engine.begin() as conn:
             result = await conn.execute(
-                update(messages)
+                update(table)
                 .where(
-                    messages.c.id == message_id,
-                    messages.c.state == from_state.value,
+                    table.c.id == message_id,
+                    table.c.state == from_state.value,
                 )
                 .values(state=to_state.value)
             )
@@ -99,6 +108,7 @@ async def transition(
         message_id=message_id,
         from_state=from_state.value,
         to_state=to_state.value,
+        table=table.name,
         won=won,
     )
     return won
@@ -108,6 +118,7 @@ async def safe_abort_draft(
     *,
     engine: AsyncEngine,
     message_id: int,
+    table: Table = messages,
 ) -> bool:
     """Attempt to move *message_id* from ``draft`` to ``aborted_by_client``.
 
@@ -118,7 +129,9 @@ async def safe_abort_draft(
 
     Args:
         engine:      The async SQLAlchemy engine to use.
-        message_id:  Primary key of the row in ``messages``.
+        message_id:  Primary key of the row in *table*.
+        table:       Target table; ``messages`` (default) or
+            ``sub_session_messages``.
 
     Returns:
         ``True`` if the abort succeeded (row was in ``draft``).
@@ -129,6 +142,7 @@ async def safe_abort_draft(
         message_id=message_id,
         from_state=PersistState.DRAFT,
         to_state=PersistState.ABORTED_BY_CLIENT,
+        table=table,
     )
 
 
@@ -136,6 +150,7 @@ async def finalize_pending(
     *,
     engine: AsyncEngine,
     message_id: int,
+    table: Table = messages,
 ) -> bool:
     """Attempt to move *message_id* from ``pending_finalization`` to ``final``.
 
@@ -145,7 +160,9 @@ async def finalize_pending(
 
     Args:
         engine:      The async SQLAlchemy engine to use.
-        message_id:  Primary key of the row in ``messages``.
+        message_id:  Primary key of the row in *table*.
+        table:       Target table; ``messages`` (default) or
+            ``sub_session_messages``.
 
     Returns:
         ``True`` if the finalization succeeded.
@@ -156,4 +173,5 @@ async def finalize_pending(
         message_id=message_id,
         from_state=PersistState.PENDING_FINALIZATION,
         to_state=PersistState.FINAL,
+        table=table,
     )
