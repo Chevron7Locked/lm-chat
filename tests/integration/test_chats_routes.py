@@ -674,3 +674,106 @@ async def test_append_message_unauth(client: httpx.AsyncClient) -> None:
         data={"role": "user", "content": "hi"},
     )
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/chats/{id} — per-chat override clear-to-inherit.
+# FastAPI coerces an empty form value to None on an optional param, so a field
+# sent EMPTY (clear) was indistinguishable from OMITTED — every clear silently
+# failed (numeric fields additionally 422'd on the "null" the rail serialises).
+# The route now reads the raw form to recover the present-but-empty signal.
+# ---------------------------------------------------------------------------
+
+
+async def test_numeric_rail_override_set_then_clear(
+    client: httpx.AsyncClient,
+) -> None:
+    _, cookie = await register_and_login(client)
+    chat = await _create_chat(client, cookie)
+    hdr = {"Cookie": f"lmchat_session={cookie}"}
+    cid = chat["id"]
+
+    # Set a real value → stored.
+    resp = await client.patch(
+        f"/api/chats/{cid}", data={"temperature": "0.7"}, headers=hdr
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["settings"]["temperature"] == 0.7
+
+    # Clear via "null" — the string the rail serialises the JS `null` to. 200,
+    # NOT a 422, and the override is gone.
+    resp = await client.patch(
+        f"/api/chats/{cid}", data={"temperature": "null"}, headers=hdr
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["settings"].get("temperature") is None
+
+    # Clear via a present-but-empty value also works (belt-and-suspenders).
+    await client.patch(f"/api/chats/{cid}", data={"top_k": "40"}, headers=hdr)
+    resp = await client.patch(f"/api/chats/{cid}", data={"top_k": ""}, headers=hdr)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["settings"].get("top_k") is None
+
+
+async def test_perchat_string_fields_clear_via_empty(
+    client: httpx.AsyncClient,
+) -> None:
+    """reasoning / repeat_warning_cut_k / system_prompt clear on a present-but-
+    empty submission (the raw-form path recovers what FastAPI swallowed)."""
+    _, cookie = await register_and_login(client)
+    chat = await _create_chat(client, cookie)
+    hdr = {"Cookie": f"lmchat_session={cookie}"}
+    cid = chat["id"]
+
+    for key, val in (
+        ("reasoning", "high"),
+        ("reasoning_effort", "high"),
+        ("active_preset", "general"),
+        ("repeat_warning_cut_k", "25"),
+        ("system_prompt", "hello"),
+    ):
+        resp = await client.patch(f"/api/chats/{cid}", data={key: val}, headers=hdr)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["settings"].get(key) is not None, f"{key} did not persist"
+
+        resp = await client.patch(f"/api/chats/{cid}", data={key: ""}, headers=hdr)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["settings"].get(key) is None, f"{key} did not clear"
+
+    # Enum/id fields also clear via the "null" the rail may serialise (they
+    # never carry a literal "null" value, unlike free-text system_prompt).
+    await client.patch(f"/api/chats/{cid}", data={"reasoning": "low"}, headers=hdr)
+    resp = await client.patch(
+        f"/api/chats/{cid}", data={"reasoning": "null"}, headers=hdr
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["settings"].get("reasoning") is None
+
+
+async def test_system_prompt_literal_null_is_preserved(
+    client: httpx.AsyncClient,
+) -> None:
+    """A literal "null" is a VALID system prompt — it must be stored, not
+    treated as a clear sentinel (free text ≠ numeric fields)."""
+    _, cookie = await register_and_login(client)
+    chat = await _create_chat(client, cookie)
+    resp = await client.patch(
+        f"/api/chats/{chat['id']}",
+        data={"system_prompt": "null"},
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["settings"].get("system_prompt") == "null"
+
+
+async def test_numeric_rail_override_rejects_non_numeric(
+    client: httpx.AsyncClient,
+) -> None:
+    _, cookie = await register_and_login(client)
+    chat = await _create_chat(client, cookie)
+    resp = await client.patch(
+        f"/api/chats/{chat['id']}",
+        data={"max_tokens": "not-a-number"},
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert resp.status_code == 422, resp.text

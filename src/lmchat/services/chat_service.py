@@ -1266,6 +1266,7 @@ class ChatService:
             "self_consistency_enabled",
             "chain_of_verification_enabled",
             "stateless",
+            "repeat_warning_cut_k",
             # Forward-compat
             "active_preset",
         }

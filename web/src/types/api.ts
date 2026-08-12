@@ -4088,9 +4088,9 @@ export interface components {
             /** Incognito */
             incognito?: boolean | null;
             /** Max Tokens */
-            max_tokens?: number | null;
+            max_tokens?: string | null;
             /** Min P */
-            min_p?: number | null;
+            min_p?: string | null;
             /** Model Id */
             model_id?: string | null;
             /** Pinned */
@@ -4106,7 +4106,7 @@ export interface components {
             /** Reasoning Effort */
             reasoning_effort?: string | null;
             /** Repeat Penalty */
-            repeat_penalty?: number | null;
+            repeat_penalty?: string | null;
             /** Repeat Warning Cut K */
             repeat_warning_cut_k?: string | null;
             /** Self Consistency Enabled */
@@ -4116,13 +4116,13 @@ export interface components {
             /** System Prompt */
             system_prompt?: string | null;
             /** Temperature */
-            temperature?: number | null;
+            temperature?: string | null;
             /** Title */
             title?: string | null;
             /** Top K */
-            top_k?: number | null;
+            top_k?: string | null;
             /** Top P */
-            top_p?: number | null;
+            top_p?: string | null;
         };
         /** Body_patch_document_route_api_documents__document_id__patch */
         Body_patch_document_route_api_documents__document_id__patch: {

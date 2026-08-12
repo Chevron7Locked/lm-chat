@@ -590,12 +590,16 @@ async def patch_chat(
     # ``useUpdateChat``. Without these declarations FastAPI silently drops
     # the form fields and the Pydantic gate never sees them.
     system_prompt: str | None = Form(default=None),
-    temperature: float | None = Form(default=None),
-    top_p: float | None = Form(default=None),
-    top_k: int | None = Form(default=None),
-    min_p: float | None = Form(default=None),
-    repeat_penalty: float | None = Form(default=None),
-    max_tokens: int | None = Form(default=None),
+    # Numeric rail overrides travel as strings so the clear path ("" — see the
+    # frontend rail) can be told apart from a real value. A bare `float | None`
+    # Form param 422'd on the clear payload, so clearing a per-chat sampler
+    # override silently failed. Parsed + range-checked below.
+    temperature: str | None = Form(default=None),
+    top_p: str | None = Form(default=None),
+    top_k: str | None = Form(default=None),
+    min_p: str | None = Form(default=None),
+    repeat_penalty: str | None = Form(default=None),
+    max_tokens: str | None = Form(default=None),
     reasoning: str | None = Form(default=None),
     self_consistency_enabled: bool | None = Form(default=None),
     chain_of_verification_enabled: bool | None = Form(default=None),
@@ -715,10 +719,7 @@ async def patch_chat(
         settings_patch: dict = {}  # type: ignore[type-arg]
         if rag_enabled is not None:
             settings_patch["rag_enabled"] = rag_enabled
-        if reasoning_effort is not None:
-            # Empty string clears the per-chat override (falls through to
-            # the global default in the frontend).
-            settings_patch["reasoning_effort"] = reasoning_effort if reasoning_effort else None
+        # reasoning_effort is cleared/set in the consolidated enum/id loop below.
         if ab_compare is not None:
             try:
                 ab_compare_parsed = _json.loads(ab_compare)
@@ -753,42 +754,75 @@ async def patch_chat(
             if ab_compare_model_b is not None:
                 existing_ab["model_b"] = ab_compare_model_b
             settings_patch["ab_compare"] = existing_ab
-        # Per-chat rail fields. Empty string on text/select fields
-        # explicitly clears the override (sends None); on numeric fields the
-        # frontend coerces "" → omits the field, so we only see a real value
-        # here. The explicit-null clear path lives in the frontend rail
-        # (persistNumber now sends None on empty string).
+        # Per-chat rail fields — clear-to-inherit is the tricky case. FastAPI
+        # coerces an empty form value to None on an optional param, so a field
+        # SENT EMPTY (an explicit clear) is indistinguishable from a field that
+        # was OMITTED — both arrive as None. The codebase already handles this
+        # for columns via the ``clear=`` list; here we recover the same signal
+        # for settings-blob fields by consulting the RAW form for a
+        # present-but-empty submission. (Numeric fields additionally accept the
+        # JS ``null`` the rail serialises to the string "null" as a clear.)
+        _raw_form = await request.form()
+
+        # Numeric overrides: a real value sets; ""/"null"/present-empty clears;
+        # anything else 422s. Range validation runs on the ChatSettings merge.
+        for _num_name, _num_param, _num_cast in (
+            ("temperature", temperature, float),
+            ("top_p", top_p, float),
+            ("top_k", top_k, int),
+            ("min_p", min_p, float),
+            ("repeat_penalty", repeat_penalty, float),
+            ("max_tokens", max_tokens, int),
+        ):
+            if _num_param is not None:
+                if _num_param.strip() in ("", "null"):
+                    settings_patch[_num_name] = None
+                else:
+                    try:
+                        settings_patch[_num_name] = _num_cast(_num_param)
+                    except ValueError as exc:
+                        raise HTTPException(
+                            status_code=_HTTP_422,
+                            detail=f"{_num_name} must be a valid number: {exc}",
+                        ) from exc
+            elif _num_name in _raw_form:
+                # Sent empty → coerced to a None param → explicit clear.
+                settings_patch[_num_name] = None
+
+        # system_prompt is FREE TEXT: only a present-but-empty submission
+        # clears it, so a literal "null" survives as a real prompt (a value
+        # sentinel would wrongly wipe it).
         if system_prompt is not None:
-            settings_patch["system_prompt"] = system_prompt if system_prompt else None
-        if temperature is not None:
-            settings_patch["temperature"] = temperature
-        if top_p is not None:
-            settings_patch["top_p"] = top_p
-        if top_k is not None:
-            settings_patch["top_k"] = top_k
-        if min_p is not None:
-            settings_patch["min_p"] = min_p
-        if repeat_penalty is not None:
-            settings_patch["repeat_penalty"] = repeat_penalty
-        if max_tokens is not None:
-            settings_patch["max_tokens"] = max_tokens
-        if reasoning is not None:
-            # Empty string clears the per-chat override (matches the
-            # reasoning_effort field behaviour above; ChatSettings'
-            # field_validator also coerces "" → None defensively).
-            settings_patch["reasoning"] = reasoning if reasoning else None
+            settings_patch["system_prompt"] = system_prompt
+        elif "system_prompt" in _raw_form:
+            settings_patch["system_prompt"] = None
+
+        # Enum / id string overrides: a real value sets; ""/"null"/present-empty
+        # clears. Unlike system_prompt (free text), "null" is never a legitimate
+        # value for these, so it's safe to treat as a clear sentinel — covering
+        # both the rail's present-empty submit and a JS-null serialisation.
+        for _enum_name, _enum_param in (
+            ("reasoning", reasoning),
+            ("reasoning_effort", reasoning_effort),
+            ("active_preset", active_preset),
+        ):
+            if _enum_param is not None:
+                settings_patch[_enum_name] = (
+                    None if _enum_param.strip() in ("", "null") else _enum_param
+                )
+            elif _enum_name in _raw_form:
+                settings_patch[_enum_name] = None
         if self_consistency_enabled is not None:
             settings_patch["self_consistency_enabled"] = self_consistency_enabled
         if chain_of_verification_enabled is not None:
             settings_patch["chain_of_verification_enabled"] = chain_of_verification_enabled
         if stateless is not None:
             settings_patch["stateless"] = stateless
-        if active_preset is not None:
-            settings_patch["active_preset"] = active_preset if active_preset else None
+        # active_preset is cleared/set in the consolidated enum/id loop above.
+        # repeat_warning_cut_k (int): a real value sets; ""/"null"/present-empty
+        # clears (falls through to the global admin default, then config).
         if repeat_warning_cut_k is not None:
-            # Empty string clears the per-chat override (falls through to
-            # the global admin default, then the config default).
-            if repeat_warning_cut_k == "":
+            if repeat_warning_cut_k.strip() in ("", "null"):
                 settings_patch["repeat_warning_cut_k"] = None
             else:
                 try:
@@ -798,6 +832,9 @@ async def patch_chat(
                         status_code=_HTTP_422,
                         detail=f"repeat_warning_cut_k must be an integer: {exc}",
                     ) from exc
+        elif "repeat_warning_cut_k" in _raw_form:
+            # Sent empty → coerced to a None param → explicit clear.
+            settings_patch["repeat_warning_cut_k"] = None
         # W2-BE: provider selection.  FastAPI coerces an empty form field to
         # None (same as omitting the field), so we only reach here when a
         # non-None slug was submitted.  An explicit empty string would be
