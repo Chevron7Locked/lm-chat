@@ -30,7 +30,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from prometheus_client import REGISTRY  # type: ignore[import-untyped]
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from lmchat.db.schema import chats, messages, metadata
@@ -617,7 +617,6 @@ def _salvaged_counter_for(reason: str) -> float:
 @pytest.mark.asyncio
 async def test_repeat_warning_early_cut_after_k_repeats(
     engine_with_chat: AsyncEngine,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """K=2 repeat_warnings for the same tool → early loop-cut well before cap.
 
@@ -626,19 +625,24 @@ async def test_repeat_warning_early_cut_after_k_repeats(
     streaming_service never acted on it.  With the fix, the 2nd repeat_warning
     (K=2, i.e. the 3rd identical call in the lookback window) triggers the cut.
 
-    Red-on-revert: if _REPEAT_WARNING_CUT_K handling is removed, the stream
-    runs past the K threshold without cutting and this test fails because the
-    salvage counter for 'repeat_loop' never increments.
+    Red-on-revert: if the repeat_warning_cut_k resolution/threshold handling
+    is removed, the stream runs past the K threshold without cutting and this
+    test fails because the salvage counter for 'repeat_loop' never increments.
     """
-    from lmchat.services import streaming_service as ss
+    # Pin K below _MAX_IDENTICAL_TOOL_ROUNDS (5) via a PER-CHAT override (the
+    # chats.settings JSON column) so the repeat_warning cut fires before the
+    # consecutive-identical cut — this test exercises the repeat_loop path
+    # specifically. The shipped default is higher (permissive for research).
+    # Exercising the real per-chat override also covers the effective-K
+    # resolution chain end-to-end (per-chat override -> global admin default
+    # -> config default) instead of reaching into a module constant.
+    k = 2
+    async with engine_with_chat.begin() as conn:
+        await conn.execute(
+            update(chats).where(chats.c.id == 1).values(settings={"repeat_warning_cut_k": k})
+        )
 
-    # Pin K below _MAX_IDENTICAL_TOOL_ROUNDS (5) so the repeat_warning cut fires
-    # before the consecutive-identical cut — this test exercises the repeat_loop
-    # path specifically. The shipped default is higher (permissive for research).
-    monkeypatch.setattr(ss, "_REPEAT_WARNING_CUT_K", 2)
-
-    k = ss._REPEAT_WARNING_CUT_K
-    assert k > 0, "_REPEAT_WARNING_CUT_K must be positive for this test"
+    assert k > 0, "K must be positive for this test"
 
     # Emit enough rounds to trip K repeat_warnings (k+1 rounds, where round 0
     # has no warning and rounds 1..k have a warning; cut fires on warning k).

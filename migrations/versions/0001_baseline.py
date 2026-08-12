@@ -116,7 +116,13 @@ depends_on: str | None = None
 # so recall/eviction recency ordering can run as a plain SQL ORDER BY
 # instead of a per-turn full-active-set Python scan. Value verified via
 # `schema_fingerprint(metadata)` against the updated db/schema.py.
-SCHEMA_FINGERPRINT: str = "834a7c47eafaf2fab728d93d9ff6d4a4"
+# Bumped 2026-08-11 by migration 0044 (repeat-loop cut threshold admin
+# override) — added server_lm_studio_default.repeat_warning_cut_k (nullable
+# Integer, NULL = "use the Settings env-var default"). Global-admin half of
+# the tool-call repeat-loop cut K resolution chain; see
+# app_settings_service.resolve_repeat_warning_cut_k. Value verified via
+# `schema_fingerprint(metadata)` against the updated db/schema.py.
+SCHEMA_FINGERPRINT: str = "80d0af1e2217b3a7ae669e0063ed3de4"
 
 
 def upgrade() -> None:

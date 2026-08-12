@@ -71,6 +71,12 @@ export interface ChatSettings {
   focused_document_id?: number | null;
   /** Multi-provider: dispatch provider for this chat. */
   provider?: string | null;
+  /**
+   * Per-chat override for the tool-call repeat-loop cut threshold (K),
+   * 0-100. ``null``/absent inherits the global admin default (then the
+   * config default, 16).
+   */
+  repeat_warning_cut_k?: number | null;
 }
 
 export interface ChatSummary {
@@ -274,6 +280,14 @@ interface UpdateChatBody {
   clear?: string | undefined;
   /** Multi-provider: provider slug for the model (e.g. "openrouter", "lmstudio"). */
   provider?: string | undefined;
+  /**
+   * Per-chat override for the tool-call repeat-loop cut threshold (K).
+   * String (not number): mirrors ``reasoning_effort``'s wire shape so an
+   * explicit empty string can clear the override (falls through to the
+   * global admin default, then the config default). Callers pass
+   * ``String(n)`` to set, ``""`` to clear.
+   */
+  repeat_warning_cut_k?: string | undefined;
 }
 
 // ─── Query keys ────────────────────────────────────────────────────────────
@@ -494,6 +508,10 @@ export function useUpdateChat(chatId: number) {
       if (body.active_preset !== undefined)
         params.set("active_preset", body.active_preset);
       if (body.provider !== undefined) params.set("provider", body.provider);
+      // Per-chat repeat-loop cut threshold (K). Sent as-is (including "")
+      // — mirrors reasoning_effort's empty-string-clears handling above.
+      if (body.repeat_warning_cut_k !== undefined)
+        params.set("repeat_warning_cut_k", body.repeat_warning_cut_k);
       // Explicit-NULL list (e.g. "model_id" to reset the picker to "Auto",
       // "project_id" to detach). FastAPI can't tell an omitted form field
       // from an empty one, so clears must be named here rather than sent as "".

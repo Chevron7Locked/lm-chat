@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """App-level admin settings resolver.
 
-Promotes four env-only config flags to runtime admin overrides stored
+Promotes five env-only config flags to runtime admin overrides stored
 in the ``server_lm_studio_default`` singleton row (id=1).
 
 Resolver chain for each flag
@@ -11,9 +11,16 @@ Resolver chain for each flag
 3. If the value is NULL → fall back to ``get_settings().<flag>``.
 4. Any error (no row, DB error, etc.) → fail-soft to the config default.
 
+``repeat_warning_cut_k`` additionally sits under a PER-CHAT override
+(``chats.settings.repeat_warning_cut_k``) that this module knows nothing
+about — the full effective-K resolution chain (per-chat -> this global
+admin default -> config default) is assembled by the caller
+(``streaming_service.stream_chat``); this module only resolves the
+global-admin half.
+
 Admin endpoints
 ---------------
-- ``GET /api/settings/app`` — returns the 4 resolved values with
+- ``GET /api/settings/app`` — returns the 5 resolved values with
   ``is_override`` flags.
 - ``PATCH /api/settings/app`` — admin-only; sets or clears overrides.
 """
@@ -48,6 +55,7 @@ async def _get_admin_row(engine: AsyncEngine) -> dict[str, Any] | None:
                     server_lm_studio_default.c.subsession_memory_distillation_enabled,
                     server_lm_studio_default.c.web_search_provider,
                     server_lm_studio_default.c.searxng_url,
+                    server_lm_studio_default.c.repeat_warning_cut_k,
                 ).where(server_lm_studio_default.c.id == 1)
             )
             row = result.fetchone()
@@ -167,6 +175,27 @@ async def resolve_searxng_url(engine: AsyncEngine) -> str:
         return "https://searx.be"  # Settings default
 
 
+async def resolve_repeat_warning_cut_k(engine: AsyncEngine) -> int:
+    """Return the effective GLOBAL tool-call repeat-loop cut threshold (K).
+
+    This is the global-admin half of the resolution chain only — callers
+    that need the full per-chat -> global -> config chain (i.e.
+    ``streaming_service.stream_chat``) check ``chats.settings.
+    repeat_warning_cut_k`` first and fall back to this resolver.
+
+    DB override (non-NULL) → that value.
+    Otherwise → ``get_settings().lm_chat_repeat_warning_cut_k``.
+    On error → config default (16).
+    """
+    row = await _get_admin_row(engine)
+    if row is not None and row.get("repeat_warning_cut_k") is not None:
+        return int(row["repeat_warning_cut_k"])
+    try:
+        return get_settings().lm_chat_repeat_warning_cut_k
+    except Exception:  # noqa: BLE001
+        return 16  # Settings default
+
+
 # ─── Admin write helpers ──────────────────────────────────────────────────────
 
 
@@ -190,3 +219,8 @@ async def set_web_search_provider(engine: AsyncEngine, value: str | None) -> Non
 async def set_searxng_url(engine: AsyncEngine, value: str | None) -> None:
     """Set or clear the SearXNG URL override."""
     await _set_admin_column(engine, "searxng_url", value)
+
+
+async def set_repeat_warning_cut_k(engine: AsyncEngine, value: int | None) -> None:
+    """Set or clear the global repeat-loop cut threshold (K) override."""
+    await _set_admin_column(engine, "repeat_warning_cut_k", value)

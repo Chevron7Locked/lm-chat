@@ -68,6 +68,8 @@ _TOP_K_MIN: Final[int] = 1
 _REPEAT_PENALTY_MIN: Final[float] = 0.0
 _REPEAT_PENALTY_MAX: Final[float] = 5.0
 _MAX_TOKENS_MIN: Final[int] = 1
+_REPEAT_WARNING_CUT_K_MIN: Final[int] = 0
+_REPEAT_WARNING_CUT_K_MAX: Final[int] = 100
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +130,12 @@ class ChatSettings(BaseModel):
         - ``active_preset``: written when a preset slash
           command is fired (``/research /code /write /analyze /architect``).
           Present in the model now for forward-compat.
+        - ``repeat_warning_cut_k``: per-chat override for the tool-call
+          repeat-loop cut threshold (K) consumed by
+          ``streaming_service._track_loop_cut_signals``. 0-100; 0 disables
+          the cut. ``None`` clears the override and falls through to the
+          global admin default (``app_settings_service.
+          resolve_repeat_warning_cut_k``), then the config default (16).
     """
 
     # extra='allow' preserves the forward-compat invariant: unknown keys
@@ -172,6 +180,13 @@ class ChatSettings(BaseModel):
     self_consistency_enabled: bool | None = None
     chain_of_verification_enabled: bool | None = None
     stateless: bool | None = None
+    # None = inherit the global admin default (then the config default).
+    # 0 disables the tool-call repeat-loop cut for this chat.
+    repeat_warning_cut_k: int | None = Field(
+        default=None,
+        ge=_REPEAT_WARNING_CUT_K_MIN,
+        le=_REPEAT_WARNING_CUT_K_MAX,
+    )
 
     # Forward-compat ---------------------------------------------------------
     active_preset: str | None = None

@@ -7,7 +7,7 @@
  *  - System prompt textarea with preset-match highlight.
  *  - Basic params: temperature.
  *  - Advanced sampler expander: top_p, top_k, min_p, repeat_penalty,
- *    max_tokens, reasoning effort.
+ *    max_tokens, repeat-loop cut threshold (K), reasoning effort.
  *  - Quality toggles: self-consistency, chain-of-verification, stateless flag.
  *
  * Persistence flows through the :func:`useUpdateChat` mutation
@@ -71,7 +71,8 @@ const REASONING_TOOLTIP =
 
 const ADVANCED_TOOLTIP =
   "Advanced sampler — top_p, top_k, min_p, repeat penalty, max tokens, " +
-  "and reasoning effort. Leave a field blank to defer to the model preset.";
+  "repeat-loop cut threshold, and reasoning effort. Leave a field blank " +
+  "to defer to the model preset (or the global default for the loop cut).";
 
 // Time the "Saved" indicator stays visible after a successful PATCH.
 const SAVED_PULSE_MS = 2000;
@@ -187,6 +188,9 @@ function ChatSettingsRailBody({ chatId }: { chatId: number }) {
   const [maxTokens, setMaxTokens] = useState<string>(
     stringOrEmpty(settings.max_tokens),
   );
+  const [repeatWarningCutK, setRepeatWarningCutK] = useState<string>(
+    stringOrEmpty(settings.repeat_warning_cut_k),
+  );
   // The canonical key is reasoning_effort; `settings.reasoning` is a legacy
   // alias. The canonical-key/legacy-alias parsing lives in ONE place
   // (deriveChatReasoningOverride, shared with ReasoningToggle) instead of
@@ -232,6 +236,7 @@ function ChatSettingsRailBody({ chatId }: { chatId: number }) {
     setMinP(stringOrEmpty(settings.min_p));
     setRepeatPenalty(stringOrEmpty(settings.repeat_penalty));
     setMaxTokens(stringOrEmpty(settings.max_tokens));
+    setRepeatWarningCutK(stringOrEmpty(settings.repeat_warning_cut_k));
     setReasoning(deriveChatReasoningOverride(settings));
     // settingsHash is a content digest of `settings`; chatId guarantees we
     // also resync on chat-switch even if the new chat happens to have an
@@ -311,6 +316,27 @@ function ChatSettingsRailBody({ chatId }: { chatId: number }) {
 
   const persistString = (key: "system_prompt", raw: string): void => {
     updateChat.mutate({ [key]: raw }, { onError: makeOnError("System prompt") });
+  };
+
+  /**
+   * Persist the per-chat repeat-loop cut threshold (K). Unlike
+   * persistNumber (which clears via `{[key]: null}`, a shape the numeric
+   * rail fields' BE Form params can't cleanly accept as a clear signal),
+   * this field's BE param is string-typed specifically so an explicit ""
+   * travels as a real clear — mirrors reasoning_effort's clear-to-inherit
+   * handling instead of the other numeric rail fields.
+   */
+  const persistRepeatWarningCutK = (raw: string): void => {
+    const onError = makeOnError("Repeat-loop cut");
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      updateChat.mutate({ repeat_warning_cut_k: "" }, { onError });
+      return;
+    }
+    const num = Number(trimmed);
+    if (!Number.isFinite(num)) return;
+    const clamped = Math.max(0, Math.min(100, Math.trunc(num)));
+    updateChat.mutate({ repeat_warning_cut_k: String(clamped) }, { onError });
   };
 
   const persistBool = (
@@ -594,6 +620,27 @@ function ChatSettingsRailBody({ chatId }: { chatId: number }) {
               className="lmchat-settings-rail__input"
               aria-label="Max tokens"
               data-testid="chat-settings-max-tokens"
+            />
+          </FieldRow>
+          <FieldRow
+            label="Repeat-loop cut"
+            help="Cut a tool-calling loop after this many identical calls. Empty = inherit the global default. 0 disables."
+          >
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              value={repeatWarningCutK}
+              onChange={(e) => {
+                setRepeatWarningCutK(e.target.value);
+              }}
+              onBlur={() => {
+                persistRepeatWarningCutK(repeatWarningCutK);
+              }}
+              className="lmchat-settings-rail__input"
+              aria-label="Repeat-loop cut"
+              data-testid="chat-settings-repeat-warning-cut-k"
             />
           </FieldRow>
           {/* Gate on capabilities.reasoning, with ReasoningToggle mounted here

@@ -8,6 +8,7 @@
  *  - persists system prompt on blur
  *  - quality toggles persist on change
  *  - reasoning select inside advanced persists with empty-string clear
+ *  - repeat-loop cut (K) input persists on blur, empty clears to inherit
  *  - initial values are seeded from the chat row's settings
  *
  * Cluster 2 Task 1: mutate() is now called with a second `{ onError }` options
@@ -250,6 +251,35 @@ describe("ChatSettingsRail — persist", () => {
     fireEvent.blur(input);
     expect(mockMutate).toHaveBeenCalledWith(
       { max_tokens: 1024 },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it("persists advanced repeat-loop cut (K) on blur", async () => {
+    await renderRail();
+    const input = screen.getByTestId(
+      "chat-settings-repeat-warning-cut-k",
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "8" } });
+    fireEvent.blur(input);
+    // The field is string-typed on the wire (mirrors reasoning_effort) so an
+    // explicit "" can travel as a clear signal — set persists as a string too.
+    expect(mockMutate).toHaveBeenCalledWith(
+      { repeat_warning_cut_k: "8" },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it("sends explicit empty string when repeat-loop cut (K) is cleared", async () => {
+    await renderRail({ settings: { repeat_warning_cut_k: 8 } });
+    const input = screen.getByTestId(
+      "chat-settings-repeat-warning-cut-k",
+    ) as HTMLInputElement;
+    expect(input.value).toBe("8");
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.blur(input);
+    expect(mockMutate).toHaveBeenCalledWith(
+      { repeat_warning_cut_k: "" },
       expect.objectContaining({ onError: expect.any(Function) }),
     );
   });

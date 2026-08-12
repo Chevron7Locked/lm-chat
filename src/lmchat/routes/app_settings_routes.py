@@ -3,7 +3,7 @@
 
 Endpoints
 ---------
-- ``GET /api/settings/app`` — return the 4 resolved values with
+- ``GET /api/settings/app`` — return the 5 resolved values with
   ``is_override`` flags.
 - ``PATCH /api/settings/app`` — admin-only; set/clear overrides.
 
@@ -13,6 +13,8 @@ Validation
   ``"brave_llm"``.
 - ``searxng_url`` must be a valid http(s) URL (validated via
   ``validate_searxng_url`` from ``web_search_service``).
+- ``repeat_warning_cut_k`` must be an integer 0..100 (enforced via the
+  Pydantic ``Field(ge=0, le=100)`` bound on the request model).
 
 Auth
 ----
@@ -37,10 +39,12 @@ from lmchat.routes._dependencies import (
 )
 from lmchat.services.app_settings_service import (
     resolve_memory_distillation_enabled,
+    resolve_repeat_warning_cut_k,
     resolve_searxng_url,
     resolve_subsession_memory_distillation_enabled,
     resolve_web_search_provider,
     set_memory_distillation_enabled,
+    set_repeat_warning_cut_k,
     set_searxng_url,
     set_subsession_memory_distillation_enabled,
     set_web_search_provider,
@@ -63,7 +67,7 @@ class _AppSettingItem(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    value: bool | str | None
+    value: bool | str | int | None
     is_override: bool
 
 
@@ -76,6 +80,7 @@ class _AppSettingsResponse(BaseModel):
     subsession_memory_distillation_enabled: _AppSettingItem
     web_search_provider: _AppSettingItem
     searxng_url: _AppSettingItem
+    repeat_warning_cut_k: _AppSettingItem
 
 
 class _PatchAppSettingsRequest(BaseModel):
@@ -91,6 +96,7 @@ class _PatchAppSettingsRequest(BaseModel):
     subsession_memory_distillation_enabled: bool | None = None
     web_search_provider: str | None = None
     searxng_url: str | None = Field(default=None, max_length=512)
+    repeat_warning_cut_k: int | None = Field(default=None, ge=0, le=100)
 
 
 # ─── GET /api/settings/app ────────────────────────────────────────────────────
@@ -102,7 +108,7 @@ async def get_app_settings(
     request: Request,
     engine: AsyncEngine = Depends(get_engine_dep),
 ) -> _AppSettingsResponse:
-    """Return the 4 app settings with ``is_override`` flags.
+    """Return the 5 app settings with ``is_override`` flags.
 
     Authenticated-user read (any role).  The values are resolved
     (DB override → config default) so the FE always gets the effective value.
@@ -113,6 +119,7 @@ async def get_app_settings(
     ss_md_enabled = await resolve_subsession_memory_distillation_enabled(engine)
     ws_provider = await resolve_web_search_provider(engine)
     ws_url = await resolve_searxng_url(engine)
+    repeat_warning_cut_k = await resolve_repeat_warning_cut_k(engine)
 
     # Determine is_override by re-reading the raw columns.
     try:
@@ -129,6 +136,7 @@ async def get_app_settings(
                     _tbl.c.subsession_memory_distillation_enabled,
                     _tbl.c.web_search_provider,
                     _tbl.c.searxng_url,
+                    _tbl.c.repeat_warning_cut_k,
                 ).where(_tbl.c.id == 1)
             )
             _row = _raw.fetchone()
@@ -136,9 +144,10 @@ async def get_app_settings(
             _raw_ss_md = _row[1] if _row else None
             _raw_ws_provider = _row[2] if _row else None
             _raw_ws_url = _row[3] if _row else None
+            _raw_repeat_k = _row[4] if _row else None
     except Exception:  # noqa: BLE001
         # If we can't read overrides, everything is "config default".
-        _raw_md = _raw_ss_md = _raw_ws_provider = _raw_ws_url = None
+        _raw_md = _raw_ss_md = _raw_ws_provider = _raw_ws_url = _raw_repeat_k = None
 
     return _AppSettingsResponse(
         memory_distillation_enabled=_AppSettingItem(
@@ -149,6 +158,9 @@ async def get_app_settings(
         ),
         web_search_provider=_AppSettingItem(
             value=ws_provider, is_override=_raw_ws_provider is not None
+        ),
+        repeat_warning_cut_k=_AppSettingItem(
+            value=repeat_warning_cut_k, is_override=_raw_repeat_k is not None
         ),
         searxng_url=_AppSettingItem(value=ws_url, is_override=_raw_ws_url is not None),
     )
@@ -181,6 +193,8 @@ async def patch_app_settings(
       or ``"brave_llm"``.
     - ``searxng_url`` must be a valid http(s) URL (SSRF guard via
       ``validate_searxng_url``).
+    - ``repeat_warning_cut_k`` must be an integer 0..100 (Pydantic
+      ``Field(ge=0, le=100)`` on the request model raises 422 otherwise).
     """
     # Validate web_search_provider if provided.
     if body.web_search_provider is not None:
@@ -213,6 +227,8 @@ async def patch_app_settings(
         await set_web_search_provider(engine, body.web_search_provider)
     if "searxng_url" in body.model_fields_set:
         await set_searxng_url(engine, body.searxng_url)
+    if "repeat_warning_cut_k" in body.model_fields_set:
+        await set_repeat_warning_cut_k(engine, body.repeat_warning_cut_k)
 
     # Live-rebind the web_search_service singleton if web-search settings
     # were touched (Finding A: overrides must take effect at runtime).

@@ -50,6 +50,7 @@ from lmchat.services._stream_state import (
 from lmchat.services.app_settings_service import (
     resolve_memory_distillation_enabled as _resolve_memory_distillation_enabled,
 )
+from lmchat.services.app_settings_service import resolve_repeat_warning_cut_k
 from lmchat.services.audit_service import AuditEvent, write_audit_event
 from lmchat.services.bg_aux import (
     bg_aux_overloaded,
@@ -233,6 +234,14 @@ _MAX_IDENTICAL_TOOL_ROUNDS: Final[int] = int(os.getenv("LM_CHAT_MAX_IDENTICAL_TO
 # 17th identical call in the window fires the cut — permissive so heavy
 # agentic/research runs aren't cut short. Override via
 # `LM_CHAT_REPEAT_WARNING_CUT_K` (<=0 disables).
+#
+# NOT read in the hot path (see _track_loop_cut_signals's
+# repeat_warning_cut_k parameter) — the effective K is now resolved per-turn
+# in stream_chat via the per-chat override -> global admin default -> config
+# default chain (config.Settings.lm_chat_repeat_warning_cut_k /
+# app_settings_service.resolve_repeat_warning_cut_k). Kept only as a
+# documented standalone default for anything reading the raw env var
+# directly outside a request context.
 _REPEAT_WARNING_CUT_K: Final[int] = int(os.getenv("LM_CHAT_REPEAT_WARNING_CUT_K", "16"))
 
 
@@ -2754,6 +2763,7 @@ class StreamingService:
         repeat_warn_counts: dict[tuple[str, str], int],
         early_cut_reason: str | None,
         msg_id: int,
+        repeat_warning_cut_k: int,
     ) -> str | None:
         """Track the two client-advisory early loop-cut signals.
 
@@ -2762,8 +2772,10 @@ class StreamingService:
 
         1. ``tool_call.repeat_warning``: the client saw a prior SUCCESSFUL
            call with the same (name, args) via a lookback deque (catches
-           non-consecutive repeats too); cut after K=``_REPEAT_WARNING_CUT_K``
-           warnings for the signature.
+           non-consecutive repeats too); cut after K=``repeat_warning_cut_k``
+           warnings for the signature. Effective K is resolved by the caller
+           (per-chat override -> global admin default -> config default; see
+           ``stream_chat``'s ``_repeat_warning_cut_k`` computation).
         2. ``tool_call.failure_streak_warning``: the client detected
            FAILURE_STREAK_THRESHOLD consecutive failures for the same tool
            — cut immediately.
@@ -2773,7 +2785,7 @@ class StreamingService:
         """
         if (
             event.type == "tool_call.repeat_warning"
-            and _REPEAT_WARNING_CUT_K > 0
+            and repeat_warning_cut_k > 0
             and early_cut_reason is None
             and event.tool_call is not None
         ):
@@ -2792,14 +2804,14 @@ class StreamingService:
                     repr(event.tool_call.arguments),
                 )
             repeat_warn_counts[_rw_sig] = repeat_warn_counts.get(_rw_sig, 0) + 1
-            if repeat_warn_counts[_rw_sig] >= _REPEAT_WARNING_CUT_K:
+            if repeat_warn_counts[_rw_sig] >= repeat_warning_cut_k:
                 early_cut_reason = "repeat_loop"
                 log.warning(
                     "stream.repeat_loop_cut_armed",
                     msg_id=msg_id,
                     tool_name=event.tool_call.name,
                     repeat_count=repeat_warn_counts[_rw_sig],
-                    threshold=_REPEAT_WARNING_CUT_K,
+                    threshold=repeat_warning_cut_k,
                 )
 
         if event.type == "tool_call.failure_streak_warning" and early_cut_reason is None:
@@ -3282,6 +3294,21 @@ class StreamingService:
                 )
                 STREAMS_FAILED.labels(reason="settings_unavailable").inc()
                 return
+
+            # Effective-K resolution for the tool-call repeat-loop cut:
+            # per-chat override (chats.settings.repeat_warning_cut_k) ->
+            # global admin default (resolve_repeat_warning_cut_k) -> config
+            # default. Consumed by _track_loop_cut_signals below, well after
+            # the tool loop starts. bool is excluded even though it's an int
+            # subclass — the JSON blob should never legitimately hold one
+            # here, but a stray True/False must not silently become 1/0.
+            _repeat_warning_cut_k_override = _chat_settings.get("repeat_warning_cut_k")
+            if isinstance(_repeat_warning_cut_k_override, int) and not isinstance(
+                _repeat_warning_cut_k_override, bool
+            ):
+                _repeat_warning_cut_k = max(0, min(100, _repeat_warning_cut_k_override))
+            else:
+                _repeat_warning_cut_k = await resolve_repeat_warning_cut_k(self._engine)
 
             _provider_name: str = _chat_settings.get("provider", "lmstudio") or "lmstudio"
             _provider_resolution = await self._resolve_provider_and_context_mode(
@@ -4305,6 +4332,7 @@ class StreamingService:
                             repeat_warn_counts=_repeat_warn_counts,
                             early_cut_reason=_early_loop_cut_reason,
                             msg_id=msg_id,
+                            repeat_warning_cut_k=_repeat_warning_cut_k,
                         )
 
                         # Per-turn tool-loop cap: LM Studio drives the MCP

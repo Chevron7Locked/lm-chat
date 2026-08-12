@@ -16,12 +16,14 @@
  *     subsession_memory_distillation_enabled: { value: bool|null, is_override: bool },
  *     web_search_provider: { value: str|null, is_override: bool },
  *     searxng_url: { value: str|null, is_override: bool },
+ *     repeat_warning_cut_k: { value: int|null, is_override: bool },
  *   }
  *   PATCH /api/settings/app (admin)  →  body any subset of:
  *     { memory_distillation_enabled?: bool|null,
  *       subsession_memory_distillation_enabled?: bool|null,
  *       web_search_provider?: 'searxng'|'ddg'|'brave'|'brave_llm'|null,
- *       searxng_url?: string|null }
+ *       searxng_url?: string|null,
+ *       repeat_warning_cut_k?: number|null }
  *   A field set to null clears the override (reverts to config default).
  *   Omitted fields are unchanged.  Non-admin PATCH → 403.
  */
@@ -46,6 +48,7 @@ interface AppSettingsResponse {
   subsession_memory_distillation_enabled: OverrideField<boolean>;
   web_search_provider: OverrideField<"searxng" | "ddg" | "brave" | "brave_llm" | null>;
   searxng_url: OverrideField<string>;
+  repeat_warning_cut_k: OverrideField<number>;
 }
 
 type AppSettingsPatch = Partial<{
@@ -53,6 +56,7 @@ type AppSettingsPatch = Partial<{
   subsession_memory_distillation_enabled: boolean | null;
   web_search_provider: "searxng" | "ddg" | "brave" | "brave_llm" | null;
   searxng_url: string | null;
+  repeat_warning_cut_k: number | null;
 }>;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -103,6 +107,8 @@ export function MemorySettings(): JSX.Element {
 
   const [editingSearxngUrl, setEditingSearxngUrl] = useState(false);
   const [searxngUrlDraft, setSearxngUrlDraft] = useState("");
+  const [editingRepeatWarningCutK, setEditingRepeatWarningCutK] = useState(false);
+  const [repeatWarningCutKDraft, setRepeatWarningCutKDraft] = useState("");
 
   // ── Query ────────────────────────────────────────────────────────────────
   const { data, isLoading, isError } = useQuery<AppSettingsResponse, ApiError>({
@@ -188,11 +194,33 @@ export function MemorySettings(): JSX.Element {
     setEditingSearxngUrl(false);
   }
 
+  function handleRepeatWarningCutKSave(): void {
+    if (!isAdmin) return;
+    const trimmed = repeatWarningCutKDraft.trim();
+    if (trimmed === "") {
+      // Empty draft clears the override (reverts to config default) —
+      // mirrors the searxng_url save-empty-to-clear convention above.
+      patchMutation.mutate({ repeat_warning_cut_k: null });
+      setEditingRepeatWarningCutK(false);
+      return;
+    }
+    const num = Number(trimmed);
+    if (!Number.isFinite(num)) return;
+    const clamped = Math.max(0, Math.min(100, Math.trunc(num)));
+    patchMutation.mutate({ repeat_warning_cut_k: clamped });
+    setEditingRepeatWarningCutK(false);
+  }
+
+  function handleRepeatWarningCutKCancel(): void {
+    setEditingRepeatWarningCutK(false);
+  }
+
   // ── Read values ──────────────────────────────────────────────────────────
   const masterValue = data?.memory_distillation_enabled;
   const subValue = data?.subsession_memory_distillation_enabled;
   const searchProvider = data?.web_search_provider;
   const searxngUrlField = data?.searxng_url;
+  const repeatWarningCutKField = data?.repeat_warning_cut_k;
 
   if (isLoading) {
     return (
@@ -433,6 +461,88 @@ export function MemorySettings(): JSX.Element {
             )}
           </div>
         )}
+      </section>
+
+      {/* ── Divider ──────────────────────────────────────────────────────── */}
+      <hr className="lmchat-section-divider" aria-hidden="true" />
+
+      {/* ── Repeat-loop cut threshold (K) ────────────────────────────────── */}
+      <section className="lmchat-section" aria-label="Repeat-loop cut">
+        <h3 className="lmchat-section-heading">Repeat-loop cut (K)</h3>
+        <p className="lmchat-section-description">
+          Cut a tool-calling loop after K identical calls. Higher = more
+          permissive for heavy agentic runs. 0 disables. Default 16.
+        </p>
+        <div className="lmchat-meta-block">
+          {!editingRepeatWarningCutK ? (
+            <div className="lmchat-field-row">
+              <span className="lmchat-field-row-label">Threshold</span>
+              <button
+                type="button"
+                className="lmchat-btn-secondary"
+                onClick={() => {
+                  setRepeatWarningCutKDraft(
+                    repeatWarningCutKField?.value !== null &&
+                      repeatWarningCutKField?.value !== undefined
+                      ? String(repeatWarningCutKField.value)
+                      : "",
+                  );
+                  setEditingRepeatWarningCutK(true);
+                }}
+                disabled={!isAdmin}
+                data-testid="settings-memory-repeat-cut-k-edit"
+              >
+                {repeatWarningCutKField?.value ?? "16"}
+              </button>
+              <OverrideBadge isOverride={repeatWarningCutKField?.is_override ?? false} />
+            </div>
+          ) : (
+            <div style={{ marginTop: "var(--space-glue-relaxed)" }}>
+              <div className="lmchat-field">
+                <label
+                  htmlFor="memory-repeat-cut-k-input"
+                  className="lmchat-field-label"
+                >
+                  Repeat-loop cut (K)
+                </label>
+                <input
+                  id="memory-repeat-cut-k-input"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  className="lmchat-input"
+                  value={repeatWarningCutKDraft}
+                  onChange={(e) => {
+                    setRepeatWarningCutKDraft(e.target.value);
+                  }}
+                  placeholder="16"
+                  data-testid="settings-memory-repeat-cut-k-input"
+                />
+              </div>
+              <div className="lmchat-form-actions">
+                <button
+                  type="button"
+                  className="lmchat-btn-primary"
+                  onClick={handleRepeatWarningCutKSave}
+                  disabled={patchMutation.isPending}
+                  data-testid="settings-memory-repeat-cut-k-save"
+                >
+                  {patchMutation.isPending ? "Saving…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  className="lmchat-btn-secondary"
+                  onClick={handleRepeatWarningCutKCancel}
+                  disabled={patchMutation.isPending}
+                  data-testid="settings-memory-repeat-cut-k-cancel"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
         {/* ── Divider ──────────────────────────────────────────────────────── */}

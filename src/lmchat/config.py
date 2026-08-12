@@ -200,6 +200,19 @@ class Settings(BaseSettings):
     # https://brave.com/search/api/. Override via LM_CHAT_BRAVE_API_KEY.
     lm_chat_brave_api_key: str = Field(default="")
 
+    # Tool-call repeat-loop cut threshold (K). ``_track_loop_cut_signals``
+    # (streaming_service.py) aborts the turn once the streaming client's
+    # lookback deque has fired a ``tool_call.repeat_warning`` for the same
+    # (tool name, args) signature K times. Higher = more permissive for
+    # heavy agentic/research runs; 0 disables the cut entirely (existing
+    # ``> 0`` guard semantics preserved). This config value is the last link
+    # in the resolution chain: per-chat override (``chats.settings.
+    # repeat_warning_cut_k``) -> global admin override
+    # (``server_lm_studio_default.repeat_warning_cut_k``, see
+    # app_settings_service.resolve_repeat_warning_cut_k) -> this default.
+    # Override via LM_CHAT_REPEAT_WARNING_CUT_K.
+    lm_chat_repeat_warning_cut_k: int = Field(default=16, ge=0, le=100)
+
     # Long-operation timeout for model load / download upstream calls.
     # Model loading can take 10–120 s (7B–120B range on MLX/GGUF).
     # Download of large models can take many minutes.

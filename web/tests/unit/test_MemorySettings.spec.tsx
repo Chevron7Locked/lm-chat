@@ -8,6 +8,7 @@
  *   - Sub-session toggle is disabled when master toggle is off
  *   - Web search provider select renders and sends PATCH on change
  *   - SearXNG URL input only shown when provider is "searxng"
+ *   - Repeat-loop cut (K) edit/save/cancel flow, empty-clears-to-default
  *   - Non-admin users see disabled toggles (no PATCH fires)
  *   - MemoryIndexingCard is rendered
  *   - Override badges show "(default)" vs "(override)"
@@ -84,6 +85,7 @@ const DEFAULT_SETTINGS = {
   subsession_memory_distillation_enabled: { value: false, is_override: false },
   web_search_provider: { value: "ddg", is_override: false },
   searxng_url: { value: null, is_override: false },
+  repeat_warning_cut_k: { value: 16, is_override: false },
 };
 
 function wrap(node: React.ReactNode) {
@@ -420,6 +422,109 @@ describe("MemorySettings", () => {
     // Second PATCH should clear the URL
     expect(patchCalls[1][1].body).toContain("searxng_url");
   });
+
+    it("repeat-loop cut (K) edit button opens the numeric input", async () => {
+      mockRequest.mockResolvedValue(DEFAULT_SETTINGS);
+
+      wrap(<MemorySettings />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("settings-memory-repeat-cut-k-edit")).toBeTruthy();
+      });
+
+      // Shows the effective value on the button before editing.
+      expect(screen.getByTestId("settings-memory-repeat-cut-k-edit").textContent).toBe("16");
+      expect(screen.queryByTestId("settings-memory-repeat-cut-k-input")).toBeNull();
+
+      fireEvent.click(screen.getByTestId("settings-memory-repeat-cut-k-edit"));
+      expect(screen.getByTestId("settings-memory-repeat-cut-k-input")).toBeTruthy();
+
+      fireEvent.click(screen.getByTestId("settings-memory-repeat-cut-k-cancel"));
+      expect(screen.queryByTestId("settings-memory-repeat-cut-k-input")).toBeNull();
+    });
+
+    it("repeat-loop cut (K) saves an integer override on save click", async () => {
+      const updatedSettings = {
+        ...DEFAULT_SETTINGS,
+        repeat_warning_cut_k: { value: 8, is_override: true },
+      };
+
+      mockRequest.mockImplementation(
+        async (url: string, opts?: { method?: string; body?: string }) => {
+          if (url === "/api/settings/app") {
+            if (opts?.method === "PATCH") {
+              const body = JSON.parse(opts.body ?? "{}");
+              if (body.repeat_warning_cut_k !== undefined) {
+                return updatedSettings;
+              }
+            }
+            return DEFAULT_SETTINGS;
+          }
+          return Promise.reject(new Error("unexpected " + url));
+        },
+      );
+
+      wrap(<MemorySettings />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("settings-memory-repeat-cut-k-edit")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByTestId("settings-memory-repeat-cut-k-edit"));
+      const input = screen.getByTestId("settings-memory-repeat-cut-k-input");
+      fireEvent.change(input, { target: { value: "8" } });
+      fireEvent.click(screen.getByTestId("settings-memory-repeat-cut-k-save"));
+
+      await waitFor(() => {
+        expect(mockRequest).toHaveBeenCalledWith(
+          "/api/settings/app",
+          expect.objectContaining({
+            method: "PATCH",
+            body: JSON.stringify({ repeat_warning_cut_k: 8 }),
+          }),
+        );
+      });
+    });
+
+    it("repeat-loop cut (K) saving an empty draft clears the override", async () => {
+      const overridden = {
+        ...DEFAULT_SETTINGS,
+        repeat_warning_cut_k: { value: 8, is_override: true },
+      };
+
+      mockRequest.mockImplementation(
+        async (url: string, opts?: { method?: string; body?: string }) => {
+          if (url === "/api/settings/app") {
+            if (opts?.method === "PATCH") {
+              return DEFAULT_SETTINGS;
+            }
+            return overridden;
+          }
+          return Promise.reject(new Error("unexpected " + url));
+        },
+      );
+
+      wrap(<MemorySettings />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("settings-memory-repeat-cut-k-edit").textContent).toBe("8");
+      });
+
+      fireEvent.click(screen.getByTestId("settings-memory-repeat-cut-k-edit"));
+      const input = screen.getByTestId("settings-memory-repeat-cut-k-input");
+      fireEvent.change(input, { target: { value: "" } });
+      fireEvent.click(screen.getByTestId("settings-memory-repeat-cut-k-save"));
+
+      await waitFor(() => {
+        expect(mockRequest).toHaveBeenCalledWith(
+          "/api/settings/app",
+          expect.objectContaining({
+            method: "PATCH",
+            body: JSON.stringify({ repeat_warning_cut_k: null }),
+          }),
+        );
+      });
+    });
 
     it("non-admin users see read-only view (no interactive toggles)", async () => {
       isAdminUser = false;

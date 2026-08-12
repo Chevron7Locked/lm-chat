@@ -352,15 +352,8 @@ export interface paths {
          * List Quotas
          * @description List quota rows for all users that have an explicit quota row.
          *
-         *     Users without a quotas row use the system defaults (100 000 tokens/day,
-         *     1 000 requests/day) and will not appear in this list.
-         *
-         *     Args:
-         *         admin:  The authenticated admin user.
-         *         engine: The async SQLAlchemy engine.
-         *
-         *     Returns:
-         *         Plain list of ``QuotaSummary`` (Invariant 3).
+         *     Users without one use the system defaults (100 000 tokens/day, 1 000
+         *     requests/day) and won't appear here.
          */
         get: operations["list_quotas_api_admin_quotas_get"];
         put?: never;
@@ -388,19 +381,8 @@ export interface paths {
          * Update Quota
          * @description Admin upsert for a user's quota limits.
          *
-         *     Validates that the target user exists (via the quotas table lookup);
-         *     creates or updates their quota row.
-         *
-         *     Args:
-         *         user_id:          Target user PK (from URL path).
-         *         tokens_per_day:   New daily token limit (form field).
-         *         requests_per_day: New daily request limit (form field).
-         *         admin:            The authenticated admin user.
-         *         engine:           The async SQLAlchemy engine.
-         *         request:          FastAPI request (unused; required by dependency injection).
-         *
-         *     Returns:
-         *         The updated ``QuotaSummary``.
+         *     ``request`` is unused but required by the dependency-injection
+         *     signature.
          */
         patch: operations["update_quota_api_admin_quotas__user_id__patch"];
         trace?: never;
@@ -419,7 +401,7 @@ export interface paths {
          *     Results are ordered by ``id`` ascending.  ``limit`` is capped at
          *     :data:`_MAX_LIMIT` to prevent runaway queries.
          *
-         *     P13k: each row also carries ``last_login`` — the timestamp of the most
+         *     Each row also carries ``last_login`` — the timestamp of the most
          *     recent ``auth.login.success`` event for that user, derived in-query
          *     from ``audit_log`` so no schema change is needed on the ``users`` table.
          *
@@ -485,7 +467,7 @@ export interface paths {
          * Delete User
          * @description Permanently delete a user account.
          *
-         *     P13k destructive action.  Cascading FKs (chats, sessions, messages, …)
+         *     Destructive action.  Cascading FKs (chats, sessions, messages, …)
          *     handle child rows; ``audit_log.user_id`` uses SET NULL so the audit
          *     trail survives.  Sessions for the doomed user are also revoked
          *     explicitly via ``session_store.revoke`` in case the store doesn't see
@@ -761,7 +743,7 @@ export interface paths {
          *         ``True`` iff the user row has a non-null ``totp_secret`` — the
          *         SPA uses this to hydrate the Settings TOTP surface on mount
          *         (SA-gaps: SecuritySettings was resetting to "not configured" on
-         *         every reload).  ``needs_setup`` (P13f) is ``True`` iff the
+         *         every reload).  ``needs_setup`` is ``True`` iff the
          *         ``users`` table is empty — when authenticated this is always
          *         ``False``, but the field is included for shape parity with
          *         ``GET /api/auth/setup_status`` so the SPA can rely on a single
@@ -1123,7 +1105,7 @@ export interface paths {
          *         data: {"type": "<type>", "msg_id": <int>, ...}
          *
          *     ``msg_id`` is present on every frame (including ``chat.start``) so the
-         *     P7 client can correlate frames to the draft row without waiting for
+         *     client can correlate frames to the draft row without waiting for
          *     ``chat.end``.
          *
          *     Args:
@@ -1350,6 +1332,10 @@ export interface paths {
          *                           ``store=False`` upstream.
          *         active_preset:    Forward-compat: name of the currently-active
          *                           preset.
+         *         repeat_warning_cut_k: Per-chat override for the tool-call
+         *                           repeat-loop cut threshold (K), 0-100; ``""``
+         *                           clears the override (falls through to the
+         *                           global admin default, then the config default).
          *         user:             Authenticated user.
          *         chat_service:     Injected ``ChatService``.
          *
@@ -1361,6 +1347,7 @@ export interface paths {
          *         HTTPException: 422 if ``ab_compare`` is not valid JSON or fails schema.
          *         HTTPException: 422 if ``incognito`` is sent on a chat that already has
          *                        messages (privacy invariant).
+         *         HTTPException: 422 if ``repeat_warning_cut_k`` is not a valid integer.
          *         HTTPException: 422 if any settings field fails ChatSettings
          *                        validation (range / type errors).
          */
@@ -1678,7 +1665,7 @@ export interface paths {
          *       turn (the user message itself is kept).  The frontend resubmits
          *       the kept user message content as a fresh turn.
          *
-         *     Two-step confirmation contract (R-16):
+         *     Two-step confirmation contract:
          *
          *     * Without ``?confirm=true`` the endpoint returns HTTP 412 with a
          *       :class:`RegenerateConfirmDetail` body so the UI can render a
@@ -1890,7 +1877,7 @@ export interface paths {
          *     Idempotent.  Re-POSTing returns the existing token without churning
          *     the URL — admin-friendly when a user double-clicks "Share".
          *
-         *     Privacy invariant (R-15): incognito chats cannot be shared.
+         *     Privacy invariant: incognito chats cannot be shared.
          *     The endpoint returns 403 in that case; the chat is intentionally
          *     treated as "exists but private" (not 404) because the caller is the
          *     chat owner and there's no existence-leak benefit to hiding it.
@@ -1906,7 +1893,7 @@ export interface paths {
          *
          *     Raises:
          *         HTTPException: 404 if the chat is missing or owned by another user.
-         *         HTTPException: 403 if the chat is incognito (R-15).
+         *         HTTPException: 403 if the chat is incognito.
          */
         post: operations["share_chat_api_chats__chat_id__share_post"];
         /**
@@ -2073,7 +2060,7 @@ export interface paths {
          *         file:             The uploaded file (FastAPI UploadFile).
          *         user:             Authenticated user.
          *         engine:           Async SQLAlchemy engine.
-         *         embedding_client: P2 EmbeddingClient.
+         *         embedding_client: EmbeddingClient.
          *         models_service:   ModelsService.
          *
          *     Returns:
@@ -2826,7 +2813,7 @@ export interface paths {
         head?: never;
         /**
          * Edit Message
-         * @description Edit the content of a user-role message (P13l.1).
+         * @description Edit the content of a user-role message.
          *
          *     Wire contract:
          *     * 400 with ``"only user messages are editable"`` when the message
@@ -2906,7 +2893,7 @@ export interface paths {
          *
          *     NOTE: The success response shape from LM Studio could not be verified
          *     during probing (see PROBES_p11b_lifecycle.md §4e).  The frontend Download
-         *     button is NOT rendered until P11b.1 confirms the shape.  This route is
+         *     button is NOT rendered until that shape is confirmed.  This route is
          *     functional but the UI is gated.
          *
          *     Args:
@@ -3348,7 +3335,7 @@ export interface paths {
          *
          *     ``content`` is capped at 32 768 characters (32 KB).  Larger values return
          *     422 Unprocessable Entity.  This prevents storing arbitrarily large blobs in
-         *     the prompt table before per-user quota infrastructure (P8d) lands.
+         *     the prompt table before per-user quota infrastructure lands.
          *
          *     Args:
          *         request: FastAPI Request.
@@ -3461,16 +3448,8 @@ export interface paths {
          * Get My Quota
          * @description Return the current user's quota limits and today's usage.
          *
-         *     Admins and non-admins both see their quota.  Admins are not
-         *     quota-enforced at request time (see ``QuotaMiddleware``) but their
-         *     usage row is still tracked for observability.
-         *
-         *     Args:
-         *         user:   The authenticated user.
-         *         engine: The async SQLAlchemy engine.
-         *
-         *     Returns:
-         *         ``QuotaResponse`` with limits + today's consumption + reset time.
+         *     Admins aren't quota-enforced at request time (see ``QuotaMiddleware``)
+         *     but their usage row is still tracked for observability.
          */
         get: operations["get_my_quota_api_quotas_me_get"];
         put?: never;
@@ -3552,22 +3531,16 @@ export interface paths {
          * Web Search
          * @description Search the web and return structured results.
          *
-         *     Queries are routed to SearXNG (or DuckDuckGo fallback per config).
-         *     Returns a plain JSON array of ``SearchResult`` objects (Invariant 3).
-         *
-         *     Args:
-         *         request: FastAPI request (for ``app.state.web_search_service``).
-         *         q:       Search query (1–512 chars, form-encoded).
-         *         user:    Authenticated user (auth-gated).
+         *     Routed to SearXNG (or DuckDuckGo fallback per config). Returns a plain
+         *     JSON array of ``SearchResult`` objects (Invariant 3).
          *
          *     Returns:
          *         List of ``SearchResult`` objects (empty ONLY on a genuine
          *         zero-result search — never used to mask a backend failure).
          *
          *     Raises:
-         *         502: If the search itself failed — every configured backend
-         *             (SearXNG and, if applicable, the DDG fallback) was unreachable
-         *             for this query. Distinct from an empty result list.
+         *         502: If every configured backend was unreachable for this query —
+         *             distinct from an empty result list.
          */
         post: operations["web_search_api_search_web_post"];
         delete?: never;
@@ -3585,7 +3558,7 @@ export interface paths {
         };
         /**
          * Get App Settings
-         * @description Return the 4 app settings with ``is_override`` flags.
+         * @description Return the 5 app settings with ``is_override`` flags.
          *
          *     Authenticated-user read (any role).  The values are resolved
          *     (DB override → config default) so the FE always gets the effective value.
@@ -3608,6 +3581,8 @@ export interface paths {
          *       or ``"brave_llm"``.
          *     - ``searxng_url`` must be a valid http(s) URL (SSRF guard via
          *       ``validate_searxng_url``).
+         *     - ``repeat_warning_cut_k`` must be an integer 0..100 (Pydantic
+         *       ``Field(ge=0, le=100)`` on the request model raises 422 otherwise).
          */
         patch: operations["patch_app_settings_api_settings_app_patch"];
         trace?: never;
@@ -4132,6 +4107,8 @@ export interface components {
             reasoning_effort?: string | null;
             /** Repeat Penalty */
             repeat_penalty?: number | null;
+            /** Repeat Warning Cut K */
+            repeat_warning_cut_k?: string | null;
             /** Self Consistency Enabled */
             self_consistency_enabled?: boolean | null;
             /** Stateless */
@@ -4413,12 +4390,8 @@ export interface components {
          * Capabilities
          * @description Model capability flags from LM Studio's ``/api/v1/models`` response.
          *
-         *     Live-probed shape:
-         *     ``{"vision": true, "trained_for_tool_use": true}``
-         *
-         *     ``reasoning`` is documented as optional and present only on reasoning-
-         *     capable models; a live probe of qwen3-8b (MLX
-         *     format) did not surface it.
+         *     Live-probed shape: ``{"vision": true, "trained_for_tool_use": true}``.
+         *     ``reasoning`` is optional and present only on reasoning-capable models.
          */
         Capabilities: {
             /**
@@ -5057,13 +5030,6 @@ export interface components {
         /**
          * MemoryInsight
          * @description One row from the ``memory_insights`` table.
-         *
-         *     Attributes:
-         *         id:         Row PK.
-         *         user_id:    Owning user.
-         *         text:       Insight text.
-         *         pinned:     Whether the insight is currently pinned.
-         *         created_at: Row creation timestamp.
          */
         MemoryInsight: {
             /**
@@ -5090,7 +5056,7 @@ export interface components {
          *         role:              Message role (``"user"`` | ``"assistant"`` |
          *                            ``"system"`` | ``"tool"``).
          *         content:           Message text body.
-         *         reasoning_content: Optional chain-of-thought text (P5 streaming).
+         *         reasoning_content: Optional chain-of-thought text (streaming).
          *         state:             Lifecycle state (``"draft"`` | ``"final"`` |
          *                            ``"pending_finalization"`` | ``"aborted_by_client"``).
          *         response_id:       LM Studio response-chain ID (nullable).
@@ -5167,20 +5133,17 @@ export interface components {
          * ModelInfo
          * @description One model entry from LM Studio's ``GET /api/v1/models`` response.
          *
-         *     LM Studio's REST surface mixes casings (live-probed):
-         *     ``displayName`` / ``sizeBytes`` / ``paramsString`` / ``maxContextLength``
-         *     are camelCase while ``key`` / ``loaded_instances`` / ``capabilities``
-         *     stay snake_case.  Those camelCase upstream keys are accepted via
-         *     ``validation_alias`` (INPUT only).  Casing policy: serialization
-         *     carries NO aliases, so the
-         *     lm-chat wire (``GET /api/models``) is snake_case everywhere — the FE
-         *     consumes the generated ``components["schemas"]["ModelInfo"]`` type.
-         *     Optional fields default gracefully when absent from the response so the
-         *     service doesn't fail on a new LM Studio release that omits a field.
+         *     LM Studio's REST surface mixes casings: ``displayName`` / ``sizeBytes``
+         *     / ``paramsString`` / ``maxContextLength`` are camelCase while ``key`` /
+         *     ``loaded_instances`` / ``capabilities`` stay snake_case. Camelcase keys
+         *     are accepted via ``validation_alias`` (input only) — serialization
+         *     carries no aliases, so the lm-chat wire is snake_case everywhere.
+         *     Optional fields default gracefully when absent so a new LM Studio
+         *     release that omits a field doesn't fail the service.
          *
-         *     ``loaded_instance_ids`` carries the ``id`` field from
-         *     each ``loaded_instances`` array entry (live-probed).  These
-         *     are the identifiers used for ``POST /api/v1/models/unload``.
+         *     ``loaded_instance_ids`` carries the ``id`` field from each
+         *     ``loaded_instances`` entry — the identifiers used for
+         *     ``POST /api/v1/models/unload``.
          */
         ModelInfo: {
             /**
@@ -5804,11 +5767,6 @@ export interface components {
         /**
          * SearchResult
          * @description One web search result.
-         *
-         *     Attributes:
-         *         title:   Page title.
-         *         url:     Canonical page URL.
-         *         snippet: Short excerpt or description.
          */
         SearchResult: {
             /** Snippet */
@@ -5994,7 +5952,7 @@ export interface components {
          *                     event for this user, derived from ``audit_log`` at
          *                     query time.  ``None`` when the user has never
          *                     successfully logged in (e.g. just-registered users).
-         *                     Added in P13k for the AdminUsers page.
+         *                     Added for the AdminUsers page.
          */
         UserResponse: {
             /**
@@ -6037,7 +5995,7 @@ export interface components {
             /** Is Override */
             is_override: boolean;
             /** Value */
-            value: boolean | string | null;
+            value: boolean | string | number | null;
         };
         /**
          * _AppSettingsResponse
@@ -6045,6 +6003,7 @@ export interface components {
          */
         _AppSettingsResponse: {
             memory_distillation_enabled: components["schemas"]["_AppSettingItem"];
+            repeat_warning_cut_k: components["schemas"]["_AppSettingItem"];
             searxng_url: components["schemas"]["_AppSettingItem"];
             subsession_memory_distillation_enabled: components["schemas"]["_AppSettingItem"];
             web_search_provider: components["schemas"]["_AppSettingItem"];
@@ -6094,6 +6053,8 @@ export interface components {
         _PatchAppSettingsRequest: {
             /** Memory Distillation Enabled */
             memory_distillation_enabled?: boolean | null;
+            /** Repeat Warning Cut K */
+            repeat_warning_cut_k?: number | null;
             /** Searxng Url */
             searxng_url?: string | null;
             /** Subsession Memory Distillation Enabled */

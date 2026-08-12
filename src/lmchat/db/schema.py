@@ -812,6 +812,12 @@ server_lm_studio_default = Table(
     Column("subsession_memory_distillation_enabled", Boolean, nullable=True),
     Column("web_search_provider", String(16), nullable=True),
     Column("searxng_url", String(512), nullable=True),
+    # Tool-call repeat-loop cut threshold (K) admin override. NULL = "use
+    # the Settings env-var default" (Settings.lm_chat_repeat_warning_cut_k).
+    # 0..100; 0 disables the cut. See app_settings_service.py's
+    # resolve_repeat_warning_cut_k / set_repeat_warning_cut_k and
+    # streaming_service.py's _track_loop_cut_signals (the consumer).
+    Column("repeat_warning_cut_k", Integer, nullable=True),
     Column(
         "updated_at",
         DateTime(timezone=True),

@@ -132,7 +132,9 @@ def test_0036_round_trip(tmp_path: Path) -> None:
     assert "memory_distillation_enabled" in _columns(db_url, "server_lm_studio_default")
     # head advanced to 0037 (hybrid compaction) — accept either the 0036 that
     # this migration introduced or the current head.
-    assert _get_version(db_url) in {"0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043"}
+    assert _get_version(db_url) in {
+        "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044",
+    }
 
 
 def test_0036_columns_accept_null(tmp_path: Path) -> None:

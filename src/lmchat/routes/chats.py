@@ -601,6 +601,13 @@ async def patch_chat(
     chain_of_verification_enabled: bool | None = Form(default=None),
     stateless: bool | None = Form(default=None),
     active_preset: str | None = Form(default=None),
+    # Per-chat override for the tool-call repeat-loop cut threshold (K).
+    # String (not int): mirrors reasoning_effort's Form/clear shape so an
+    # explicit empty string can travel over the wire as a real clear
+    # signal — an int-typed Form field can't distinguish "clear" from
+    # "omitted" without a second sentinel param. See settings_patch
+    # handling below for the int() parse + empty-clears-to-None semantics.
+    repeat_warning_cut_k: str | None = Form(default=None),
     # Move/detach a chat between projects.
     project_id: int | None = Form(default=None),
     # Comma-separated list of fields to explicitly NULL. Required because
@@ -663,6 +670,10 @@ async def patch_chat(
                           ``store=False`` upstream.
         active_preset:    Forward-compat: name of the currently-active
                           preset.
+        repeat_warning_cut_k: Per-chat override for the tool-call
+                          repeat-loop cut threshold (K), 0-100; ``""``
+                          clears the override (falls through to the
+                          global admin default, then the config default).
         user:             Authenticated user.
         chat_service:     Injected ``ChatService``.
 
@@ -674,6 +685,7 @@ async def patch_chat(
         HTTPException: 422 if ``ab_compare`` is not valid JSON or fails schema.
         HTTPException: 422 if ``incognito`` is sent on a chat that already has
                        messages (privacy invariant).
+        HTTPException: 422 if ``repeat_warning_cut_k`` is not a valid integer.
         HTTPException: 422 if any settings field fails ChatSettings
                        validation (range / type errors).
     """
@@ -773,6 +785,19 @@ async def patch_chat(
             settings_patch["stateless"] = stateless
         if active_preset is not None:
             settings_patch["active_preset"] = active_preset if active_preset else None
+        if repeat_warning_cut_k is not None:
+            # Empty string clears the per-chat override (falls through to
+            # the global admin default, then the config default).
+            if repeat_warning_cut_k == "":
+                settings_patch["repeat_warning_cut_k"] = None
+            else:
+                try:
+                    settings_patch["repeat_warning_cut_k"] = int(repeat_warning_cut_k)
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=_HTTP_422,
+                        detail=f"repeat_warning_cut_k must be an integer: {exc}",
+                    ) from exc
         # W2-BE: provider selection.  FastAPI coerces an empty form field to
         # None (same as omitting the field), so we only reach here when a
         # non-None slug was submitted.  An explicit empty string would be

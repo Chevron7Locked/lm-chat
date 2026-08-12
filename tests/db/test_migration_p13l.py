@@ -103,14 +103,14 @@ def test_migration_p13l_upgrade_creates_tables(tmp_path: Path) -> None:
     h_cols = _columns(db_url, "memory_insights_history")
     assert {"id", "user_id", "event", "insights_before", "created_at"}.issubset(h_cols)
 
-    assert _get_version(db_url) in {"0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043"}
+    assert _get_version(db_url) in {"0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044"}
 
 
 def test_migration_p13l_head_is_0017(tmp_path: Path) -> None:
     """After upgrade head the alembic_version row reads '0017'."""
     db_url = f"sqlite+aiosqlite:///{tmp_path}/test.db"
     _run_upgrade(db_url)
-    assert _get_version(db_url) in {"0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043"}
+    assert _get_version(db_url) in {"0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044"}
 
 
 def test_migration_p13l_downgrade_drops_tables(tmp_path: Path) -> None:
@@ -133,7 +133,7 @@ def test_migration_p13l_round_trip(tmp_path: Path) -> None:
     """upgrade head → downgrade past 0015 → upgrade head: P13l round-trips clean."""
     db_url = f"sqlite+aiosqlite:///{tmp_path}/test.db"
     _run_upgrade(db_url)
-    assert _get_version(db_url) in {"0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043"}
+    assert _get_version(db_url) in {"0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044"}
 
     # Downgrade past 0015 → 0014 (drops P13l stack).
     _run_downgrade(db_url, "0014")
@@ -147,7 +147,7 @@ def test_migration_p13l_round_trip(tmp_path: Path) -> None:
     tables = _table_names(db_url)
     assert "user_prefs" in tables
     assert "memory_insights_history" in tables
-    assert _get_version(db_url) in {"0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043"}
+    assert _get_version(db_url) in {"0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044"}
 
 
 def test_migration_p13l_user_prefs_default_folders(tmp_path: Path) -> None:
