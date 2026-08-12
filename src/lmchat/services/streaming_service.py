@@ -229,10 +229,11 @@ _MAX_TOOL_ROUNDS_PER_TURN: Final[int] = int(os.getenv("LM_CHAT_MAX_TOOL_ROUNDS_P
 _MAX_IDENTICAL_TOOL_ROUNDS: Final[int] = int(os.getenv("LM_CHAT_MAX_IDENTICAL_TOOL_ROUNDS", "5"))
 
 # Fast-path cut driven by the streaming client's own repeat detector, which
-# catches non-consecutive repeats too via a lookback window. K=2 means the
-# 3rd identical call in the window fires the cut. Override via
+# catches non-consecutive repeats too via a lookback window. K=16 means the
+# 17th identical call in the window fires the cut — permissive so heavy
+# agentic/research runs aren't cut short. Override via
 # `LM_CHAT_REPEAT_WARNING_CUT_K` (<=0 disables).
-_REPEAT_WARNING_CUT_K: Final[int] = int(os.getenv("LM_CHAT_REPEAT_WARNING_CUT_K", "2"))
+_REPEAT_WARNING_CUT_K: Final[int] = int(os.getenv("LM_CHAT_REPEAT_WARNING_CUT_K", "16"))
 
 
 class _LoopCutDecision(NamedTuple):
