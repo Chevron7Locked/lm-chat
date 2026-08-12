@@ -134,7 +134,7 @@ def test_0031_round_trip(tmp_path: Path) -> None:
     assert "preset_models" in _columns(db_url, "user_prefs")
     assert _get_version(db_url) in {
         "0031", "0032", "0033", "0034", "0035", "0036",
-        "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044",
+        "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044", "0045",
     }
 
 

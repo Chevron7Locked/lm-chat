@@ -122,7 +122,14 @@ depends_on: str | None = None
 # the tool-call repeat-loop cut K resolution chain; see
 # app_settings_service.resolve_repeat_warning_cut_k. Value verified via
 # `schema_fingerprint(metadata)` against the updated db/schema.py.
-SCHEMA_FINGERPRINT: str = "80d0af1e2217b3a7ae669e0063ed3de4"
+# Bumped 2026-08-12 by migration 0045 (durable sub-sessions) — added two
+# dedicated tables, sub_sessions (per-session metadata: preset_id, title,
+# status, model_id) and sub_session_messages (the transcript; reuses the
+# messages draft->final streaming state machine). Kept OUT of the messages
+# table on purpose so sub-session content is schema-isolated from the main
+# chat / replay context / search / analytics / summaries. Value verified via
+# `schema_fingerprint(metadata)` against the updated db/schema.py.
+SCHEMA_FINGERPRINT: str = "3dc4e1a0f22d7fd5458562f7d5c3c8db"
 
 
 def upgrade() -> None:

@@ -307,6 +307,99 @@ messages = Table(
 )
 
 # ---------------------------------------------------------------------------
+# sub_sessions + sub_session_messages (durable sub-sessions — migration 0045)
+#
+# Sub-sessions (/research, /code, /write, /analyze, /architect) are clean-
+# context mini-conversations run beside a chat. They live in DEDICATED tables
+# (NOT tagged rows in `messages`) so their private scratch content is
+# SCHEMA-ISOLATED: it can never reach the main-chat message list, the model
+# replay context, search/FTS5, analytics, or project summaries — all of which
+# query `messages`. sub_session_messages reuses the same
+# draft->pending_finalization->final/aborted_by_client streaming state machine
+# as `messages` (see _stream_state.py, parameterized on the target table).
+# ---------------------------------------------------------------------------
+sub_sessions = Table(
+    "sub_sessions",
+    metadata,
+    Column("id", _AUTO_PK_TYPE, primary_key=True),
+    Column(
+        "chat_id",
+        BigInteger,
+        ForeignKey("chats.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    # Slash-command mode: research | coder | creative | analyst | architect.
+    Column("preset_id", String(32), nullable=False),
+    # Derived from the first user turn; NULL falls back to the preset label.
+    Column("title", Text, nullable=True),
+    # Session lifecycle (distinct from per-message `state`):
+    #   active  — created; a stream is (or was) live
+    #   final   — a turn completed gracefully (chat.end, no error/disconnect)
+    #   aborted — client disconnect / terminal error / reaped
+    Column(
+        "status",
+        String(24),
+        nullable=False,
+        server_default=text("'active'"),
+    ),
+    Column("model_id", Text, nullable=True),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    # Reaper inactivity threshold for an in-flight sub-session; parallels
+    # messages.last_activity_at (touched by the ported _CoalesceTimer).
+    Column("last_activity_at", DateTime(timezone=True), nullable=True),
+    Index("ix_sub_sessions_chat_id", "chat_id"),
+)
+
+sub_session_messages = Table(
+    "sub_session_messages",
+    metadata,
+    Column("id", _AUTO_PK_TYPE, primary_key=True),
+    Column(
+        "sub_session_id",
+        BigInteger,
+        ForeignKey("sub_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("role", String(16), nullable=False),  # user | assistant | tool
+    Column("content", Text, nullable=False),
+    Column("reasoning_content", Text, nullable=True),
+    # Same streaming state machine as `messages`:
+    # draft | pending_finalization | final | aborted_by_client
+    Column(
+        "state",
+        String(24),
+        nullable=False,
+        server_default=text("'final'"),
+    ),
+    Column("tool_calls", JSON, nullable=True),
+    Column("response_id", Text, nullable=True),
+    Column("stop_reason", Text, nullable=True),
+    Column("model_id", Text, nullable=True),
+    Column(
+        "created_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column("last_activity_at", DateTime(timezone=True), nullable=True),
+    # Per-session transcript fetch + cursor pagination (sub_session_id, id).
+    Index("ix_sub_session_messages_sid_id", "sub_session_id", "id"),
+    # Reaper inactivity sweep over in-flight sub-session drafts.
+    Index("ix_sub_session_messages_last_activity_at", "last_activity_at"),
+)
+
+# ---------------------------------------------------------------------------
 # compactions (hybrid compaction — migration 0037)
 # ---------------------------------------------------------------------------
 # One row per `/compact` call that actually archived something. `messages`

@@ -194,7 +194,7 @@ def test_migration_0003_head_version(tmp_path: Path) -> None:
     version = _get_version(db_url)
     assert version in {
         "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038",
-        "0039", "0040", "0041", "0042", "0043", "0044",
+        "0039", "0040", "0041", "0042", "0043", "0044", "0045",
     }, f"Expected head version, got {version!r}"
 
 

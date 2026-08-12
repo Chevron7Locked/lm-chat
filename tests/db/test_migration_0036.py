@@ -133,7 +133,7 @@ def test_0036_round_trip(tmp_path: Path) -> None:
     # head advanced to 0037 (hybrid compaction) — accept either the 0036 that
     # this migration introduced or the current head.
     assert _get_version(db_url) in {
-        "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044",
+        "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044", "0045",
     }
 
 
