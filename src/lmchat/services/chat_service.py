@@ -25,7 +25,14 @@ from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from lmchat.db.retry import with_write_retry
-from lmchat.db.schema import chat_shares, chats, compactions, messages, sub_sessions
+from lmchat.db.schema import (
+    chat_shares,
+    chats,
+    compactions,
+    messages,
+    sub_session_messages,
+    sub_sessions,
+)
 from lmchat.db.scope import project_scope_clause
 from lmchat.lmstudio.oob_text import oob_message_text
 from lmchat.logging import get_logger
@@ -282,6 +289,73 @@ class Compaction(BaseModel):
     summary_token_count: int
     created_at: datetime
     archived_count: int = 0
+
+
+class SubSessionSummary(BaseModel):
+    """Pydantic projection of one row from the ``sub_sessions`` table.
+
+    Backs the P3 history/restore-on-load list (``GET
+    /{chat_id}/sub-sessions``) — metadata only, no transcript. See
+    :class:`SubSessionDetail` for the full-transcript shape.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    chat_id: int
+    preset_id: str
+    title: str | None
+    status: str
+    model_id: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SubSessionMessageRow(BaseModel):
+    """One row from ``sub_session_messages`` (a sub-session's transcript).
+
+    Mirrors :class:`~lmchat.services.message_service.Message`'s shape
+    where the two tables share columns (the FE already understands this
+    row shape), minus the main-``messages``-only columns
+    (``tool_call_id``, ``compaction_id``) that ``sub_session_messages``
+    doesn't have.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    sub_session_id: int
+    role: str
+    content: str
+    reasoning_content: str | None
+    state: str
+    tool_calls: list[dict[str, object]] | None = None
+    response_id: str | None
+    stop_reason: str | None
+    model_id: str | None
+    created_at: datetime
+
+
+class SubSessionDetail(BaseModel):
+    """One sub-session's metadata + its full transcript, id-ordered.
+
+    Backs ``GET /{chat_id}/sub-sessions/{sub_session_id}``. ``messages``
+    includes EVERY row state (``draft`` / ``pending_finalization`` /
+    ``final`` / ``aborted_by_client``) so an in-progress sub-session
+    rehydrates mid-stream, not just a finished one.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    chat_id: int
+    preset_id: str
+    title: str | None
+    status: str
+    model_id: str | None
+    created_at: datetime
+    updated_at: datetime
+    messages: list[SubSessionMessageRow]
 
 
 class ReorderRequest(BaseModel):
@@ -2637,3 +2711,87 @@ class ChatService:
             ).fetchall()
 
         return [Message.model_validate(r, from_attributes=True) for r in msg_rows]
+
+    async def list_sub_sessions(
+        self, chat_id: int, *, user_id: int
+    ) -> list[SubSessionSummary]:
+        """Return every sub-session for *chat_id*, newest first.
+
+        Backs the P3 restore-on-load fetch — the FE inspects the newest
+        row's most recent ``sub_session_messages.state`` (via
+        :meth:`get_sub_session`), NOT ``status`` alone (D9), to decide
+        whether to auto-restore it as live.
+
+        Returns:
+            List of :class:`SubSessionSummary`, ordered by id descending
+            (newest first).
+
+        Raises:
+            ChatNotFoundError: If missing or not owned by user.
+        """
+        await self._get_chat_row(chat_id, user_id=user_id)
+
+        async with self._engine.connect() as conn:
+            rows = (
+                await conn.execute(
+                    select(sub_sessions)
+                    .where(sub_sessions.c.chat_id == chat_id)
+                    .order_by(sub_sessions.c.id.desc())
+                )
+            ).fetchall()
+
+        return [SubSessionSummary.model_validate(r, from_attributes=True) for r in rows]
+
+    async def get_sub_session(
+        self, chat_id: int, sub_session_id: int, *, user_id: int
+    ) -> SubSessionDetail:
+        """Return one sub-session's metadata + full transcript, id-ordered.
+
+        Includes every message state (draft / pending_finalization / final
+        / aborted_by_client) — an in-progress sub-session must rehydrate
+        mid-stream, not just a finished one.
+
+        Args:
+            chat_id:        PK of the chat (ownership scope).
+            sub_session_id: PK of the ``sub_sessions`` row.
+            user_id:        Must own the chat.
+
+        Returns:
+            :class:`SubSessionDetail`.
+
+        Raises:
+            ChatNotFoundError: If the chat is missing/not owned, OR the
+                               sub-session does not belong to this chat —
+                               both surface as 404 so existence never leaks.
+        """
+        await self._get_chat_row(chat_id, user_id=user_id)
+
+        async with self._engine.connect() as conn:
+            sess_row = (
+                await conn.execute(
+                    select(sub_sessions).where(
+                        sub_sessions.c.id == sub_session_id,
+                        sub_sessions.c.chat_id == chat_id,
+                    )
+                )
+            ).fetchone()
+            if sess_row is None:
+                raise ChatNotFoundError(
+                    f"sub_session {sub_session_id!r} not found on chat {chat_id!r}"
+                )
+
+            msg_rows = (
+                await conn.execute(
+                    select(sub_session_messages)
+                    .where(sub_session_messages.c.sub_session_id == sub_session_id)
+                    .order_by(sub_session_messages.c.id.asc())
+                )
+            ).fetchall()
+
+        summary = SubSessionSummary.model_validate(sess_row, from_attributes=True)
+        return SubSessionDetail(
+            **summary.model_dump(),
+            messages=[
+                SubSessionMessageRow.model_validate(r, from_attributes=True) for r in msg_rows
+            ],
+        )

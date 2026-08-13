@@ -32,9 +32,13 @@ import { usePresetModels } from "@/hooks/usePresetModels";
 import { getPreset } from "@/lib/presets";
 import {
   buildSubSessionSystemPrompt,
+  fetchSubSessionDetail,
+  fetchSubSessions,
   formatSubSessionDate,
   injectSubSessionSummary,
+  isSubSessionLive,
 } from "@/lib/subSession";
+import type { SubSessionDetailDto } from "@/lib/subSession";
 import { resolveChatIntegrationsField } from "@/components/Composer";
 import type { ChatStreamPayload } from "@/hooks/useSSE";
 import type { PushOptions } from "@/stores/toastStore";
@@ -54,6 +58,19 @@ export interface SubSessionState {
   messages: SubSessionMessage[];
   finalizing: boolean;
   finalContent: string | null;
+  /**
+   * `sub_sessions.id` this panel corresponds to server-side, or `null`
+   * when unknown. P3: a freshly-started session never learns its id — the
+   * SSE stream doesn't echo it back (that's P4's continuation-param
+   * territory); only a session restored via `GET .../sub-sessions/{id}` on
+   * chat load populates this. The field exists mainly so a future reopen
+   * flow (P4) has something to key on; see `closeSubSessionPanel` vs
+   * `cancelSubSession` for why closing a panel must never abort an
+   * already-gracefully-finishing stream (that's the "keep the record"
+   * guarantee — it's about not racing the server's own teardown, not
+   * about retaining this field after the panel closes).
+   */
+  subSessionId: number | null;
 }
 
 export interface UseSubSessionArgs {
@@ -78,6 +95,11 @@ export interface UseSubSessionResult {
   startSubSession: (presetId: string) => SubSessionState | null;
   handleSubSessionFinalize: () => void;
   handleSubSessionInject: () => void;
+  /** UI-only close — chat-switch and post-inject cleanup. Never aborts an
+   *  in-flight stream; see the D10 comment on its implementation. */
+  closeSubSessionPanel: () => void;
+  /** Explicit user abort (the panel's Cancel button). Aborts any in-flight
+   *  stream, which the backend salvages as `aborted`. */
   cancelSubSession: () => void;
   subSessionSSE: UseSubSessionSSE;
   /** Routes a Composer submit into the sub-session stream when a
@@ -99,6 +121,52 @@ export interface UseSubSessionResult {
   ) => boolean;
 }
 
+/**
+ * Convert a fetched `SubSessionDetail` transcript into a `SubSessionState`
+ * the panel can render — same shape a live session builds up turn by turn.
+ *
+ * Returns `null` (skip the restore) when `preset_id` doesn't resolve to a
+ * known preset — legacy rows written before this fix carry the
+ * `_SUB_SESSION_PRESET_ID_UNSPECIFIED` placeholder, and a preset-less
+ * session can't rebuild a `systemPrompt` for a possible follow-up
+ * finalize. `systemPrompt` is reconstructed fresh (today's date, no
+ * integrations) rather than round-tripped — the original isn't persisted,
+ * and every live turn already rebuilds it the same way (see
+ * `maybeRouteSubmit`), so this isn't a new source of drift.
+ *
+ * Drops any row that isn't `user`/`assistant` (the schema allows a future
+ * `tool` role; nothing writes one today) and any row with no content AND
+ * no reasoning_content (a draft salvaged before its first delta landed) —
+ * otherwise the panel would show a blank assistant bubble.
+ */
+function buildRestoredSubSessionState(
+  detail: SubSessionDetailDto,
+): SubSessionState | null {
+  const preset = getPreset(detail.preset_id);
+  if (preset === null) return null;
+
+  const messages: SubSessionMessage[] = [];
+  for (const row of detail.messages) {
+    if (row.role !== "user" && row.role !== "assistant") continue;
+    if (row.content === "" && (row.reasoning_content ?? "") === "") continue;
+    messages.push({ role: row.role, content: row.content, id: row.id });
+  }
+
+  return {
+    presetId: preset.id,
+    presetLabel: preset.label,
+    presetTemplate: preset.system_prompt,
+    systemPrompt: buildSubSessionSystemPrompt(
+      preset.system_prompt,
+      formatSubSessionDate(),
+    ),
+    messages,
+    finalizing: false,
+    finalContent: null,
+    subSessionId: detail.id,
+  };
+}
+
 export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
   const {
     chatId,
@@ -113,13 +181,30 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
   const [subSession, setSubSession] = useState<SubSessionState | null>(null);
   const subSessionSSE = useSubSessionSSE();
 
-  // The reset-sub-session
-  // sequence (clear ref, clear state, reset SSE) was previously duplicated
-  // verbatim at three call sites in Chat.tsx (the cross-chat wipe effect,
-  // handleSubSessionInject, and the SubSessionPanel onCancel prop).
-  // Consolidated here into one callback — same three statements, same
-  // order, at all three sites — and returned so Chat.tsx's render wiring
-  // can pass it straight through as onCancel.
+  // P3 (durable sub-sessions, D10): cancel and close used to be the SAME
+  // operation (`cancelSubSession`, below) fired from three call sites — the
+  // cross-chat wipe effect, `handleSubSessionInject`'s post-promote
+  // cleanup, and the panel's explicit Cancel button. That conflated two
+  // different intents: at the server, a dropped connection and a real user
+  // abort are indistinguishable (both salvage the draft as `aborted`), so
+  // reusing `cancelSubSession`'s `subSessionSSE.reset()` (which aborts the
+  // in-flight fetch's AbortController) at the chat-switch/post-inject sites
+  // risked racing an already-gracefully-finishing stream into `aborted`
+  // instead of `final`. Split:
+  //   - `closeSubSessionPanel` — UI-only. Clears the local panel so it
+  //     stops rendering, but does NOT touch `subSessionSSE` — a stream
+  //     still in flight keeps running server-side to its own natural
+  //     conclusion (final or aborted, decided by the backend's own
+  //     disconnect/error/graceful-completion logic, same as a main-chat
+  //     stream surviving a chat switch). Used by the chat-switch wipe and
+  //     `handleSubSessionInject`'s post-promote cleanup.
+  //   - `cancelSubSession` — a real user abort (the panel's Cancel
+  //     button). Aborts the underlying fetch too, which the backend's
+  //     disconnect watcher observes and salvages as `aborted`.
+  const closeSubSessionPanel = useCallback((): void => {
+    setSubSession(null);
+  }, []);
+
   const cancelSubSession = useCallback((): void => {
     setSubSession(null);
     subSessionSSE.reset();
@@ -150,8 +235,11 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
 
   // un-keyed subSession state leaked across chat-switch — opening a fresh
   // chat 19 from chat 18 showed chat 18's "RESEARCH" panel. This piece of
-  // state belongs to the chat the user was just in. Wipe on chatId change.
-  // Intentionally ephemeral (no restore-on-revisit).
+  // state belongs to the chat the user was just in. Wipe (UI-only —
+  // `closeSubSessionPanel`, not `cancelSubSession`; D10 above) on chatId
+  // change. The panel itself doesn't restore across THIS wipe — the
+  // restore-on-load effect below is a separate fetch keyed on the NEW
+  // chatId, not a carry-over of the wiped state.
   //
   // This used to be one half
   // of a combined effect in Chat.tsx that also wiped followupSuggestions
@@ -163,10 +251,57 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
     if (prevChatIdRef.current !== chatId) {
       prevChatIdRef.current = chatId;
       if (subSession !== null) {
-        cancelSubSession();
+        closeSubSessionPanel();
       }
     }
-  }, [chatId, cancelSubSession, subSession]);
+  }, [chatId, closeSubSessionPanel, subSession]);
+
+  // P3 restore-on-load: durable sub-sessions (migration 0045 + P2's
+  // persist-through-the-draft-state-machine) survive a reload at the DB
+  // layer already — this is what makes that visible. On every chatId
+  // change (including the initial mount), fetch the chat's sub-sessions
+  // newest-first and, ONLY if the newest one is genuinely still live,
+  // restore its transcript into the panel.
+  //
+  // "Genuinely still live" (D9) is keyed off the newest
+  // `sub_session_messages.state` being `draft` or `pending_finalization`
+  // — NOT `sub_sessions.status` alone, which can briefly still read
+  // `active` after a graceful finish (the outer teardown's `final`
+  // transition is a separate write that can lag the terminal SSE frame).
+  // A finished/aborted session is deliberately NOT auto-restored here —
+  // browsing/reopening past sessions is P4's history-list feature.
+  //
+  // `restoreRunIdRef` guards against a stale fetch from an earlier
+  // chatId landing after the user has already switched again — the same
+  // shape as `runGuardRef` in useSubSessionSSE, at the coarser
+  // per-effect-run granularity this hook needs.
+  const restoreRunIdRef = useRef(0);
+  useEffect(() => {
+    const runId = restoreRunIdRef.current + 1;
+    restoreRunIdRef.current = runId;
+    if (chatId === null) return;
+    const cid = chatId;
+    void (async () => {
+      const list = await fetchSubSessions(cid);
+      if (restoreRunIdRef.current !== runId) return; // chat switched again
+      if (list === null) return;
+      const [newest] = list;
+      if (newest === undefined) return;
+      const detail: SubSessionDetailDto | null = await fetchSubSessionDetail(
+        cid,
+        newest.id,
+      );
+      if (restoreRunIdRef.current !== runId) return; // chat switched again
+      if (detail === null || !isSubSessionLive(detail)) return;
+      const restored = buildRestoredSubSessionState(detail);
+      if (restored === null) return;
+      // Functional guard: if the user already opened their OWN sub-session
+      // (e.g. typed `/research ...` while this fetch was in flight), don't
+      // clobber it with the restored one. Reads the LATEST state at apply
+      // time rather than whatever was closed over when the effect started.
+      setSubSession((prev) => prev ?? restored);
+    })();
+  }, [chatId]);
 
   // Start a sub-session for a given preset. Returns the created state
   // synchronously (in addition to scheduling the setSubSession commit) so
@@ -187,6 +322,7 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
         messages: [],
         finalizing: false,
         finalContent: null,
+        subSessionId: null,
       };
       setSubSession(next);
       return next;
@@ -210,6 +346,7 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
     subSessionSSE.finalize({
       chatId,
       modelId: resolvedModel,
+      presetId: subSession.presetId,
       systemPrompt: subSession.systemPrompt,
       messages: subSession.messages,
       ...(finalizeIntegrations !== undefined && { integrations: finalizeIntegrations }),
@@ -240,7 +377,11 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
         });
         return; // keep sub-session open so user can retry
       }
-      cancelSubSession();
+      // D10: close, don't cancel — the finalize stream already finished
+      // gracefully (finalContent came from its onComplete), so there's
+      // nothing to abort; using cancelSubSession here would risk racing
+      // an already-final row into aborted for no reason.
+      closeSubSessionPanel();
       void refetchMessages();
     })();
   }, [
@@ -249,7 +390,7 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
     selectedModel,
     currentChat?.model_id,
     savedDefaultModel,
-    cancelSubSession,
+    closeSubSessionPanel,
     refetchMessages,
     push,
   ]);
@@ -306,6 +447,7 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
           chatId: cid,
           modelId: resolvedModel,
           provider: resolvedProvider,
+          presetId: activeSubSession.presetId,
           systemPrompt: freshSystemPrompt,
           messages: updated,
           ...(turnIntegrations.length > 0
@@ -341,6 +483,7 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
     startSubSession,
     handleSubSessionFinalize,
     handleSubSessionInject,
+    closeSubSessionPanel,
     cancelSubSession,
     subSessionSSE,
     maybeRouteSubmit,

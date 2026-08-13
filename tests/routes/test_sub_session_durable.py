@@ -34,7 +34,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import event, select
+from sqlalchemy import event, func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from lmchat.db.pragmas import apply_sqlite_pragmas
@@ -60,6 +60,7 @@ from lmchat.services.message_service import MessageService
 from lmchat.services.models_service import Capabilities, ModelsService, ResolvedModel
 from lmchat.services.streaming_errors import SubSessionStreamInProgressError
 from lmchat.session.sqlite_store import SQLiteSessionStore
+from lmchat.utils.hashing import hash_password
 
 # ---------------------------------------------------------------------------
 # Fixtures — service-level (tests 1, 2, 4, 5)
@@ -425,6 +426,36 @@ def _register_and_login(
     assert resp.status_code == 200, f"login failed: {resp.text}"
 
 
+_LOW_N: int = 2**10
+
+
+async def _insert_user_direct(
+    engine: AsyncEngine, username: str, password: str = "correct-horse-battery"
+) -> None:
+    """Bypass the single-admin registration gate by inserting a user row directly.
+
+    Needed for a SECOND user in a cross-user test — plain ``/api/auth/register``
+    is closed once the first (admin) user exists. Mirrors
+    ``tests/routes/test_chats.py::_insert_user_direct`` exactly.
+    """
+    pw_hash = hash_password(password, n=_LOW_N, r=8, p=1)
+    async with engine.begin() as conn:
+        next_id = (
+            await conn.execute(select(func.coalesce(func.max(users.c.id), 0) + 1))
+        ).scalar()
+        if next_id is None:
+            raise RuntimeError("coalesce returned None — unreachable")
+        await conn.execute(
+            text("INSERT INTO users (id, username, password_hash) VALUES (:id, :u, :ph)"),
+            {"id": int(next_id), "u": username, "ph": pw_hash},
+        )
+
+
+def _login(client: TestClient, username: str, password: str = "correct-horse-battery") -> None:
+    resp = client.post("/api/auth/login", data={"username": username, "password": password})
+    assert resp.status_code == 200, f"login failed: {resp.text}"
+
+
 def test_sub_session_incognito_writes_zero_rows(
     test_client: TestClient, db_engine: AsyncEngine
 ) -> None:
@@ -722,3 +753,233 @@ async def test_reaper_finalizes_stuck_sub_session_draft(db_engine: AsyncEngine) 
         f"reaper must force-finalize the stuck draft, got state={assistant.state!r}"
     )
     assert assistant.content == "partial", "reaper must not clobber existing content"
+
+
+# ---------------------------------------------------------------------------
+# Test 9 — P3 rehydrate endpoints: GET /sub-sessions (list) + GET
+# /sub-sessions/{sub_session_id} (metadata + full transcript, including
+# still-in-flight draft rows so a reload mid-stream can rehydrate).
+# ---------------------------------------------------------------------------
+
+
+async def _seed_sub_session(
+    engine: AsyncEngine,
+    *,
+    chat_id: int,
+    preset_id: str = "research",
+    title: str | None = "seeded title",
+    status: str = "active",
+    messages: list[dict[str, Any]] | None = None,
+) -> int:
+    """Insert a ``sub_sessions`` row (+ optional ``sub_session_messages``).
+
+    Direct-DB seeding — a ``draft``-state row is only ever reachable
+    mid-stream in production, so route-level tests need this to exercise
+    the "includes drafts" contract without mocking the whole streaming
+    pipeline. Returns the new ``sub_session_id``.
+    """
+    async with engine.begin() as conn:
+        sess_result = await conn.execute(
+            sub_sessions.insert().values(
+                chat_id=chat_id, preset_id=preset_id, title=title, status=status
+            )
+        )
+        sub_session_id = int(sess_result.inserted_primary_key[0])  # type: ignore[index]
+        for msg in messages or []:
+            await conn.execute(
+                sub_session_messages.insert().values(sub_session_id=sub_session_id, **msg)
+            )
+    return sub_session_id
+
+
+def test_list_sub_sessions_happy_newest_first(
+    test_client: TestClient, db_engine: AsyncEngine
+) -> None:
+    """GET /sub-sessions returns every session for the chat, newest first."""
+    _register_and_login(test_client, username="alice")
+    chat_resp = test_client.post("/api/chats", data={"title": "history chat"})
+    assert chat_resp.status_code == 201, chat_resp.text
+    chat_id = chat_resp.json()["id"]
+
+    async def _seed() -> tuple[int, int]:
+        first = await _seed_sub_session(
+            db_engine,
+            chat_id=chat_id,
+            preset_id="research",
+            title="first",
+            status="final",
+            messages=[
+                {"role": "user", "content": "q1", "state": "final"},
+                {"role": "assistant", "content": "a1", "state": "final"},
+            ],
+        )
+        second = await _seed_sub_session(
+            db_engine,
+            chat_id=chat_id,
+            preset_id="coder",
+            title="second",
+            status="final",
+            messages=[
+                {"role": "user", "content": "q2", "state": "final"},
+                {"role": "assistant", "content": "a2", "state": "final"},
+            ],
+        )
+        return first, second
+
+    first_id, second_id = asyncio.run(_seed())
+
+    resp = test_client.get(f"/api/chats/{chat_id}/sub-sessions")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert isinstance(body, list)
+    assert [row["id"] for row in body] == [second_id, first_id], "expected newest-first order"
+    assert body[0]["preset_id"] == "coder"
+    assert body[0]["title"] == "second"
+    assert body[0]["status"] == "final"
+    assert "created_at" in body[0]
+    assert "updated_at" in body[0]
+    # Metadata only — no transcript on the list endpoint.
+    assert "messages" not in body[0]
+
+
+def test_list_sub_sessions_empty_chat(test_client: TestClient) -> None:
+    """A chat with no sub-sessions returns an empty array, not 404."""
+    _register_and_login(test_client, username="alice")
+    chat_resp = test_client.post("/api/chats", data={"title": "no sub-sessions"})
+    chat_id = chat_resp.json()["id"]
+
+    resp = test_client.get(f"/api/chats/{chat_id}/sub-sessions")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_list_sub_sessions_cross_user_404(
+    test_client: TestClient, db_engine: AsyncEngine
+) -> None:
+    async def _setup() -> int:
+        await _insert_user_direct(db_engine, "alice")
+        await _insert_user_direct(db_engine, "bob")
+        return await _seed_chat(db_engine, user_id=1)
+
+    chat_id = asyncio.run(_setup())
+
+    _login(test_client, "bob")
+    resp = test_client.get(f"/api/chats/{chat_id}/sub-sessions")
+    assert resp.status_code == 404
+
+
+def test_list_sub_sessions_not_found_404(test_client: TestClient) -> None:
+    _register_and_login(test_client, username="alice")
+    resp = test_client.get("/api/chats/999999/sub-sessions")
+    assert resp.status_code == 404
+
+
+def test_list_sub_sessions_unauth(test_client: TestClient) -> None:
+    resp = test_client.get("/api/chats/1/sub-sessions")
+    assert resp.status_code == 401
+
+
+def test_get_sub_session_includes_drafts(
+    test_client: TestClient, db_engine: AsyncEngine
+) -> None:
+    """GET /sub-sessions/{id} returns the full transcript, INCLUDING a
+    still-``draft`` assistant row — the mid-stream rehydrate contract."""
+    _register_and_login(test_client, username="alice")
+    chat_resp = test_client.post("/api/chats", data={"title": "mid-stream chat"})
+    chat_id = chat_resp.json()["id"]
+
+    sub_session_id = asyncio.run(
+        _seed_sub_session(
+            db_engine,
+            chat_id=chat_id,
+            preset_id="research",
+            title="mid-stream research",
+            status="active",
+            messages=[
+                {"role": "user", "content": "what happened", "state": "final"},
+                {
+                    "role": "assistant",
+                    "content": "partial answer so far",
+                    "state": "draft",
+                    "reasoning_content": "thinking...",
+                },
+            ],
+        )
+    )
+
+    resp = test_client.get(f"/api/chats/{chat_id}/sub-sessions/{sub_session_id}")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == sub_session_id
+    assert body["chat_id"] == chat_id
+    assert body["preset_id"] == "research"
+    assert body["status"] == "active"
+    assert len(body["messages"]) == 2
+    assert body["messages"][0]["role"] == "user"
+    assert body["messages"][0]["content"] == "what happened"
+    assert body["messages"][1]["role"] == "assistant"
+    assert body["messages"][1]["state"] == "draft", (
+        "the draft row must be included, not filtered out"
+    )
+    assert body["messages"][1]["content"] == "partial answer so far"
+    assert body["messages"][1]["reasoning_content"] == "thinking..."
+    # id-ordered ascending (user turn before the assistant reply).
+    assert body["messages"][0]["id"] < body["messages"][1]["id"]
+
+
+def test_get_sub_session_cross_user_404(
+    test_client: TestClient, db_engine: AsyncEngine
+) -> None:
+    async def _setup() -> tuple[int, int]:
+        await _insert_user_direct(db_engine, "alice")
+        await _insert_user_direct(db_engine, "bob")
+        cid = await _seed_chat(db_engine, user_id=1)
+        sid = await _seed_sub_session(
+            db_engine,
+            chat_id=cid,
+            messages=[{"role": "user", "content": "q", "state": "final"}],
+        )
+        return cid, sid
+
+    chat_id, sub_session_id = asyncio.run(_setup())
+
+    _login(test_client, "bob")
+    resp = test_client.get(f"/api/chats/{chat_id}/sub-sessions/{sub_session_id}")
+    assert resp.status_code == 404
+
+
+def test_get_sub_session_wrong_chat_404(
+    test_client: TestClient, db_engine: AsyncEngine
+) -> None:
+    """A sub_session_id that exists but under a DIFFERENT (still owned)
+    chat must 404 — existence never leaks across the wrong parent."""
+    _register_and_login(test_client, username="alice")
+    chat_a_resp = test_client.post("/api/chats", data={"title": "chat A"})
+    chat_a_id = chat_a_resp.json()["id"]
+    chat_b_resp = test_client.post("/api/chats", data={"title": "chat B"})
+    chat_b_id = chat_b_resp.json()["id"]
+
+    sub_session_id = asyncio.run(
+        _seed_sub_session(
+            db_engine,
+            chat_id=chat_a_id,
+            messages=[{"role": "user", "content": "q", "state": "final"}],
+        )
+    )
+
+    resp = test_client.get(f"/api/chats/{chat_b_id}/sub-sessions/{sub_session_id}")
+    assert resp.status_code == 404
+
+
+def test_get_sub_session_not_found_404(test_client: TestClient) -> None:
+    _register_and_login(test_client, username="alice")
+    chat_resp = test_client.post("/api/chats", data={"title": "empty history"})
+    chat_id = chat_resp.json()["id"]
+
+    resp = test_client.get(f"/api/chats/{chat_id}/sub-sessions/999999")
+    assert resp.status_code == 404
+
+
+def test_get_sub_session_unauth(test_client: TestClient) -> None:
+    resp = test_client.get("/api/chats/1/sub-sessions/1")
+    assert resp.status_code == 401

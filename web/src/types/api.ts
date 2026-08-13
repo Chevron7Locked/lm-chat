@@ -1941,6 +1941,12 @@ export interface paths {
          *
          *     Same project_id reject as /stream — the finalize stream is part of the
          *     same ephemeral pipeline so it inherits the not-projectable contract.
+         *     Same incognito gate (D6) as /stream: a non-incognito chat persists this
+         *     closing turn through the SAME durable state machine.
+         *
+         *     Raises:
+         *         HTTPException: 409 (``code=stream_in_progress``) if a sub-session
+         *             stream is already in flight for this chat_id (D4).
          */
         post: operations["sub_session_finalize_api_chats__chat_id__sub_session_finalize_post"];
         delete?: never;
@@ -1963,7 +1969,11 @@ export interface paths {
          * @description Stream a sub-session completion with clean context (no chat history).
          *
          *     The sub-session uses ONLY [system_prompt, ...messages_json] — the main
-         *     chat history is never loaded.  Nothing is persisted to the DB.
+         *     chat history is never loaded. Durable sub-sessions (migration 0045):
+         *     the turn is persisted through the SAME draft->pending_finalization->
+         *     final/aborted_by_client state machine the main chat uses, UNLESS the
+         *     chat is incognito (D6) — an incognito chat keeps today's zero-persist
+         *     path exactly.
          *
          *     Used by the frontend slash-command sub-session panel so that each mode
          *     (/research, /code, etc.) operates in a clean, isolated context.
@@ -1975,8 +1985,89 @@ export interface paths {
          *     irrelevant; project context flows into persistent main-chat turns via
          *     the project-prompt hoist at ``streaming_service.py:836-862``, never
          *     into the ephemeral sub-session pipeline.
+         *
+         *     Raises:
+         *         HTTPException: 409 (``code=stream_in_progress``) if a sub-session
+         *             stream is already in flight for this chat_id (D4) — independent
+         *             of, and never blocked by, an in-progress MAIN-chat stream on
+         *             the same chat_id.
          */
         post: operations["sub_session_stream_api_chats__chat_id__sub_session_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chats/{chat_id}/sub-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sub Sessions
+         * @description List every sub-session for ``chat_id``, newest first.
+         *
+         *     Read-only; owner-authed. Backs the FE's restore-on-load fetch (P3):
+         *     the FE inspects the newest entry's transcript (via
+         *     :func:`get_sub_session`) to decide whether it is genuinely live
+         *     (D9 — newest message ``state``, not ``status`` alone) before
+         *     auto-restoring the panel.
+         *
+         *     Args:
+         *         chat_id:      PK of the chat.
+         *         user:         Authenticated user.
+         *         chat_service: Injected ``ChatService``.
+         *
+         *     Returns:
+         *         List of :class:`~lmchat.services.chat_service.SubSessionSummary`
+         *         (200), ordered by id descending (newest first).
+         *
+         *     Raises:
+         *         HTTPException: 404 if chat not found or not owned by user.
+         */
+        get: operations["list_sub_sessions_api_chats__chat_id__sub_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chats/{chat_id}/sub-sessions/{sub_session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Sub Session
+         * @description Return one sub-session's metadata + full transcript, id-ordered.
+         *
+         *     Read-only; owner-authed. Includes every message state (draft /
+         *     pending_finalization / final / aborted_by_client) so an in-progress
+         *     sub-session rehydrates mid-stream, not just a finished one.
+         *
+         *     Args:
+         *         chat_id:        PK of the chat.
+         *         sub_session_id: PK of the ``sub_sessions`` row.
+         *         user:           Authenticated user.
+         *         chat_service:   Injected ``ChatService``.
+         *
+         *     Returns:
+         *         :class:`~lmchat.services.chat_service.SubSessionDetail` (200).
+         *
+         *     Raises:
+         *         HTTPException: 404 if the chat or the sub-session is not found
+         *             (or not owned by user) — existence never leaks.
+         */
+        get: operations["get_sub_session_api_chats__chat_id__sub_sessions__sub_session_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4200,6 +4291,8 @@ export interface components {
             messages_json: string;
             /** Model Id */
             model_id: string;
+            /** Preset Id */
+            preset_id?: string | null;
             /** Project Id */
             project_id?: string | null;
             /** Provider */
@@ -4215,6 +4308,8 @@ export interface components {
             messages_json: string;
             /** Model Id */
             model_id: string;
+            /** Preset Id */
+            preset_id?: string | null;
             /** Project Id */
             project_id?: string | null;
             /** Provider */
@@ -5784,6 +5879,112 @@ export interface components {
             label: string;
             /** Required */
             required: boolean;
+        };
+        /**
+         * SubSessionDetail
+         * @description One sub-session's metadata + its full transcript, id-ordered.
+         *
+         *     Backs ``GET /{chat_id}/sub-sessions/{sub_session_id}``. ``messages``
+         *     includes EVERY row state (``draft`` / ``pending_finalization`` /
+         *     ``final`` / ``aborted_by_client``) so an in-progress sub-session
+         *     rehydrates mid-stream, not just a finished one.
+         */
+        SubSessionDetail: {
+            /** Chat Id */
+            chat_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Messages */
+            messages: components["schemas"]["SubSessionMessageRow"][];
+            /** Model Id */
+            model_id: string | null;
+            /** Preset Id */
+            preset_id: string;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * SubSessionMessageRow
+         * @description One row from ``sub_session_messages`` (a sub-session's transcript).
+         *
+         *     Mirrors :class:`~lmchat.services.message_service.Message`'s shape
+         *     where the two tables share columns (the FE already understands this
+         *     row shape), minus the main-``messages``-only columns
+         *     (``tool_call_id``, ``compaction_id``) that ``sub_session_messages``
+         *     doesn't have.
+         */
+        SubSessionMessageRow: {
+            /** Content */
+            content: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Model Id */
+            model_id: string | null;
+            /** Reasoning Content */
+            reasoning_content: string | null;
+            /** Response Id */
+            response_id: string | null;
+            /** Role */
+            role: string;
+            /** State */
+            state: string;
+            /** Stop Reason */
+            stop_reason: string | null;
+            /** Sub Session Id */
+            sub_session_id: number;
+            /** Tool Calls */
+            tool_calls?: {
+                [key: string]: unknown;
+            }[] | null;
+        };
+        /**
+         * SubSessionSummary
+         * @description Pydantic projection of one row from the ``sub_sessions`` table.
+         *
+         *     Backs the P3 history/restore-on-load list (``GET
+         *     /{chat_id}/sub-sessions``) — metadata only, no transcript. See
+         *     :class:`SubSessionDetail` for the full-transcript shape.
+         */
+        SubSessionSummary: {
+            /** Chat Id */
+            chat_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Model Id */
+            model_id: string | null;
+            /** Preset Id */
+            preset_id: string;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * SystemAnalytics
@@ -8585,6 +8786,97 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden — insufficient privileges or cross-tenant access. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sub_sessions_api_chats__chat_id__sub_sessions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chat_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubSessionSummary"][];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden — insufficient privileges or cross-tenant access. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sub_session_api_chats__chat_id__sub_sessions__sub_session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chat_id: number;
+                sub_session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubSessionDetail"];
+                };
             };
             /** @description Authentication required. */
             401: {

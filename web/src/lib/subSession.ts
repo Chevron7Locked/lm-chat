@@ -4,7 +4,21 @@
  *
  * Extracted from `Chat.tsx` so the prompt-build path and the inject-summary
  * fetch are unit-testable without rendering the full chat surface.
+ *
+ * P3 (durable sub-sessions) additions: `fetchSubSessions` /
+ * `fetchSubSessionDetail` back the restore-on-load fetch in
+ * `useSubSession.ts`; `isSubSessionLive` is the D9 liveness check shared
+ * by that restore path.
  */
+import { api } from "@/lib/api";
+import type { components } from "@/types/api";
+
+// ─── Wire shapes (generated) ─────────────────────────────────────────────────
+
+export type SubSessionSummaryDto = components["schemas"]["SubSessionSummary"];
+export type SubSessionDetailDto = components["schemas"]["SubSessionDetail"];
+export type SubSessionMessageRowDto =
+  components["schemas"]["SubSessionMessageRow"];
 
 /**
  * Build a sub-session system prompt by framing the persona template with
@@ -95,5 +109,72 @@ export async function injectSubSessionSummary(
     return { ok: res.ok };
   } catch {
     return { ok: false };
+  }
+}
+
+// ─── P3: restore-on-load ────────────────────────────────────────────────────
+
+/**
+ * `sub_session_messages.state` values that mean "the newest turn is still
+ * in flight" (D9 — see migrations/versions/0045_sub_sessions.py and
+ * services/_stream_state.py's PersistState). Deliberately mirrors the BE
+ * enum as string literals rather than importing it — this is a FE-only
+ * decision boundary, not a shared contract type.
+ */
+const LIVE_MESSAGE_STATES: ReadonlySet<string> = new Set([
+  "draft",
+  "pending_finalization",
+]);
+
+/**
+ * D9 liveness check: is *detail*'s sub-session genuinely still in flight?
+ *
+ * Keyed off the newest transcript row's `state`, NOT `sub_sessions.status`
+ * alone — a session that just finished gracefully can briefly still read
+ * `status: "active"` before the backend's outer teardown commits the
+ * `final` transition (a separate write that can lag the terminal SSE
+ * frame). An empty transcript (shouldn't happen — every row gets an
+ * opening user turn — but defensive) is never live.
+ */
+export function isSubSessionLive(detail: SubSessionDetailDto): boolean {
+  const { messages } = detail;
+  if (messages.length === 0) return false;
+  const newest = messages[messages.length - 1];
+  return newest !== undefined && LIVE_MESSAGE_STATES.has(newest.state);
+}
+
+/**
+ * List a chat's sub-sessions, newest first. Best-effort: returns `null`
+ * (never throws) on any failure so the restore-on-load check silently
+ * degrades to "nothing to restore" instead of surfacing an error toast for
+ * a background fetch the user didn't initiate.
+ */
+export async function fetchSubSessions(
+  chatId: number,
+): Promise<SubSessionSummaryDto[] | null> {
+  try {
+    return await api.request<SubSessionSummaryDto[]>(
+      `/api/chats/${String(chatId)}/sub-sessions`,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch one sub-session's metadata + full transcript (including
+ * draft/pending rows, so an in-progress one rehydrates mid-stream).
+ * Best-effort — see `fetchSubSessions`.
+ */
+export async function fetchSubSessionDetail(
+  chatId: number,
+  subSessionId: number,
+): Promise<SubSessionDetailDto | null> {
+  try {
+    return await api.request<SubSessionDetailDto>(
+      `/api/chats/${String(chatId)}/sub-sessions/${String(subSessionId)}`,
+    );
+  } catch {
+    return null;
   }
 }

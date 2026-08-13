@@ -73,6 +73,8 @@ from lmchat.services.chat_service import (
     CompactionSummaryError,
     CompactResult,
     CompactTooLowError,
+    SubSessionDetail,
+    SubSessionSummary,
     TitleGenerationError,
 )
 from lmchat.services.lmstudio_streaming_client import StreamingClientUpstreamError
@@ -4041,6 +4043,76 @@ async def sub_session_finalize(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get(
+    "/{chat_id}/sub-sessions",
+    response_model=list[SubSessionSummary],
+)
+async def list_sub_sessions(
+    chat_id: int,
+    user: User = Depends(require_user),
+    chat_service: ChatService = Depends(_get_chat_service),
+) -> list[SubSessionSummary]:
+    """List every sub-session for ``chat_id``, newest first.
+
+    Read-only; owner-authed. Backs the FE's restore-on-load fetch (P3):
+    the FE inspects the newest entry's transcript (via
+    :func:`get_sub_session`) to decide whether it is genuinely live
+    (D9 — newest message ``state``, not ``status`` alone) before
+    auto-restoring the panel.
+
+    Args:
+        chat_id:      PK of the chat.
+        user:         Authenticated user.
+        chat_service: Injected ``ChatService``.
+
+    Returns:
+        List of :class:`~lmchat.services.chat_service.SubSessionSummary`
+        (200), ordered by id descending (newest first).
+
+    Raises:
+        HTTPException: 404 if chat not found or not owned by user.
+    """
+    try:
+        return await chat_service.list_sub_sessions(chat_id, user_id=user.id)
+    except ChatNotFoundError as exc:
+        raise HTTPException(status_code=_HTTP_404, detail="chat not found") from exc
+
+
+@router.get(
+    "/{chat_id}/sub-sessions/{sub_session_id}",
+    response_model=SubSessionDetail,
+)
+async def get_sub_session(
+    chat_id: int,
+    sub_session_id: int,
+    user: User = Depends(require_user),
+    chat_service: ChatService = Depends(_get_chat_service),
+) -> SubSessionDetail:
+    """Return one sub-session's metadata + full transcript, id-ordered.
+
+    Read-only; owner-authed. Includes every message state (draft /
+    pending_finalization / final / aborted_by_client) so an in-progress
+    sub-session rehydrates mid-stream, not just a finished one.
+
+    Args:
+        chat_id:        PK of the chat.
+        sub_session_id: PK of the ``sub_sessions`` row.
+        user:           Authenticated user.
+        chat_service:   Injected ``ChatService``.
+
+    Returns:
+        :class:`~lmchat.services.chat_service.SubSessionDetail` (200).
+
+    Raises:
+        HTTPException: 404 if the chat or the sub-session is not found
+            (or not owned by user) — existence never leaks.
+    """
+    try:
+        return await chat_service.get_sub_session(chat_id, sub_session_id, user_id=user.id)
+    except ChatNotFoundError as exc:
+        raise HTTPException(status_code=_HTTP_404, detail="chat not found") from exc
 
 
 class InjectMessageRequest(BaseModel):

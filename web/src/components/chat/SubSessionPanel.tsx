@@ -9,7 +9,11 @@ import type { SubSessionSSEState } from "@/hooks/useSubSessionSSE";
 interface SubSessionPanelProps {
   subSession: {
     presetLabel: string;
-    messages: { role: "user" | "assistant"; content: string }[];
+    /** `id` is set only on messages hydrated from a restored transcript
+     *  (P3 restore-on-load) — used as a stable render key in place of
+     *  array index; a live session's locally-typed turns render exactly
+     *  as before. */
+    messages: { role: "user" | "assistant"; content: string; id?: number }[];
     finalizing: boolean;
     finalContent: string | null;
   };
@@ -133,19 +137,22 @@ export function SubSessionPanel({
             </p>
           </div>
         )}
-        {headMessages.map((msg, i) => (
-          <ChatMessage
-            key={i}
-            message={{
-              id: `sub-${String(i)}`,
-              role: msg.role,
-              content: msg.content,
-              reasoning_content: null,
-            }}
-            streamingActive={false}
-            personaLabel={msg.role === "assistant" ? subSession.presetLabel : undefined}
-          />
-        ))}
+        {headMessages.map((msg, i) => {
+          const key = msg.id !== undefined ? `sub-row-${String(msg.id)}` : `sub-${String(i)}`;
+          return (
+            <ChatMessage
+              key={key}
+              message={{
+                id: key,
+                role: msg.role,
+                content: msg.content,
+                reasoning_content: null,
+              }}
+              streamingActive={false}
+              personaLabel={msg.role === "assistant" ? subSession.presetLabel : undefined}
+            />
+          );
+        })}
         {/* Live tool-call cards. BE was emitting
             sub.tool_call.{start,name,arguments,success} but the
             panel rendered only "Thinking…" — the toolCalls array was

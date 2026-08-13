@@ -73,6 +73,16 @@ export interface UseSubSessionSSE {
 export interface SubSessionMessage {
   role: "user" | "assistant";
   content: string;
+  /**
+   * Server-assigned `sub_session_messages.id` — set only on messages
+   * hydrated from a restored transcript (`GET
+   * .../sub-sessions/{sub_session_id}`, P3 restore-on-load). Messages typed
+   * during a live session are undefined here: the SSE stream doesn't echo
+   * row ids back to the FE (that's P4's continuation-param territory).
+   * Lets SubSessionPanel key rehydrated turns on a stable id instead of
+   * array index.
+   */
+  id?: number;
 }
 
 export interface SubSessionStreamParams {
@@ -86,6 +96,14 @@ export interface SubSessionStreamParams {
    * POST /api/chats/{id}/sub-session/stream (236cc54).
    */
   provider?: string;
+  /**
+   * Slash-command preset id (e.g. "research", "coder") — forwarded as the
+   * `preset_id` form field so the BE can persist the real discriminator on
+   * `sub_sessions.preset_id` and derive the row's title, instead of the
+   * `_SUB_SESSION_PRESET_ID_UNSPECIFIED` placeholder. Omit only for call
+   * sites that genuinely have no preset context.
+   */
+  presetId?: string;
   systemPrompt: string;
   messages: SubSessionMessage[];
   /** Optional integration ids forwarded to LM Studio (e.g.
@@ -196,6 +214,9 @@ export function useSubSessionSSE(): UseSubSessionSSE {
       // pass a provider.
       if (params.provider !== undefined && params.provider !== "" && params.provider !== "lmstudio") {
         form.append("provider", params.provider);
+      }
+      if (params.presetId !== undefined && params.presetId !== "") {
+        form.append("preset_id", params.presetId);
       }
       form.append("system_prompt", params.systemPrompt);
       form.append("messages_json", JSON.stringify(params.messages));
