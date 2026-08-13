@@ -142,7 +142,11 @@ describe("useSubSession — restore-on-load (P3)", () => {
     expect(result.current.subSession?.finalizing).toBe(false);
   });
 
-  it("restores a genuinely live sub-session (newest row state=pending_finalization)", async () => {
+  it("does NOT restore a finalizing sub-session (newest row state=pending_finalization)", async () => {
+    // pending_finalization = the turn's answer completed + finalize step 1 ran;
+    // it is DONE (awaiting the reaper's step-2 commit), not streaming — so it is
+    // recovered via P4 reopen, not auto-restored as live (dogfood-found: a
+    // reload landing during the finalize left the row here for a beat).
     mockRoutes({
       "/api/chats/42/sub-sessions": [baseSubSessionRow],
       "/api/chats/42/sub-sessions/5": makeDetail("pending_finalization"),
@@ -154,9 +158,9 @@ describe("useSubSession — restore-on-load (P3)", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.subSession).not.toBeNull();
+      expect(mockRequest).toHaveBeenCalledWith("/api/chats/42/sub-sessions/5");
     });
-    expect(result.current.subSession?.subSessionId).toBe(5);
+    expect(result.current.subSession).toBeNull();
   });
 
   it("does NOT restore a finished sub-session (newest row state=final)", async () => {

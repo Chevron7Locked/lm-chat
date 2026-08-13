@@ -129,6 +129,14 @@ test(
       "assistant content lost on reload",
     ).toBeGreaterThan(0);
 
+    // DIAGNOSTIC — printed BEFORE the status assertion so the real terminal is
+    // visible even when the assertion fails.
+    console.log(
+      `J7 DIAG: status=${detail.status} | ` +
+        `msgs=[${detail.messages.map((m) => `${m.role}:${m.state}`).join(", ")}] | ` +
+        `assistant.contentChars=${String((assistant?.content ?? "").length)}`,
+    );
+
     // (2) P4 status fix — a turn that finished BEFORE the reload must read
     // status='final', not 'aborted'. The dogfood-found race: the SSE
     // response's underlying generator can still be tearing down (a few more

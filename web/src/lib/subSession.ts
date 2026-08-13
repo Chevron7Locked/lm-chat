@@ -121,10 +121,15 @@ export async function injectSubSessionSummary(
  * enum as string literals rather than importing it — this is a FE-only
  * decision boundary, not a shared contract type.
  */
-const LIVE_MESSAGE_STATES: ReadonlySet<string> = new Set([
-  "draft",
-  "pending_finalization",
-]);
+// Auto-restore-on-load fires ONLY for a genuinely still-streaming session,
+// i.e. the newest message is `draft`. `pending_finalization` is NOT live: it
+// means the turn's answer already completed and finalize step 1 ran — the row
+// is just awaiting the reaper's step-2 commit (or a step-2 that a reload
+// interrupted). Treating it as live wrongly auto-restored a COMPLETED session
+// as if it were streaming (dogfood-found: a reload landing during the finalize
+// left the row at pending_finalization for a beat). Such a finished session is
+// recovered via P4's reopen-from-history, not auto-restore.
+const LIVE_MESSAGE_STATES: ReadonlySet<string> = new Set(["draft"]);
 
 /**
  * D9 liveness check: is *detail*'s sub-session genuinely still in flight?

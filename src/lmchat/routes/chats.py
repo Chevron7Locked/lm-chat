@@ -2364,6 +2364,17 @@ async def _sub_session_sse(
         ``finally``'s salvage below only ever fires for rows this never
         touched (still ``draft``).
         """
+        # Set graceful FIRST, before any await. Entering _on_success means a
+        # real sub.complete frame was yielded (a graceful terminal), so the
+        # session IS 'final' even if the finalize below is interrupted mid-way
+        # by a client disconnect / GeneratorExit. DOGFOOD-FOUND: a reload landing
+        # during _on_success left the message at pending_finalization (finalize
+        # step 1 done, step 2 not) with `_graceful` still False (it used to be
+        # set AFTER the finalize) → the session was wrongly marked 'aborted'
+        # even though it had streamed a complete 394-char answer. Setting the
+        # flag before every await makes it immune to that interruption; the
+        # reaper (D5) finalizes any pending_finalization row it left behind.
+        _graceful["value"] = True
         await coalesce.flush()
         ok = await _finalize_message_impl(
             engine,
@@ -2375,15 +2386,6 @@ async def _sub_session_sse(
             tool_calls=tool_calls,
             table=sub_session_messages,
         )
-        # _on_success only runs at a GRACEFUL terminal (a real sub.complete was
-        # yielded), so the session IS final regardless of whether the finalize's
-        # step-2 commit won its race. A False `ok` means step 2 lost to a
-        # concurrent reaper / transient DB error and the row is left in
-        # pending_finalization for the reaper to finalize (D5) — NOT that the
-        # turn aborted. Keying `_graceful` off `ok` mislabeled a completed
-        # sub-session 'aborted' on a transient step-2 failure (dual-seat review:
-        # genesis + strong, 2026-08-12).
-        _graceful["value"] = True
         if not ok:
             log.warning(
                 "sub_session.finalize_deferred_to_reaper",
@@ -2552,10 +2554,13 @@ async def _sub_session_sse(
         except asyncio.CancelledError:
             pass
 
-        # D9: final on a graceful _on_success finalize; aborted on every
-        # other exit (disconnect / error / exception / GeneratorExit). A
-        # later reaper sweep (D5) is a clean no-op — the conditional
-        # UPDATE only ever fires from 'active'.
+        # D9: status = 'final' iff a graceful terminal was reached — `_graceful`
+        # is set at the TOP of _on_success (the instant a real sub.complete
+        # frame is yielded), so it survives a reload interrupting the finalize.
+        # False on aclose/disconnect BEFORE any sub.complete (no _on_success →
+        # the message is only ever a salvaged partial), so an interrupted turn
+        # correctly stays 'aborted'. (A later reaper sweep is a clean no-op —
+        # the UPDATE only fires from 'active'.)
         _final_status = "final" if _graceful["value"] else "aborted"
         try:
             await asyncio.shield(
