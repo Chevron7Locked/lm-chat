@@ -238,3 +238,6 @@ select = ["E", "F", "I", "B", "UP", "ASYNC"]
 # E402 for streaming_service.py — _LOCAL_TZ must be computed before imports that may
 # trigger the event loop; late imports are intentional to avoid circular deps.
 "src/lmchat/services/streaming_service.py" = ["E402"]
+# E501 for preset_catalog.py — verbatim persona system-prompt text mirrored
+# from web/src/lib/presets.ts; reflowing would drift it from the FE source of truth.
+"src/lmchat/services/preset_catalog.py" = ["E501"]
