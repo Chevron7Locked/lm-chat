@@ -4198,6 +4198,26 @@ class InjectMessageRequest(BaseModel):
     model_id: str | None = None
 
 
+def _cap_sub_session_output(content: str) -> str:
+    """Cap a sub-session's finalized output before it reaches the main chat.
+
+    This is the single choke point where a sub-session's output is injected
+    into the main chat (``inject_message`` below) — the output is otherwise
+    bounded only indirectly by the tool-round cap, so an unbounded/huge
+    sub-session result could otherwise be injected verbatim. Truncates to
+    ``lm_chat_sub_session_output_max_chars`` (default 8000, override via
+    ``LM_CHAT_SUB_SESSION_OUTPUT_MAX_CHARS``) and appends a trailing marker;
+    ``<= 0`` disables the cap.
+    """
+    from lmchat.config import get_settings as _get_settings  # noqa: PLC0415
+
+    max_chars = _get_settings().lm_chat_sub_session_output_max_chars
+    if max_chars <= 0 or len(content) <= max_chars:
+        return content
+    marker = f"\n\n[… sub-session output truncated at {max_chars} characters …]"
+    return content[:max_chars] + marker
+
+
 @router.post(
     "/{chat_id}/inject-message",
     status_code=201,
@@ -4214,20 +4234,22 @@ async def inject_message(
     """Inject a pre-generated assistant message into a chat's main thread.
 
     Used by the sub-session frontend to add the finalized summary to the
-    main chat context after the sub-session completes.
+    main chat context after the sub-session completes. The content is
+    capped (see ``_cap_sub_session_output``) before it is persisted.
     """
     from lmchat.services.message_service import MessageNotFoundError
 
     svc: MessageService = message_service  # type: ignore[assignment]
+    capped_content = _cap_sub_session_output(body.content)
     try:
         msg = await svc.append(
             chat_id=chat_id,
             user_id=user.id,
             role="assistant",
-            content=body.content,
+            content=capped_content,
             model_id=body.model_id,
         )
     except MessageNotFoundError as exc:
         raise HTTPException(status_code=_HTTP_404, detail="chat not found") from exc
 
-    return {"id": msg.id, "chat_id": chat_id, "role": "assistant", "content": body.content}
+    return {"id": msg.id, "chat_id": chat_id, "role": "assistant", "content": capped_content}

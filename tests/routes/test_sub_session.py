@@ -588,6 +588,79 @@ def test_inject_message_cross_user_404(test_client: TestClient, db_engine: Async
     assert resp.status_code == 404
 
 
+def test_inject_message_truncates_over_cap_output(
+    test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sub-session output over the configured cap is truncated + marked
+    before it reaches the main chat (the single inject choke point)."""
+    from lmchat.config import get_settings
+
+    monkeypatch.setenv("LM_CHAT_SUB_SESSION_OUTPUT_MAX_CHARS", "50")
+    get_settings.cache_clear()
+
+    _register_and_login(test_client)
+    chat = _create_chat(test_client)
+
+    huge = "x" * 500
+    resp = test_client.post(
+        f"/api/chats/{int(chat['id'])}/inject-message",
+        json={"content": huge, "model_id": "summarizer"},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["content"].startswith("x" * 50)
+    assert "truncated at 50 characters" in body["content"]
+    assert len(body["content"]) < len(huge)
+
+    # The persisted row carries the SAME capped content — never the raw blob.
+    list_resp = test_client.get(f"/api/chats/{int(chat['id'])}")
+    messages = list_resp.json()["messages"]
+    stored = next(m for m in messages if m["role"] == "assistant")
+    assert stored["content"] == body["content"]
+
+
+def test_inject_message_leaves_under_cap_output_untouched(
+    test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sub-session output under the configured cap passes through as-is."""
+    from lmchat.config import get_settings
+
+    monkeypatch.setenv("LM_CHAT_SUB_SESSION_OUTPUT_MAX_CHARS", "50")
+    get_settings.cache_clear()
+
+    _register_and_login(test_client)
+    chat = _create_chat(test_client)
+
+    small = "a short summary"
+    resp = test_client.post(
+        f"/api/chats/{int(chat['id'])}/inject-message",
+        json={"content": small, "model_id": "summarizer"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["content"] == small
+
+
+def test_inject_message_cap_disabled_when_non_positive(
+    test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``<= 0`` disables the cap — arbitrarily large output passes through."""
+    from lmchat.config import get_settings
+
+    monkeypatch.setenv("LM_CHAT_SUB_SESSION_OUTPUT_MAX_CHARS", "0")
+    get_settings.cache_clear()
+
+    _register_and_login(test_client)
+    chat = _create_chat(test_client)
+
+    huge = "y" * 20_000
+    resp = test_client.post(
+        f"/api/chats/{int(chat['id'])}/inject-message",
+        json={"content": huge, "model_id": "summarizer"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["content"] == huge
+
+
 # Silence the unused-import warning — asyncio is imported for the event-loop
 # helpers in case future cases need them.
 _ = asyncio

@@ -213,6 +213,17 @@ class Settings(BaseSettings):
     # Override via LM_CHAT_REPEAT_WARNING_CUT_K.
     lm_chat_repeat_warning_cut_k: int = Field(default=16, ge=0, le=100)
 
+    # Sub-session output size cap (characters). Applied at the single choke
+    # point where a sub-session's finalized output is injected into the main
+    # chat (POST /{chat_id}/inject-message — see routes.chats.inject_message).
+    # A sub-session's output is otherwise bounded only indirectly by the
+    # tool-round cap, so an unbounded/huge result could be injected verbatim
+    # into the main chat; this caps it directly. Output beyond the cap is
+    # truncated with a trailing marker noting how many characters were cut.
+    # ``<= 0`` disables the cap entirely. Override via
+    # LM_CHAT_SUB_SESSION_OUTPUT_MAX_CHARS.
+    lm_chat_sub_session_output_max_chars: int = Field(default=8000)
+
     # Long-operation timeout for model load / download upstream calls.
     # Model loading can take 10–120 s (7B–120B range on MLX/GGUF).
     # Download of large models can take many minutes.
