@@ -726,6 +726,71 @@ async def test_list_for_chat_tool_calls_null_for_plain_rows(
     assert msgs[0].tool_calls is None
 
 
+@pytest.mark.asyncio()
+async def test_list_for_chat_repairs_malformed_tool_calls_row(
+    engine: AsyncEngine, svc: MessageService
+) -> None:
+    """One row with a malformed tool_calls blob does not 500 the whole chat.
+
+    Regression test: a bare-string ``tool_calls`` value is valid JSON but
+    the wrong shape (not ``list[dict]``), which is the realistic
+    corruption mode for a JSON column — e.g. a hand-edited row or a
+    pre-schema-change write. Previously ``Message.model_validate`` raised
+    for that single row inside a bare list comprehension, failing the
+    entire ``list_for_chat`` load. It must now be repaired in place
+    (``tool_calls`` reset to ``None``, logged at WARNING) while every
+    other row — including the rest of the bad row's own fields — still
+    loads.
+    """
+    from lmchat.services import message_service
+
+    await _seed_user_and_chat(engine, user_id=1, chat_id=1)
+    async with engine.begin() as conn:
+        await conn.execute(
+            messages.insert().values(
+                chat_id=1, role="user", content="hello", state="final"
+            )
+        )
+        await conn.execute(
+            messages.insert().values(
+                chat_id=1,
+                role="assistant",
+                content="I searched for you.",
+                state="final",
+                tool_calls="not-a-list",  # malformed: valid JSON, wrong shape
+            )
+        )
+
+    warnings: list[tuple[str, dict[str, object]]] = []
+    original_warning = message_service.log.warning
+
+    def _spy_warning(event: str, **kw: object) -> None:
+        warnings.append((event, kw))
+        original_warning(event, **kw)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(message_service.log, "warning", _spy_warning)
+        msgs, has_more = await svc.list_for_chat(1, user_id=1)
+
+    # Both rows load — the malformed row is repaired, not skipped, since
+    # tool_calls is the only offending field.
+    assert has_more is False
+    assert len(msgs) == 2
+    assert msgs[0].content == "hello"
+    assert msgs[0].tool_calls is None
+    assert msgs[1].content == "I searched for you."
+    assert msgs[1].role == "assistant"
+    assert msgs[1].tool_calls is None  # repaired to the safe default
+
+    # The repair is logged at WARNING with chat_id + row id so the
+    # corrupted row can still be found.
+    assert len(warnings) == 1
+    event, kw = warnings[0]
+    assert event == "message.tool_calls_repaired"
+    assert kw["chat_id"] == 1
+    assert kw["row_id"] == msgs[1].id
+
+
 # ---------------------------------------------------------------------------
 # Tests — delete_from_user_message_for_resend memory notify uses REAL ids
 # ---------------------------------------------------------------------------

@@ -32,10 +32,11 @@ the request context.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import delete, func, insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -161,13 +162,65 @@ def _sanitise_fts5_query(raw: str) -> str:
 def _message_from_row(row: Any) -> Message:
     """Construct a :class:`Message` from a SQLAlchemy Row.
 
+    A malformed ``tool_calls`` blob — valid JSON that decoded to the
+    wrong shape (not ``list[dict]``), the realistic corruption mode for
+    a JSON column — is repaired to ``None`` and the row re-validated,
+    mirroring the defensive per-row ``tool_calls`` parsing already used
+    for the model-facing replay path (``streaming_service.py``
+    ``_replay_msgs`` construction). The repair is logged at WARNING so
+    the corrupted row can still be found even though it loaded fine.
+    Any other validation failure still propagates; read paths that must
+    not fail an entire batch over one bad row catch it via
+    :func:`_messages_from_rows`.
+
     Args:
         row: A row returned from a SELECT on ``messages``.
 
     Returns:
         Validated :class:`Message` instance.
     """
-    return Message.model_validate(row, from_attributes=True)
+    try:
+        return Message.model_validate(row, from_attributes=True)
+    except ValidationError:
+        repaired = dict(row._mapping)  # noqa: SLF001
+        repaired["tool_calls"] = None
+        msg = Message.model_validate(repaired, from_attributes=True)
+        log.warning(
+            "message.tool_calls_repaired",
+            chat_id=msg.chat_id,
+            row_id=msg.id,
+        )
+        return msg
+
+
+def _messages_from_rows(rows: Iterable[Any]) -> list[Message]:
+    """Validate a batch of message rows, skipping any that fail.
+
+    Wraps :func:`_message_from_row` per row so a single corrupted row
+    that survives its repair attempt (any other bad field, e.g. one
+    left by a hand-edited row) does not fail the entire batch — this is
+    the user-facing load/search counterpart to the model-facing replay
+    path's per-row defensiveness. Every skip is logged at WARNING with
+    the chat_id + row id so the offending row can be found and fixed.
+
+    Args:
+        rows: Rows from a SELECT against ``messages``.
+
+    Returns:
+        Validated messages, in row order, with unrepairable rows omitted.
+    """
+    out: list[Message] = []
+    for row in rows:
+        try:
+            out.append(_message_from_row(row))
+        except ValidationError as exc:
+            log.warning(
+                "message.row_validation_failed",
+                chat_id=getattr(row, "chat_id", None),
+                row_id=getattr(row, "id", None),
+                error=str(exc),
+            )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -344,10 +397,11 @@ class MessageService:
             # Reverse so the caller always gets oldest-first ordering.
             rows = list(reversed(rows))
 
-        return (
-            [Message.model_validate(row, from_attributes=True) for row in rows],
-            has_more,
-        )
+        # Per-row validation: a single corrupted row (most realistically a
+        # malformed tool_calls JSON blob — see _message_from_row) must not
+        # 500 the whole chat load. _messages_from_rows repairs what it can
+        # and skips+logs anything left over.
+        return (_messages_from_rows(rows), has_more)
 
     async def _verify_chat_ownership(self, chat_id: int, user_id: int) -> None:
         """Raise ``MessageNotFoundError`` if *chat_id* is not owned by *user_id*.
@@ -1220,7 +1274,7 @@ class MessageService:
             result = await conn.execute(text(base_sql), params)
             rows = result.fetchall()
 
-        return [_message_from_row(r) for r in rows]
+        return _messages_from_rows(rows)
 
     async def _search_postgres(
         self,
