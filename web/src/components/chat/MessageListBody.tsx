@@ -37,6 +37,7 @@ interface MessageListBodyProps {
   ) => Promise<void>;
   handleRegenerateClick: (messageId: number) => void;
   handleResendClick: (messageId: number) => void;
+  handleForkFromMessage: (messageId: number) => Promise<void>;
   handleDeleteMessage: (messageId: number) => void;
   onLaunchMode: (presetId: string) => void;
   currentPersonaLabel: string | undefined;
@@ -75,6 +76,7 @@ export function MessageListBody({
   handleEditUserMessage,
   handleRegenerateClick,
   handleResendClick,
+  handleForkFromMessage,
   handleDeleteMessage,
   onLaunchMode,
   currentPersonaLabel,
@@ -141,6 +143,9 @@ export function MessageListBody({
               onEditUserMessage={handleEditUserMessage}
               onRegenerate={handleRegenerateClick}
               onResend={handleResendClick}
+              onForkFromHere={(messageId) => {
+                void handleForkFromMessage(messageId);
+              }}
               onDeleteMessage={handleDeleteMessage}
               onLaunchMode={onLaunchMode}
               personaLabel={item.msg.role === "assistant" ? currentPersonaLabel : undefined}
@@ -166,6 +171,9 @@ export function MessageListBody({
           onEditUserMessage={handleEditUserMessage}
           onRegenerate={handleRegenerateClick}
           onResend={handleResendClick}
+          onForkFromHere={(messageId) => {
+            void handleForkFromMessage(messageId);
+          }}
           onDeleteMessage={handleDeleteMessage}
           onLaunchMode={onLaunchMode}
           personaLabel={msg.role === "assistant" ? currentPersonaLabel : undefined}

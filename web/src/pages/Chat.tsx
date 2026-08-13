@@ -405,6 +405,7 @@ export default function Chat() {
     handleClear,
     handleClearConfirm,
     handleFork,
+    handleForkFromMessage,
     handleCompact,
     handleMemoryPin,
     handleDeleteChat,
@@ -1385,6 +1386,7 @@ export default function Chat() {
               handleEditUserMessage={handleEditUserMessage}
               handleRegenerateClick={handleRegenerateClick}
               handleResendClick={handleResendClick}
+              handleForkFromMessage={handleForkFromMessage}
               handleDeleteMessage={handleDeleteMessage}
               onLaunchMode={(presetId) => {
                 // Same launch path the Composer's inline "/research" slash

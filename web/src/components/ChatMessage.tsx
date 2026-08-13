@@ -37,7 +37,7 @@ import { CodeBlock } from "@/components/CodeBlock";
 import { ProcessStream } from "@/components/ProcessStream";
 import { CitationBadge, tokenizeCitations } from "@/components/CitationBadge";
 import type { ToolCall, StreamStats, LoadPhase } from "@/hooks/useSSE";
-import { Copy, Check, Trash2 } from "lucide-react";
+import { Copy, Check, Trash2, GitFork } from "lucide-react";
 import { useToastStore } from "@/stores/toastStore";
 import { detectLaunchableModes } from "@/lib/launchableModes";
 import { PRESETS } from "@/lib/presets";
@@ -140,6 +140,13 @@ interface ChatMessageProps {
    * rendered.
    */
   onResend?: (messageId: number) => void;
+  /**
+   * Called when the user clicks "Fork from here" on an assistant message.
+   * Branches the main thread at this point into a new chat (backend copies
+   * every message up to and including this one). Receives the assistant
+   * message id. When absent, the Fork button is not rendered.
+   */
+  onForkFromHere?: (messageId: number) => void;
   /**
    * Called when the user clicks Delete on a message (any role). Receives
    * the persisted message id. Optional —
@@ -326,6 +333,7 @@ function ChatMessageInner({
   onEditUserMessage,
   onRegenerate,
   onResend,
+  onForkFromHere,
   onDeleteMessage,
   personaLabel,
   skipEntranceAnimation = false,
@@ -375,6 +383,16 @@ function ChatMessageInner({
     Number.isFinite(persistedNumericId) &&
     onResend !== undefined &&
     !streamingActive;
+  // Fork from here: branches the main thread at this assistant turn into a
+  // new chat. Same gating as Regenerate — persisted assistant turns only,
+  // never while a stream is in flight (the message boundary isn't stable
+  // to fork from until the turn is actually done).
+  const canFork =
+    isAssistant &&
+    Number.isFinite(persistedNumericId) &&
+    onForkFromHere !== undefined &&
+    !streamingActive &&
+    message.streaming !== true;
   // Copy is available on any user / assistant turn that has content and
   // isn't actively streaming. Unlike Edit / Regenerate, it does not
   // require a persisted numeric id — copying from an optimistic
@@ -642,11 +660,13 @@ function ChatMessageInner({
         </form>
       )}
 
-      {/* Hover action row (Edit / Regenerate / Copy / Delete).
-          Order: Edit → Regenerate → Copy → Delete. Delete is rightmost
-          per the standard destructive-action-isolated pattern; Copy stays
-          adjacent to Edit/Regenerate. */}
-      {!editing && (canCopy || canEdit || canResend || canRegenerate || canDelete) && (
+      {/* Hover action row (Edit / Regenerate / Fork / Copy / Delete).
+          Order: Edit → Regenerate → Fork → Copy → Delete. Delete is
+          rightmost per the standard destructive-action-isolated pattern;
+          Copy stays adjacent to Edit/Regenerate; Fork sits next to
+          Regenerate since both are assistant-turn actions. */}
+      {!editing &&
+        (canCopy || canEdit || canResend || canRegenerate || canFork || canDelete) && (
         <div className="lmchat-message-actions">
           {canEdit && (
             <button
@@ -730,6 +750,20 @@ function ChatMessageInner({
               </svg>
             </button>
           )}
+          {canFork && (
+            <button
+              type="button"
+              onClick={() => {
+                onForkFromHere(persistedNumericId);
+              }}
+              aria-label="Fork from here"
+              title="Fork from here"
+              className="lmchat-message-action-btn"
+              data-testid={`chat-message-fork-btn-${String(message.id)}`}
+            >
+              <GitFork size={14} aria-hidden />
+            </button>
+          )}
           {canCopy && (
             <CopyMessageButton
               content={message.content}
@@ -775,6 +809,7 @@ function ChatMessageInner({
  *                             useCallback in Chat.tsx; included for correctness)
  *   - onRegenerate          — same as above
  *   - onResend              — same as above
+ *   - onForkFromHere        — same as above (gates the Fork button)
  *   - onLaunchMode          — same as above (gates the launch-chip row)
  *
  * Fields intentionally EXCLUDED (do not need to re-render this message):
@@ -798,6 +833,7 @@ function areChatMessagePropsEqual(
   if (prev.onEditUserMessage !== next.onEditUserMessage) return false;
   if (prev.onRegenerate !== next.onRegenerate) return false;
   if (prev.onResend !== next.onResend) return false;
+  if (prev.onForkFromHere !== next.onForkFromHere) return false;
   if (prev.onLaunchMode !== next.onLaunchMode) return false;
   // stats: only the streaming message carries live stats; identity is enough.
   if (prev.message.stats !== next.message.stats) return false;

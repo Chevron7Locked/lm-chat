@@ -66,6 +66,7 @@ export interface UseChatCommandsResult {
   handleClear: () => void;
   handleClearConfirm: () => Promise<void>;
   handleFork: () => Promise<void>;
+  handleForkFromMessage: (messageId: number) => Promise<void>;
   handleCompact: () => Promise<void>;
   handleMemoryPin: (text: string) => Promise<void>;
   handleDeleteChat: () => Promise<void>;
@@ -153,6 +154,25 @@ export function useChatCommands({
     }
   }, [chatId, messagesData, forkChat, navigate, push]);
 
+  // Fork at a specific message boundary — the per-message "Fork from here"
+  // action on an assistant turn (ChatMessage's onForkFromHere). Same
+  // mutation + navigate + toast shape as handleFork above; the only
+  // difference is the caller supplies the boundary message id directly
+  // instead of it being derived from the last message in the chat.
+  const handleForkFromMessage = useCallback(
+    async (messageId: number): Promise<void> => {
+      if (chatId === null) return;
+      try {
+        const forked = await forkChat.mutateAsync({ at_message_id: messageId });
+        push({ variant: "success", message: "Chat forked." });
+        void navigate(`/chats/${String(forked.id)}`);
+      } catch {
+        push({ variant: "error", message: "Fork failed." });
+      }
+    },
+    [chatId, forkChat, navigate, push],
+  );
+
   const handleCompact = useCallback(async (): Promise<void> => {
     if (chatId === null) return;
     try {
@@ -235,6 +255,7 @@ export function useChatCommands({
     handleClear,
     handleClearConfirm,
     handleFork,
+    handleForkFromMessage,
     handleCompact,
     handleMemoryPin,
     handleDeleteChat,
