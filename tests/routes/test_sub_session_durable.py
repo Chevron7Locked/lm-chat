@@ -21,6 +21,16 @@ Tests 1/2/5 drive ``_sub_session_sse`` directly (service-level, mirroring
 pattern in ``tests/services/test_streaming_service.py::_mock_request``) —
 the incognito gate lives in the ROUTE layer, so test 3 goes through a real
 ``TestClient`` instead (mirroring ``tests/routes/test_sub_session.py``).
+
+P4 additions (PLAN.md §2c/§3/D9/D10 — history + reopen + continue):
+
+6. The graceful finalize path marks ``sub_sessions.status='final'`` INSIDE
+   ``_on_success`` — not only in the outer teardown ``finally`` — so a
+   later (or racing) disconnect signal can never mislabel a genuinely
+   completed sub-session ``'aborted'``.
+7. An optional ``sub_session_id`` Form param on ``/sub-session/stream``
+   APPENDS a new turn onto an existing ``sub_sessions`` row (reopen +
+   continue); a foreign, cross-user, or malformed id is rejected.
 """
 
 from __future__ import annotations
@@ -30,7 +40,7 @@ import json
 from collections.abc import AsyncGenerator, AsyncIterator, Generator
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -46,11 +56,13 @@ from lmchat.routes._dependencies import (
     get_engine_dep,
     get_integrations_service_dep,
 )
+import lmchat.routes.chats as chats_module
 from lmchat.routes.chats import (
     _get_chat_service,
     _get_message_service,
     _sub_session_sse,
     _SubSessionPersistContext,
+    _transition_sub_session_status,
 )
 from lmchat.services._stream_reaper import _finalize_stuck_sub_session_drafts
 from lmchat.services.auth_service import _reset_dummy_hash_cache
@@ -983,3 +995,287 @@ def test_get_sub_session_not_found_404(test_client: TestClient) -> None:
 def test_get_sub_session_unauth(test_client: TestClient) -> None:
     resp = test_client.get("/api/chats/1/sub-sessions/1")
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — P4: sub_sessions.status flips to 'final' INSIDE the graceful
+# finalize (_on_success), not only in the outer teardown finally.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_graceful_completion_marks_final_inside_on_success(
+    db_engine: AsyncEngine,
+) -> None:
+    """The status transition fires as part of _on_success, before the
+    generator's outer finally runs — not deferred to it.
+
+    Regression for the live-dogfood race: before this fix, only the OUTER
+    ``finally`` called ``_transition_sub_session_status`` — several more
+    sequential DB round trips (a release-stuck-draft no-op, an
+    aborted-row-salvage no-op) run between the message finalize and that
+    single call, leaving the SSE response's underlying generator technically
+    un-torn-down for long enough that a fast client reload's disconnect
+    watcher could land ahead of it, mislabeling a genuinely COMPLETED
+    sub-session 'aborted'. Proved here by spying on
+    ``_transition_sub_session_status``: it must now be called TWICE for a
+    graceful completion — once eagerly (status still 'active' beforehand,
+    called from _on_success) and once as a same-value no-op (status already
+    'final', called from the outer finally).
+    """
+    chat_id = await _seed_chat(db_engine)
+    events = [
+        CanonicalEvent(type="chat.start"),
+        CanonicalEvent(type="message.delta", content="the answer"),
+        CanonicalEvent(type="chat.end"),
+    ]
+    lm_client = _FakeLmClient(events)
+    persist = _SubSessionPersistContext(engine=db_engine, chat_id=chat_id, preset_id="research")
+
+    real_transition = chats_module._transition_sub_session_status
+    call_log: list[tuple[str, str]] = []  # (to_status, status_in_db_BEFORE_this_call)
+
+    async def _spy(engine: AsyncEngine, *, sub_session_id: int, to_status: str) -> bool:
+        async with engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    select(sub_sessions.c.status).where(sub_sessions.c.id == sub_session_id)
+                )
+            ).fetchone()
+        call_log.append((to_status, row.status if row else "<missing>"))
+        return await real_transition(engine, sub_session_id=sub_session_id, to_status=to_status)
+
+    with patch.object(chats_module, "_transition_sub_session_status", side_effect=_spy):
+        frames: list[bytes] = []
+        async for frame in _sub_session_sse(
+            lm_client=lm_client,  # type: ignore[arg-type]
+            model_id="test-model",
+            system_prompt="you are a tester",
+            messages=[{"role": "user", "content": "what is the answer?"}],
+            request=_mock_request(disconnected=False),
+            persist=persist,
+        ):
+            frames.append(frame)
+
+    assert "sub.complete" in b"".join(frames).decode()
+    assert len(call_log) == 2, (
+        "expected _transition_sub_session_status called twice (eagerly from "
+        f"_on_success + a no-op from the outer finally), got {call_log!r}"
+    )
+    assert call_log[0] == ("final", "active"), (
+        f"first call must fire from _on_success while status is still "
+        f"'active' — got {call_log[0]!r}"
+    )
+    assert call_log[1] == ("final", "final"), (
+        "second call (the outer finally) must observe status ALREADY "
+        f"'final' — proving the transition happened inside _on_success, "
+        f"not the finally — got {call_log[1]!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_completed_sub_session_stays_final_after_late_disconnect_signal(
+    db_engine: AsyncEngine,
+) -> None:
+    """A LATE disconnect-triggered abort attempt on an already-'final'
+    sub-session is a clean no-op — it must never downgrade 'final' back to
+    'aborted'.
+
+    Simulates the literal dogfood symptom: the turn completed (status is
+    already 'final'), and only THEN does a reload's disconnect watcher get
+    a chance to run its abort attempt.
+    """
+    chat_id = await _seed_chat(db_engine)
+    events = [
+        CanonicalEvent(type="chat.start"),
+        CanonicalEvent(type="message.delta", content="the answer"),
+        CanonicalEvent(type="chat.end"),
+    ]
+    lm_client = _FakeLmClient(events)
+    persist = _SubSessionPersistContext(engine=db_engine, chat_id=chat_id, preset_id="research")
+
+    async for _frame in _sub_session_sse(
+        lm_client=lm_client,  # type: ignore[arg-type]
+        model_id="test-model",
+        system_prompt="you are a tester",
+        messages=[{"role": "user", "content": "what is the answer?"}],
+        request=_mock_request(disconnected=False),
+        persist=persist,
+    ):
+        pass
+
+    sess_rows, _msg_rows = await _sub_session_rows(db_engine, chat_id)
+    assert sess_rows[0].status == "final"
+    sub_session_id = sess_rows[0].id
+
+    won = await _transition_sub_session_status(
+        db_engine, sub_session_id=sub_session_id, to_status="aborted"
+    )
+    assert won is False, "a late abort attempt must lose the race, not win it"
+
+    sess_rows_after, _msg_rows_after = await _sub_session_rows(db_engine, chat_id)
+    assert sess_rows_after[0].status == "final", (
+        f"status must stay 'final' after a late disconnect signal, got "
+        f"{sess_rows_after[0].status!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — P4: reopen + continue. An optional sub_session_id Form param on
+# /sub-session/stream APPENDS onto an existing sub_sessions row.
+# ---------------------------------------------------------------------------
+
+
+def test_sub_session_append_creates_new_turn_under_same_sid(
+    test_client: TestClient, db_engine: AsyncEngine
+) -> None:
+    """A second /stream call carrying sub_session_id appends a new turn
+    onto the SAME sub_sessions row instead of creating a second one."""
+    _register_and_login(test_client, username="alice")
+    chat_resp = test_client.post("/api/chats", data={"title": "reopen+continue"})
+    assert chat_resp.status_code == 201, chat_resp.text
+    chat_id = chat_resp.json()["id"]
+
+    first = test_client.post(
+        f"/api/chats/{chat_id}/sub-session/stream",
+        data={
+            "model_id": "test-model",
+            "system_prompt": "you are a tester",
+            "messages_json": json.dumps([{"role": "user", "content": "first turn"}]),
+        },
+    )
+    assert first.status_code == 200, first.text
+
+    sess_rows, msg_rows = asyncio.run(_sub_session_rows(db_engine, chat_id))
+    assert len(sess_rows) == 1
+    assert sess_rows[0].status == "final"
+    assert len(msg_rows) == 2
+    sub_session_id = sess_rows[0].id
+
+    second = test_client.post(
+        f"/api/chats/{chat_id}/sub-session/stream",
+        data={
+            "model_id": "test-model",
+            "system_prompt": "you are a tester",
+            "messages_json": json.dumps(
+                [
+                    {"role": "user", "content": "first turn"},
+                    {"role": "assistant", "content": "hello world"},
+                    {"role": "user", "content": "second turn"},
+                ]
+            ),
+            "sub_session_id": str(sub_session_id),
+        },
+    )
+    assert second.status_code == 200, second.text
+    assert "sub.complete" in second.text
+
+    sess_rows_after, msg_rows_after = asyncio.run(_sub_session_rows(db_engine, chat_id))
+    assert len(sess_rows_after) == 1, (
+        f"expected the turn to append onto the SAME sub_sessions row, "
+        f"got {len(sess_rows_after)} rows"
+    )
+    assert sess_rows_after[0].id == sub_session_id
+    assert sess_rows_after[0].status == "final"
+    assert len(msg_rows_after) == 4, (
+        f"expected 2 turns x (user+assistant) = 4 rows under one "
+        f"sub_session_id, got {len(msg_rows_after)}"
+    )
+    user_msgs = sorted((m for m in msg_rows_after if m.role == "user"), key=lambda m: m.id)
+    assert [m.content for m in user_msgs] == ["first turn", "second turn"]
+
+
+def test_sub_session_append_foreign_sid_rejected(
+    test_client: TestClient, db_engine: AsyncEngine
+) -> None:
+    """A sub_session_id belonging to a DIFFERENT chat is rejected (404),
+    not silently appended to."""
+    _register_and_login(test_client, username="alice")
+    chat_a_resp = test_client.post("/api/chats", data={"title": "chat A"})
+    chat_a_id = chat_a_resp.json()["id"]
+    chat_b_resp = test_client.post("/api/chats", data={"title": "chat B"})
+    chat_b_id = chat_b_resp.json()["id"]
+
+    foreign_sid = asyncio.run(
+        _seed_sub_session(
+            db_engine,
+            chat_id=chat_a_id,
+            status="final",
+            messages=[
+                {"role": "user", "content": "q", "state": "final"},
+                {"role": "assistant", "content": "a", "state": "final"},
+            ],
+        )
+    )
+
+    resp = test_client.post(
+        f"/api/chats/{chat_b_id}/sub-session/stream",
+        data={
+            "model_id": "test-model",
+            "system_prompt": "you are a tester",
+            "messages_json": json.dumps([{"role": "user", "content": "hijack attempt"}]),
+            "sub_session_id": str(foreign_sid),
+        },
+    )
+    assert resp.status_code == 404, resp.text
+
+    # Nothing must have been appended to the foreign session.
+    sess_rows, msg_rows = asyncio.run(_sub_session_rows(db_engine, chat_a_id))
+    assert len(sess_rows) == 1
+    assert len(msg_rows) == 2, "the foreign sub-session's transcript must be untouched"
+
+
+def test_sub_session_append_cross_user_sid_rejected(
+    test_client: TestClient, db_engine: AsyncEngine
+) -> None:
+    """A sub_session_id belonging to ANOTHER USER's chat 404s — existence
+    never leaks across users either."""
+
+    async def _setup() -> tuple[int, int]:
+        await _insert_user_direct(db_engine, "alice")
+        await _insert_user_direct(db_engine, "bob")
+        cid = await _seed_chat(db_engine, user_id=1)
+        sid = await _seed_sub_session(
+            db_engine,
+            chat_id=cid,
+            status="final",
+            messages=[{"role": "user", "content": "q", "state": "final"}],
+        )
+        return cid, sid
+
+    _alice_chat_id, alice_sid = asyncio.run(_setup())
+
+    _login(test_client, "bob")
+    bob_chat_resp = test_client.post("/api/chats", data={"title": "bob's chat"})
+    bob_chat_id = bob_chat_resp.json()["id"]
+
+    resp = test_client.post(
+        f"/api/chats/{bob_chat_id}/sub-session/stream",
+        data={
+            "model_id": "test-model",
+            "system_prompt": "you are a tester",
+            "messages_json": json.dumps([{"role": "user", "content": "hijack"}]),
+            "sub_session_id": str(alice_sid),
+        },
+    )
+    assert resp.status_code == 404, resp.text
+
+
+def test_sub_session_append_malformed_sid_400(test_client: TestClient) -> None:
+    """A non-integer sub_session_id is a structured 400, not a 500 or a
+    silent create-new."""
+    _register_and_login(test_client, username="alice")
+    chat_resp = test_client.post("/api/chats", data={"title": "malformed sid"})
+    chat_id = chat_resp.json()["id"]
+
+    resp = test_client.post(
+        f"/api/chats/{chat_id}/sub-session/stream",
+        data={
+            "model_id": "test-model",
+            "system_prompt": "you are a tester",
+            "messages_json": json.dumps([{"role": "user", "content": "hi"}]),
+            "sub_session_id": "not-an-integer",
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["code"] == "invalid_sub_session_id"

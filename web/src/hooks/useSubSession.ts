@@ -38,7 +38,7 @@ import {
   injectSubSessionSummary,
   isSubSessionLive,
 } from "@/lib/subSession";
-import type { SubSessionDetailDto } from "@/lib/subSession";
+import type { SubSessionDetailDto, SubSessionSummaryDto } from "@/lib/subSession";
 import { resolveChatIntegrationsField } from "@/components/Composer";
 import type { ChatStreamPayload } from "@/hooks/useSSE";
 import type { PushOptions } from "@/stores/toastStore";
@@ -60,15 +60,18 @@ export interface SubSessionState {
   finalContent: string | null;
   /**
    * `sub_sessions.id` this panel corresponds to server-side, or `null`
-   * when unknown. P3: a freshly-started session never learns its id — the
-   * SSE stream doesn't echo it back (that's P4's continuation-param
-   * territory); only a session restored via `GET .../sub-sessions/{id}` on
-   * chat load populates this. The field exists mainly so a future reopen
-   * flow (P4) has something to key on; see `closeSubSessionPanel` vs
-   * `cancelSubSession` for why closing a panel must never abort an
-   * already-gracefully-finishing stream (that's the "keep the record"
-   * guarantee — it's about not racing the server's own teardown, not
-   * about retaining this field after the panel closes).
+   * when unknown. A freshly-started session never learns its id — the SSE
+   * stream doesn't echo it back — but a session restored on chat load (P3)
+   * or reopened from history (P4, `reopenSubSession`) populates this from
+   * `GET .../sub-sessions/{id}`. Once set, `maybeRouteSubmit` forwards it
+   * as the `sub_session_id` continuation param so every subsequent turn
+   * APPENDS onto the same durable row instead of starting a new one (P4
+   * §2 — the backend's `_append_turn_to_sub_session` path). See
+   * `closeSubSessionPanel` vs `cancelSubSession` for why closing a panel
+   * must never abort an already-gracefully-finishing stream (that's the
+   * "keep the record" guarantee — it's about not racing the server's own
+   * teardown, not about retaining this field after the panel closes; the
+   * record itself stays reachable via the history list regardless).
    */
   subSessionId: number | null;
 }
@@ -102,6 +105,25 @@ export interface UseSubSessionResult {
    *  stream, which the backend salvages as `aborted`. */
   cancelSubSession: () => void;
   subSessionSSE: UseSubSessionSSE;
+  /** P4: this chat's past sub-sessions (newest first), or `null` before
+   *  the first `openHistory()` fetch lands. */
+  subSessionHistory: SubSessionSummaryDto[] | null;
+  /** True while an `openHistory()` fetch is in flight. */
+  subSessionHistoryLoading: boolean;
+  /** Whether the history browse view is currently showing. */
+  isSubSessionHistoryOpen: boolean;
+  /** Fetch this chat's sub-session list (fresh, every call) and show the
+   *  history browse view. On-demand only — never fetched eagerly, so a
+   *  chat with no sub-sessions never pays for it. */
+  openSubSessionHistory: () => void;
+  /** Hide the history browse view without touching the underlying panel
+   *  (a live/reopened `subSession`, if any, is unaffected). */
+  closeSubSessionHistory: () => void;
+  /** Reopen a past sub-session (ANY status — final or aborted) by id:
+   *  fetches its full transcript and shows it in the panel, replacing
+   *  whatever was open. A subsequent turn appends onto the SAME row (see
+   *  `SubSessionState.subSessionId`). */
+  reopenSubSession: (subSessionId: number) => void;
   /** Routes a Composer submit into the sub-session stream when a
    *  sub-session is active. Returns true if it handled the submit (caller
    *  should return early), false if the caller should fall through to the
@@ -210,6 +232,67 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
     subSessionSSE.reset();
   }, [subSessionSSE]);
 
+  // P4: per-chat sub-session HISTORY (list past sessions) + REOPEN (load a
+  // past session's full transcript, any status, back into the panel).
+  // `historyRunId` guards against a stale fetch from a prior openHistory()
+  // call landing after the chat has switched — same shape as
+  // `restoreRunIdRef` below.
+  const [subSessionHistory, setSubSessionHistory] = useState<
+    SubSessionSummaryDto[] | null
+  >(null);
+  const [subSessionHistoryLoading, setSubSessionHistoryLoading] =
+    useState(false);
+  const [isSubSessionHistoryOpen, setIsSubSessionHistoryOpen] =
+    useState(false);
+  const historyRunIdRef = useRef(0);
+
+  const openSubSessionHistory = useCallback((): void => {
+    if (chatId === null) return;
+    setIsSubSessionHistoryOpen(true);
+    setSubSessionHistoryLoading(true);
+    const runId = historyRunIdRef.current + 1;
+    historyRunIdRef.current = runId;
+    const cid = chatId;
+    void (async () => {
+      const list = await fetchSubSessions(cid);
+      if (historyRunIdRef.current !== runId) return; // chat switched again
+      setSubSessionHistory(list ?? []);
+      setSubSessionHistoryLoading(false);
+    })();
+  }, [chatId]);
+
+  const closeSubSessionHistory = useCallback((): void => {
+    setIsSubSessionHistoryOpen(false);
+  }, []);
+
+  const reopenSubSession = useCallback(
+    (sid: number): void => {
+      if (chatId === null) return;
+      const cid = chatId;
+      void (async () => {
+        const detail = await fetchSubSessionDetail(cid, sid);
+        if (detail === null) {
+          push({
+            variant: "error",
+            message: "Couldn't load that sub-session — try again.",
+          });
+          return;
+        }
+        const restored = buildRestoredSubSessionState(detail);
+        if (restored === null) {
+          push({
+            variant: "error",
+            message: "That sub-session's mode is no longer available.",
+          });
+          return;
+        }
+        setSubSession(restored);
+        setIsSubSessionHistoryOpen(false);
+      })();
+    },
+    [chatId, push],
+  );
+
   // Preset-model mapping — used to route sub-sessions to the configured
   // model+provider for each preset instead of the top-bar model.
   const { data: presetModels } = usePresetModels();
@@ -253,8 +336,20 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
       if (subSession !== null) {
         closeSubSessionPanel();
       }
+      // P4: the history browse view is per-chat scratch state too — close
+      // it on chat-switch for the same reason (never carries a stale
+      // chat's list into the new chat).
+      if (isSubSessionHistoryOpen) {
+        closeSubSessionHistory();
+      }
     }
-  }, [chatId, closeSubSessionPanel, subSession]);
+  }, [
+    chatId,
+    closeSubSessionPanel,
+    subSession,
+    isSubSessionHistoryOpen,
+    closeSubSessionHistory,
+  ]);
 
   // P3 restore-on-load: durable sub-sessions (migration 0045 + P2's
   // persist-through-the-draft-state-machine) survive a reload at the DB
@@ -325,6 +420,9 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
         subSessionId: null,
       };
       setSubSession(next);
+      // A fresh session takes over the panel — any open history browse
+      // view would otherwise linger over it.
+      setIsSubSessionHistoryOpen(false);
       return next;
     },
     [chatId],
@@ -453,6 +551,16 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
           ...(turnIntegrations.length > 0
             ? { integrations: turnIntegrations }
             : {}),
+          // P4 continue: once a session is restored (P3) or reopened
+          // (P4's reopenSubSession) its subSessionId is non-null — forward
+          // it so the BE APPENDS this turn onto the SAME durable row
+          // instead of starting a new one. A freshly-started session's id
+          // stays null for its whole local lifetime (the create-new
+          // response doesn't echo it back), so its first turns still each
+          // create their own row — unchanged, pre-existing behavior.
+          ...(activeSubSession.subSessionId !== null
+            ? { subSessionId: activeSubSession.subSessionId }
+            : {}),
           onComplete: (fc) => {
             setSubSession((prev) =>
               prev
@@ -487,5 +595,11 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
     cancelSubSession,
     subSessionSSE,
     maybeRouteSubmit,
+    subSessionHistory,
+    subSessionHistoryLoading,
+    isSubSessionHistoryOpen,
+    openSubSessionHistory,
+    closeSubSessionHistory,
+    reopenSubSession,
   };
 }

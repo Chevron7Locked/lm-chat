@@ -12,6 +12,11 @@
  *                machinery, fires onComplete with the assembled final content.
  *   sub.error  — surfaces as state.status === "error" with the error message.
  *   reset()    — returns to idle and aborts any in-flight request.
+ *
+ *   P4 (reopen + continue): stream()'s optional `subSessionId` param
+ *   forwards as the `sub_session_id` form field so the backend APPENDS the
+ *   turn onto an existing durable sub-session instead of creating a new
+ *   one; omitting it keeps the create-new path byte-identical.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
@@ -85,6 +90,60 @@ describe("useSubSessionSSE", () => {
 
     expect(result.current.state.content).toBe("Hello");
     expect(onComplete).toHaveBeenCalledWith("Hello");
+  });
+
+  it("stream() forwards subSessionId as sub_session_id (P4 continue)", async () => {
+    const { useSubSessionSSE } = await import("@/hooks/useSubSessionSSE");
+
+    const body = sseFrame("sub.complete", { final_content: "continued" });
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(buildSseStream(body), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
+    global.fetch = fetchSpy as typeof global.fetch;
+
+    const { result } = renderHook(() => useSubSessionSSE());
+
+    await act(async () => {
+      result.current.stream({ ...baseParams, subSessionId: 42 });
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.status).toBe("complete");
+    });
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const form = init.body as FormData;
+    expect(form.get("sub_session_id")).toBe("42");
+  });
+
+  it("stream() omits sub_session_id when creating a new session", async () => {
+    const { useSubSessionSSE } = await import("@/hooks/useSubSessionSSE");
+
+    const body = sseFrame("sub.complete", { final_content: "fresh" });
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(buildSseStream(body), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
+    global.fetch = fetchSpy as typeof global.fetch;
+
+    const { result } = renderHook(() => useSubSessionSSE());
+
+    await act(async () => {
+      result.current.stream(baseParams);
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.status).toBe("complete");
+    });
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const form = init.body as FormData;
+    expect(form.get("sub_session_id")).toBeNull();
   });
 
   it("finalize() POSTs to /sub-session/finalize with the same form payload", async () => {

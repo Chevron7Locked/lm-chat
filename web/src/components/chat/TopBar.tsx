@@ -73,6 +73,10 @@ interface TopBarProps {
   focusMode?: boolean | undefined;
   /** Toggle the reversible full-screen focus mode. Undefined hides the toggle. */
   onToggleFocusMode?: (() => void) | undefined;
+  /** P4: open the sub-session history browse view (past /research, /code,
+   *  etc. sessions for this chat). Undefined hides the overflow item —
+   *  there's no active chat yet. */
+  onSubSessionHistoryOpen?: (() => void) | undefined;
 }
 
 export function TopBar({
@@ -102,6 +106,7 @@ export function TopBar({
   exportMenuSignal,
   focusMode,
   onToggleFocusMode,
+  onSubSessionHistoryOpen,
 }: TopBarProps) {
   // Consume the LM Studio model list through the
   // state-machine-aware hook so the dropdown surfaces loaded vs unloaded
@@ -262,6 +267,14 @@ export function TopBar({
             },
             { label: "Reasoning effort", onClick: onSettingsOpen },
             { label: "Pinned messages", onClick: onPinsOpen, active: pinsOpen },
+            ...(onSubSessionHistoryOpen !== undefined
+              ? [
+                  {
+                    label: "Sub-session history",
+                    onClick: onSubSessionHistoryOpen,
+                  },
+                ]
+              : []),
             {
               // Share / Export folded into the ⋯ overflow —
               // a second visible trigger at 390px was redundant chrome and
@@ -440,6 +453,14 @@ export function TopBar({
                 onClick: onPinsOpen,
                 active: pinsOpen,
               },
+              ...(onSubSessionHistoryOpen !== undefined
+                ? [
+                    {
+                      label: "Sub-session history",
+                      onClick: onSubSessionHistoryOpen,
+                    },
+                  ]
+                : []),
               {
                 label: "Share / Export",
                 onClick: () => {

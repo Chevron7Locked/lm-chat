@@ -1,12 +1,20 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 import type { CSSProperties } from "react";
-import { X } from "lucide-react";
+import { History as HistoryIcon, X } from "lucide-react";
 import { ChatMessage } from "@/components/ChatMessage";
 import type { SubSessionSSEState } from "@/hooks/useSubSessionSSE";
+import type { SubSessionSummaryDto } from "@/lib/subSession";
+import { getPreset } from "@/lib/presets";
+import { formatRelativeTime } from "@/lib/relativeTime";
 
 // ─── Sub-session panel ───────────────────────────────────────────────────────
 
 interface SubSessionPanelProps {
+  /**
+   * `null` when no session is live/reopened and only the history browse
+   * view (P4) is showing — Chat.tsx mounts this component whenever EITHER
+   * a session is open OR `isHistoryOpen` is true.
+   */
   subSession: {
     presetLabel: string;
     /** `id` is set only on messages hydrated from a restored transcript
@@ -16,11 +24,27 @@ interface SubSessionPanelProps {
     messages: { role: "user" | "assistant"; content: string; id?: number }[];
     finalizing: boolean;
     finalContent: string | null;
-  };
+  } | null;
   sseState: SubSessionSSEState;
   onFinalize: () => void;
   onInject: () => void;
   onCancel: () => void;
+  /**
+   * P4 — per-chat sub-session history (list + reopen). `history` is this
+   * chat's past sub-sessions (newest first) once fetched, `null` before
+   * the first `onOpenHistory` fetch lands. `isHistoryOpen` toggles the
+   * browse view, which replaces the live transcript while showing (a
+   * `subSession`, if any, keeps streaming server-side underneath —
+   * closing history just returns to viewing it, same as
+   * `closeSubSessionPanel` never aborting an in-flight stream).
+   */
+  history: SubSessionSummaryDto[] | null;
+  historyLoading: boolean;
+  isHistoryOpen: boolean;
+  onOpenHistory: () => void;
+  onCloseHistory: () => void;
+  /** Reopen a past sub-session (any status) by id. */
+  onReopen: (subSessionId: number) => void;
 }
 
 // Mirrors ChatMessage.tsx's toolPreStyle (kept module-private there); the
@@ -45,12 +69,152 @@ const subSessionErrorStyle: CSSProperties = {
   lineHeight: 1.45,
 };
 
+const historyBarStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  padding: "var(--space-glue) var(--space-sibling-relaxed)",
+  borderBottom: "1px solid var(--color-border)",
+};
+
+const historyListStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  overflowY: "auto",
+};
+
+const historyEntryStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "flex-start",
+  gap: 4,
+  width: "100%",
+  textAlign: "left",
+  background: "none",
+  border: "none",
+  borderBottom: "1px solid var(--color-border)",
+  padding: "var(--space-sibling-relaxed)",
+  cursor: "pointer",
+  color: "var(--color-text)",
+};
+
+const historyEntryTopRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "var(--space-glue)",
+  width: "100%",
+};
+
+const historyEntryTitleStyle: CSSProperties = {
+  fontSize: "var(--font-size-sm)",
+  fontWeight: 500,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  flex: 1,
+};
+
+const historyEntryMetaStyle: CSSProperties = {
+  fontSize: "var(--fs-label)",
+  color: "var(--color-text-muted)",
+  display: "flex",
+  gap: "var(--space-glue)",
+  alignItems: "center",
+};
+
+function statusBadgeColor(status: string): string {
+  if (status === "final") return "var(--color-success)";
+  if (status === "aborted") return "var(--color-danger)";
+  return "var(--color-text-muted)"; // "active" or anything unrecognised
+}
+
+/** History browse view — shared by "browsing while a session is open" and
+ *  "browsing with nothing open" (Chat.tsx mounts this component either way
+ *  once P4's history affordance has been opened). */
+function SubSessionHistoryList({
+  history,
+  historyLoading,
+  onReopen,
+}: {
+  history: SubSessionSummaryDto[] | null;
+  historyLoading: boolean;
+  onReopen: (subSessionId: number) => void;
+}) {
+  if (historyLoading && history === null) {
+    return (
+      <p
+        className="lmchat-subsession-hint"
+        style={{ padding: "var(--space-sibling-relaxed)" }}
+      >
+        Loading past sessions…
+      </p>
+    );
+  }
+  if (history === null || history.length === 0) {
+    return (
+      <p
+        className="lmchat-subsession-hint"
+        style={{ padding: "var(--space-sibling-relaxed)" }}
+      >
+        No past sessions in this chat yet — start one with a slash command
+        like /research or /code.
+      </p>
+    );
+  }
+  return (
+    <div style={historyListStyle} role="list" aria-label="Past sub-sessions">
+      {history.map((entry) => {
+        const modeLabel = getPreset(entry.preset_id)?.label ?? entry.preset_id;
+        const title = entry.title ?? modeLabel;
+        return (
+          <button
+            key={entry.id}
+            type="button"
+            role="listitem"
+            style={historyEntryStyle}
+            onClick={() => {
+              onReopen(entry.id);
+            }}
+          >
+            <div style={historyEntryTopRowStyle}>
+              <span style={historyEntryTitleStyle} title={title}>
+                {title}
+              </span>
+              <span
+                style={{
+                  fontSize: "var(--fs-label)",
+                  color: statusBadgeColor(entry.status),
+                  textTransform: "uppercase",
+                  letterSpacing: "0.02em",
+                }}
+              >
+                {entry.status}
+              </span>
+            </div>
+            <div style={historyEntryMetaStyle}>
+              <span>{modeLabel}</span>
+              <span aria-hidden="true">·</span>
+              <span>{formatRelativeTime(entry.created_at)}</span>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function SubSessionPanel({
   subSession,
   sseState,
   onFinalize,
   onInject,
   onCancel,
+  history,
+  historyLoading,
+  isHistoryOpen,
+  onOpenHistory,
+  onCloseHistory,
+  onReopen,
 }: SubSessionPanelProps) {
   const streaming = sseState.status === "streaming";
   const isReasoning =
@@ -61,12 +225,41 @@ export function SubSessionPanel({
   // into the settled-messages list above the cards. Split a trailing assistant
   // turn out of the head list and re-render it below the cards. (The streaming
   // in-flight message and this settled one are mutually exclusive.)
-  const _msgs = subSession.messages;
+  const _msgs = subSession?.messages ?? [];
   const _last = _msgs.length > 0 ? _msgs[_msgs.length - 1] : undefined;
   const trailingAssistant =
     _last?.role === "assistant" ? _last : null;
   const headMessages =
     trailingAssistant !== null ? _msgs.slice(0, -1) : _msgs;
+
+  // P4: browsing history takes over the panel body while open — a live
+  // session underneath keeps streaming server-side (closing history just
+  // returns to viewing it, mirroring closeSubSessionPanel never aborting
+  // an in-flight stream).
+  if (isHistoryOpen) {
+    return (
+      <div className="lmchat-subsession-outer">
+        <div style={historyBarStyle}>
+          <span className="lmchat-subsession-label">Sub-session history</span>
+          <button
+            type="button"
+            onClick={onCloseHistory}
+            className="lmchat-subsession-cancel-btn"
+            aria-label="Close sub-session history"
+          >
+            <X size={14} aria-hidden />
+          </button>
+        </div>
+        <SubSessionHistoryList
+          history={history}
+          historyLoading={historyLoading}
+          onReopen={onReopen}
+        />
+      </div>
+    );
+  }
+
+  if (subSession === null) return null;
 
   return (
     <div className="lmchat-subsession-outer">
@@ -108,6 +301,15 @@ export function SubSessionPanel({
               Summarize → main chat
             </button>
           )}
+          <button
+            type="button"
+            onClick={onOpenHistory}
+            className="lmchat-subsession-cancel-btn"
+            aria-label="Sub-session history"
+            title="Browse past sub-sessions"
+          >
+            <HistoryIcon size={14} aria-hidden />
+          </button>
           <button
             type="button"
             onClick={onCancel}

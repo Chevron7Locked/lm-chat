@@ -874,6 +874,73 @@ async def _create_sub_session_with_draft(
     return sub_session_id, msg_id
 
 
+async def _append_turn_to_sub_session(
+    engine: AsyncEngine,
+    *,
+    sub_session_id: int,
+    model_id: str,
+    user_text: str,
+) -> tuple[int, int]:
+    """Atomically append a new turn onto an EXISTING ``sub_sessions`` row.
+
+    Reopen + continue (P4). The caller has already validated that
+    *sub_session_id* belongs to the requesting chat + user — this helper
+    does not re-check ownership. Mirrors
+    :func:`_create_sub_session_with_draft`'s single-transaction discipline
+    but does NOT create a new ``sub_sessions`` parent row: two inserts
+    (the new user turn, ``state='final'``; the new assistant draft,
+    ``state='draft'``) plus a ``sub_sessions`` update in ONE transaction —
+    ``status`` flips back to ``'active'`` (a reopened ``final``/``aborted``
+    session resumes streaming) and ``updated_at`` bumps so the session
+    re-sorts to the top of the per-chat history list.
+
+    Returns:
+        ``(sub_session_id, draft_msg_id)`` — same shape as
+        :func:`_create_sub_session_with_draft` so both call sites in
+        ``_sub_session_sse`` are symmetric.
+    """
+    ids: list[int] = []
+
+    async def _insert() -> None:
+        async with engine.begin() as conn:
+            await conn.execute(
+                insert(sub_session_messages).values(
+                    sub_session_id=sub_session_id,
+                    role="user",
+                    content=user_text,
+                    state=PersistState.FINAL.value,
+                )
+            )
+            draft_result = await conn.execute(
+                insert(sub_session_messages).values(
+                    sub_session_id=sub_session_id,
+                    role="assistant",
+                    content="",
+                    state=PersistState.DRAFT.value,
+                    model_id=model_id,
+                )
+            )
+            draft_pk = draft_result.inserted_primary_key
+            if draft_pk is None:
+                raise RuntimeError("INSERT into sub_session_messages (draft) returned no PK")
+            await conn.execute(
+                sub_sessions.update()
+                .where(sub_sessions.c.id == sub_session_id)
+                .values(status="active", updated_at=func.now())
+            )
+            ids.append(int(draft_pk[0]))
+
+    await with_write_retry(_insert)
+    msg_id = ids[0]
+    log.info(
+        "sub_session.turn_appended",
+        sub_session_id=sub_session_id,
+        msg_id=msg_id,
+        model_id=model_id,
+    )
+    return sub_session_id, msg_id
+
+
 async def _salvage_aborted_sub_session_row(
     engine: AsyncEngine,
     msg_id: int,

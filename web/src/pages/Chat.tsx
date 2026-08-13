@@ -678,6 +678,12 @@ export default function Chat() {
     cancelSubSession,
     subSessionSSE,
     maybeRouteSubmit,
+    subSessionHistory,
+    subSessionHistoryLoading,
+    isSubSessionHistoryOpen,
+    openSubSessionHistory,
+    closeSubSessionHistory,
+    reopenSubSession,
   } = useSubSession({
     chatId,
     currentChat,
@@ -1298,6 +1304,9 @@ export default function Chat() {
           exportMenuSignal={exportMenuSignal}
           focusMode={focusMode}
           onToggleFocusMode={toggleFocusMode}
+          onSubSessionHistoryOpen={
+            chatId !== null ? openSubSessionHistory : undefined
+          }
         />
 
         {/* Pin-nav strip — only when this chat has pins. */}
@@ -1348,14 +1357,22 @@ export default function Chat() {
                   });
               }}
             />
-          ) : subSession !== null ? (
-            /* Sub-session mode: clean-context conversation with the preset agent */
+          ) : subSession !== null || isSubSessionHistoryOpen ? (
+            /* Sub-session mode: clean-context conversation with the preset
+               agent, OR (P4) browsing this chat's past sub-sessions when
+               none is currently open. */
             <SubSessionPanel
               subSession={subSession}
               sseState={subSessionSSE.state}
               onFinalize={handleSubSessionFinalize}
               onInject={handleSubSessionInject}
               onCancel={cancelSubSession}
+              history={subSessionHistory}
+              historyLoading={subSessionHistoryLoading}
+              isHistoryOpen={isSubSessionHistoryOpen}
+              onOpenHistory={openSubSessionHistory}
+              onCloseHistory={closeSubSessionHistory}
+              onReopen={reopenSubSession}
             />
           ) : (
             <MessageListBody

@@ -26,6 +26,7 @@ vi.mock("@/components/ChatMessage", () => ({
 
 import { SubSessionPanel } from "@/components/chat/SubSessionPanel";
 import type { SubSessionSSEState } from "@/hooks/useSubSessionSSE";
+import type { SubSessionSummaryDto } from "@/lib/subSession";
 
 type SubSession = {
   presetLabel: string;
@@ -48,6 +49,35 @@ function makeState(over: Partial<SubSessionSSEState> = {}): SubSessionSSEState {
   return { status: "idle", content: "", error: null, toolCalls: [], ...over };
 }
 
+// P4 — history + reopen props every render now needs; defaults matching
+// "nothing fetched yet, browse view closed" so the existing state-machine
+// tests above (written pre-P4) keep exercising the live/reopened branch
+// unchanged.
+const historyProps = {
+  history: null as SubSessionSummaryDto[] | null,
+  historyLoading: false,
+  isHistoryOpen: false,
+  onOpenHistory: () => undefined,
+  onCloseHistory: () => undefined,
+  onReopen: () => undefined,
+};
+
+function makeHistoryEntry(
+  over: Partial<SubSessionSummaryDto> = {},
+): SubSessionSummaryDto {
+  return {
+    id: 9,
+    chat_id: 42,
+    preset_id: "research",
+    title: "What changed in the API?",
+    status: "final",
+    model_id: "qwen3.6",
+    created_at: "2026-08-10T10:00:00Z",
+    updated_at: "2026-08-10T10:05:00Z",
+    ...over,
+  };
+}
+
 describe("SubSessionPanel — state-machine transitions", () => {
   it("idle: shows the welcome copy and the Summarize CTA", () => {
     render(
@@ -57,6 +87,7 @@ describe("SubSessionPanel — state-machine transitions", () => {
         onFinalize: () => undefined,
         onInject: () => undefined,
         onCancel: () => undefined,
+        ...historyProps,
       }),
     );
 
@@ -77,6 +108,7 @@ describe("SubSessionPanel — state-machine transitions", () => {
         onFinalize: () => undefined,
         onInject: () => undefined,
         onCancel: () => undefined,
+        ...historyProps,
       }),
     );
 
@@ -96,6 +128,7 @@ describe("SubSessionPanel — state-machine transitions", () => {
         onFinalize: () => undefined,
         onInject: () => undefined,
         onCancel: () => undefined,
+        ...historyProps,
       }),
     );
 
@@ -113,6 +146,7 @@ describe("SubSessionPanel — state-machine transitions", () => {
         onFinalize: () => undefined,
         onInject: () => undefined,
         onCancel: () => undefined,
+        ...historyProps,
       }),
     );
 
@@ -131,6 +165,7 @@ describe("SubSessionPanel — state-machine transitions", () => {
         onFinalize: () => undefined,
         onInject,
         onCancel: () => undefined,
+        ...historyProps,
       }),
     );
 
@@ -149,6 +184,7 @@ describe("SubSessionPanel — state-machine transitions", () => {
         onFinalize,
         onInject: () => undefined,
         onCancel: () => undefined,
+        ...historyProps,
       }),
     );
 
@@ -165,10 +201,131 @@ describe("SubSessionPanel — state-machine transitions", () => {
         onFinalize: () => undefined,
         onInject: () => undefined,
         onCancel,
+        ...historyProps,
       }),
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Cancel sub-session/i }));
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("live session: the History button fires onOpenHistory", () => {
+    const onOpenHistory = vi.fn();
+    render(
+      createElement(SubSessionPanel, {
+        subSession: makeSession(),
+        sseState: makeState(),
+        onFinalize: () => undefined,
+        onInject: () => undefined,
+        onCancel: () => undefined,
+        ...historyProps,
+        onOpenHistory,
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Sub-session history/i }));
+    expect(onOpenHistory).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SubSessionPanel — P4 history browse view", () => {
+  it("isHistoryOpen: lists past sessions and reopens the clicked one", () => {
+    const onReopen = vi.fn();
+    render(
+      createElement(SubSessionPanel, {
+        subSession: makeSession(),
+        sseState: makeState(),
+        onFinalize: () => undefined,
+        onInject: () => undefined,
+        onCancel: () => undefined,
+        ...historyProps,
+        isHistoryOpen: true,
+        history: [
+          makeHistoryEntry({ id: 9, title: "What changed in the API?", status: "final" }),
+          makeHistoryEntry({ id: 8, preset_id: "coder", title: null, status: "aborted" }),
+        ],
+        onReopen,
+      }),
+    );
+
+    expect(screen.getByText("Sub-session history")).toBeTruthy();
+    expect(screen.getByText("What changed in the API?")).toBeTruthy();
+    // A null title falls back to the mode label — appears twice (the
+    // entry's title AND its mode-label caption both read "Coder").
+    expect(screen.getAllByText("Coder").length).toBe(2);
+    expect(screen.getByRole("list", { name: /Past sub-sessions/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByText("What changed in the API?"));
+    expect(onReopen).toHaveBeenCalledWith(9);
+  });
+
+  it("isHistoryOpen with no entries yet: shows an empty-state hint, not a crash", () => {
+    render(
+      createElement(SubSessionPanel, {
+        subSession: null,
+        sseState: makeState(),
+        onFinalize: () => undefined,
+        onInject: () => undefined,
+        onCancel: () => undefined,
+        ...historyProps,
+        isHistoryOpen: true,
+        history: [],
+      }),
+    );
+
+    expect(screen.getByText(/No past sessions in this chat yet/i)).toBeTruthy();
+  });
+
+  it("isHistoryOpen while loading (history still null): shows a loading hint", () => {
+    render(
+      createElement(SubSessionPanel, {
+        subSession: null,
+        sseState: makeState(),
+        onFinalize: () => undefined,
+        onInject: () => undefined,
+        onCancel: () => undefined,
+        ...historyProps,
+        isHistoryOpen: true,
+        historyLoading: true,
+        history: null,
+      }),
+    );
+
+    expect(screen.getByText(/Loading past sessions/i)).toBeTruthy();
+  });
+
+  it("closing history fires onCloseHistory", () => {
+    const onCloseHistory = vi.fn();
+    render(
+      createElement(SubSessionPanel, {
+        subSession: null,
+        sseState: makeState(),
+        onFinalize: () => undefined,
+        onInject: () => undefined,
+        onCancel: () => undefined,
+        ...historyProps,
+        isHistoryOpen: true,
+        history: [],
+        onCloseHistory,
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Close sub-session history/i }));
+    expect(onCloseHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("no session and history closed: renders nothing (defensive null case)", () => {
+    const { container } = render(
+      createElement(SubSessionPanel, {
+        subSession: null,
+        sseState: makeState(),
+        onFinalize: () => undefined,
+        onInject: () => undefined,
+        onCancel: () => undefined,
+        ...historyProps,
+      }),
+    );
+
+    expect(container.textContent).toBe("");
   });
 });

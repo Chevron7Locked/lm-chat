@@ -110,6 +110,12 @@ export interface SubSessionStreamParams {
    *  ``["mcp/context7", "mcp/deepwiki"]``). Without these, the
    *  sub-session has no tools and the model is told so via the prompt. */
   integrations?: string[];
+  /**
+   * P4 reopen + continue: the `sub_sessions.id` to APPEND this turn onto,
+   * forwarded as the `sub_session_id` form field. Omit (the default) for
+   * the create-new path — every existing call site is unaffected.
+   */
+  subSessionId?: number;
   onComplete?: (finalContent: string) => void;
 }
 
@@ -226,6 +232,11 @@ export function useSubSessionSSE(): UseSubSessionSSE {
       // defaults; sending [] is the intentional "user disabled everything" signal.
       if (params.integrations !== undefined) {
         form.append("integrations", JSON.stringify(params.integrations));
+      }
+      // P4: continue an existing sub-session (append) instead of creating
+      // a new one — see SubSessionStreamParams.subSessionId.
+      if (params.subSessionId !== undefined) {
+        form.append("sub_session_id", String(params.subSessionId));
       }
 
       void (async () => {

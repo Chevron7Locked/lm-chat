@@ -50,6 +50,7 @@ from lmchat.services.streaming_errors import SubSessionStreamInProgressError
 from lmchat.services.streaming_service import (
     StreamingService,
     _accumulate_tool_call,
+    _append_turn_to_sub_session,
     _assert_no_sub_session_stream_in_progress,
     _CoalesceTimer,
     _create_sub_session_with_draft,
@@ -2214,6 +2215,12 @@ class _SubSessionPersistContext(NamedTuple):
     engine: AsyncEngine
     chat_id: int
     preset_id: str
+    # Reopen + continue (P4): set when the caller sent a ``sub_session_id``
+    # Form param that resolved to a sub-session owned by this chat + user.
+    # ``_sub_session_sse`` branches on this to APPEND a turn onto the
+    # existing ``sub_sessions`` row instead of creating a new one. ``None``
+    # (the default) is today's create-new behavior, unchanged.
+    existing_sub_session_id: int | None = None
 
 
 def _sub_session_derive_title(messages: list[dict[str, str]]) -> str | None:
@@ -2312,14 +2319,24 @@ async def _sub_session_sse(
     async with lock:
         await _assert_no_sub_session_stream_in_progress(engine, chat_id=persist.chat_id)
         user_text = messages[-1].get("content", "") if messages else ""
-        sub_session_id, msg_id = await _create_sub_session_with_draft(
-            engine,
-            chat_id=persist.chat_id,
-            preset_id=persist.preset_id,
-            title=_sub_session_derive_title(messages),
-            model_id=model_id,
-            user_text=user_text,
-        )
+        if persist.existing_sub_session_id is not None:
+            # Reopen + continue (P4): APPEND a new turn onto the caller-
+            # validated existing sub_sessions row instead of creating one.
+            sub_session_id, msg_id = await _append_turn_to_sub_session(
+                engine,
+                sub_session_id=persist.existing_sub_session_id,
+                model_id=model_id,
+                user_text=user_text,
+            )
+        else:
+            sub_session_id, msg_id = await _create_sub_session_with_draft(
+                engine,
+                chat_id=persist.chat_id,
+                preset_id=persist.preset_id,
+                title=_sub_session_derive_title(messages),
+                model_id=model_id,
+                user_text=user_text,
+            )
 
     log.info(
         "sub_session.stream.persist_start",
@@ -2373,6 +2390,21 @@ async def _sub_session_sse(
                 sub_session_id=sub_session_id,
                 msg_id=msg_id,
             )
+        # Mark the PARENT session final right here, inside the graceful
+        # finalize, rather than waiting for the outer teardown `finally`
+        # (below) to get there. Between this point and that finally there
+        # are still several more sequential shielded DB round trips
+        # (release-stuck-draft no-op, aborted-row-salvage no-op, THEN the
+        # SAME transition) — real wall-clock time in which the SSE
+        # response's underlying generator has not yet torn down. A fast
+        # client reload's disconnect watcher landing inside that window used
+        # to leave a genuinely-completed sub-session mislabeled 'aborted'
+        # (live dogfood, 2026-08-12). The outer finally's own call to this
+        # function becomes a same-value no-op once this one has already won
+        # (``_transition_sub_session_status`` is `WHERE status='active'`).
+        await _transition_sub_session_status(
+            engine, sub_session_id=sub_session_id, to_status="final"
+        )
 
     async def _watch_disconnect() -> None:
         """Watch for client disconnect via receive(); abort the draft.
@@ -3584,9 +3616,11 @@ async def sub_session_stream(
     integrations: str | None = Form(None),
     provider: str | None = Form(default=None),
     preset_id: str | None = Form(default=None),
+    sub_session_id: str | None = Form(default=None),
     request: Request = None,  # type: ignore[assignment]
     user: User = Depends(require_user),
     integrations_service: IntegrationsService = Depends(get_integrations_service_dep),
+    chat_service: ChatService = Depends(_get_chat_service),
 ) -> StreamingResponse:
     """Stream a sub-session completion with clean context (no chat history).
 
@@ -3608,11 +3642,23 @@ async def sub_session_stream(
     the project-prompt hoist at ``streaming_service.py:836-862``, never
     into the ephemeral sub-session pipeline.
 
+    Reopen + continue (P4): an optional ``sub_session_id`` Form param
+    selects APPEND (a new turn onto an existing durable ``sub_sessions``
+    row) over the default create-new path. Validated against ``chat_id`` +
+    ``user`` ownership via the same 404 contract
+    :func:`~lmchat.services.chat_service.ChatService.get_sub_session`
+    gives the GET rehydrate endpoints — existence never leaks across the
+    wrong chat or user.
+
     Raises:
         HTTPException: 409 (``code=stream_in_progress``) if a sub-session
             stream is already in flight for this chat_id (D4) — independent
             of, and never blocked by, an in-progress MAIN-chat stream on
             the same chat_id.
+        HTTPException: 400 (``code=invalid_sub_session_id``) if
+            ``sub_session_id`` is present but not an integer; 404 if it is
+            an integer but does not resolve to a sub-session owned by this
+            chat + user.
     """
     if project_id is not None and project_id != "":
         raise HTTPException(
@@ -3651,6 +3697,29 @@ async def sub_session_stream(
         messages: list[dict[str, str]] = json.loads(messages_json)
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=_HTTP_422, detail="invalid messages_json") from exc
+
+    # Reopen + continue (P4): resolve + validate an optional sub_session_id
+    # BEFORE any provider/model-resolution work, so a bad id fails fast.
+    # Form fields arrive as strings; "" (the FE's clear-to-default idiom
+    # elsewhere) is treated the same as absent.
+    existing_sub_session_id: int | None = None
+    if sub_session_id is not None and sub_session_id.strip():
+        try:
+            existing_sub_session_id = int(sub_session_id.strip())
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=_HTTP_400,
+                detail={
+                    "code": "invalid_sub_session_id",
+                    "message": "sub_session_id must be an integer.",
+                },
+            ) from exc
+        try:
+            await chat_service.get_sub_session(chat_id, existing_sub_session_id, user_id=user.id)
+        except ChatNotFoundError as exc:
+            raise HTTPException(
+                status_code=_HTTP_404, detail="sub-session not found"
+            ) from exc
 
     # Parse integrations form field — JSON-encoded list of integration ids
     # (e.g. ``["mcp/context7", "mcp/deepwiki"]``). Empty / missing → no
@@ -3868,6 +3937,7 @@ async def sub_session_stream(
             engine=get_engine_dep(request),
             chat_id=chat_id,
             preset_id=preset_id or _SUB_SESSION_PRESET_ID_UNSPECIFIED,
+            existing_sub_session_id=existing_sub_session_id,
         )
 
     gen = _sub_session_sse(

@@ -1986,11 +1986,23 @@ export interface paths {
          *     the project-prompt hoist at ``streaming_service.py:836-862``, never
          *     into the ephemeral sub-session pipeline.
          *
+         *     Reopen + continue (P4): an optional ``sub_session_id`` Form param
+         *     selects APPEND (a new turn onto an existing durable ``sub_sessions``
+         *     row) over the default create-new path. Validated against ``chat_id`` +
+         *     ``user`` ownership via the same 404 contract
+         *     :func:`~lmchat.services.chat_service.ChatService.get_sub_session`
+         *     gives the GET rehydrate endpoints — existence never leaks across the
+         *     wrong chat or user.
+         *
          *     Raises:
          *         HTTPException: 409 (``code=stream_in_progress``) if a sub-session
          *             stream is already in flight for this chat_id (D4) — independent
          *             of, and never blocked by, an in-progress MAIN-chat stream on
          *             the same chat_id.
+         *         HTTPException: 400 (``code=invalid_sub_session_id``) if
+         *             ``sub_session_id`` is present but not an integer; 404 if it is
+         *             an integer but does not resolve to a sub-session owned by this
+         *             chat + user.
          */
         post: operations["sub_session_stream_api_chats__chat_id__sub_session_stream_post"];
         delete?: never;
@@ -4314,6 +4326,8 @@ export interface components {
             project_id?: string | null;
             /** Provider */
             provider?: string | null;
+            /** Sub Session Id */
+            sub_session_id?: string | null;
             /** System Prompt */
             system_prompt: string;
         };
