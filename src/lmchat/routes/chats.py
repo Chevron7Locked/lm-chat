@@ -2355,8 +2355,21 @@ async def _sub_session_sse(
             tool_calls=tool_calls,
             table=sub_session_messages,
         )
-        if ok:
-            _graceful["value"] = True
+        # _on_success only runs at a GRACEFUL terminal (a real sub.complete was
+        # yielded), so the session IS final regardless of whether the finalize's
+        # step-2 commit won its race. A False `ok` means step 2 lost to a
+        # concurrent reaper / transient DB error and the row is left in
+        # pending_finalization for the reaper to finalize (D5) — NOT that the
+        # turn aborted. Keying `_graceful` off `ok` mislabeled a completed
+        # sub-session 'aborted' on a transient step-2 failure (dual-seat review:
+        # genesis + strong, 2026-08-12).
+        _graceful["value"] = True
+        if not ok:
+            log.warning(
+                "sub_session.finalize_deferred_to_reaper",
+                sub_session_id=sub_session_id,
+                msg_id=msg_id,
+            )
 
     async def _watch_disconnect() -> None:
         """Watch for client disconnect via receive(); abort the draft.
