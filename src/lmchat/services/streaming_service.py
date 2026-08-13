@@ -497,9 +497,20 @@ class _CoalesceTimer:
 
         async def _update() -> None:
             async with engine.begin() as conn:
+                # state == 'draft' guard: a coalesce flush must only touch the
+                # LIVE draft row. Without it, a delta flushed AFTER the row left
+                # draft (a disconnect aborted it to aborted_by_client, or a
+                # concurrent finalize moved it to pending/final) would overwrite
+                # that row's content by PK — corrupting an aborted/finalized row
+                # (found by the strong seat, P2 review 2026-08-12). A non-draft
+                # row → row is None here → no write; the buffer is then cleared
+                # (the row is done/aborting, nothing left to persist).
                 row = (
                     await conn.execute(
-                        select(table.c.content).where(table.c.id == message_id)
+                        select(table.c.content).where(
+                            table.c.id == message_id,
+                            table.c.state == PersistState.DRAFT.value,
+                        )
                     )
                 ).fetchone()
                 if row is None:
@@ -512,7 +523,10 @@ class _CoalesceTimer:
 
                 await conn.execute(
                     table.update()
-                    .where(table.c.id == message_id)
+                    .where(
+                        table.c.id == message_id,
+                        table.c.state == PersistState.DRAFT.value,
+                    )
                     .values(content=new_content, last_activity_at=_dt.now(UTC))
                 )
 
@@ -858,6 +872,57 @@ async def _create_sub_session_with_draft(
         model_id=model_id,
     )
     return sub_session_id, msg_id
+
+
+async def _salvage_aborted_sub_session_row(
+    engine: AsyncEngine,
+    msg_id: int,
+    *,
+    content: str | None,
+    reasoning: str | None,
+    tool_calls: list[dict[str, object]] | None,
+) -> None:
+    """Persist the full accumulated turn state onto a disconnect-aborted row.
+
+    On client disconnect ``safe_abort_draft`` moves the row
+    draft -> aborted_by_client WITHOUT writing the accumulated
+    reasoning/tool_calls, and ``_release_stuck_draft_impl`` only touches
+    ``draft`` rows — so a reopened disconnected sub-session would otherwise show
+    only whatever the (state-guarded) coalesce flush persisted before the abort,
+    losing reasoning_content + tool_calls (and any content streamed after the
+    abort but before the core tore down). Write the full accumulated state here,
+    KEEPING the ``aborted_by_client`` state — the turn was interrupted, this is
+    NOT a finalize. ``WHERE state='aborted_by_client'`` so a graceful/final row
+    is never clobbered. (strong seat, P2 review 2026-08-12.)
+    """
+    values: dict[str, object] = {}
+    if content is not None:
+        values["content"] = content
+    if reasoning is not None:
+        values["reasoning_content"] = reasoning
+    if tool_calls:
+        values["tool_calls"] = tool_calls
+    if not values:
+        return
+
+    async def _do_update() -> None:
+        async with engine.begin() as conn:
+            await conn.execute(
+                sub_session_messages.update()
+                .where(
+                    sub_session_messages.c.id == msg_id,
+                    sub_session_messages.c.state
+                    == PersistState.ABORTED_BY_CLIENT.value,
+                )
+                .values(**values)
+            )
+
+    try:
+        await with_write_retry(_do_update)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "sub_session.aborted_salvage_failed", msg_id=msg_id, error=str(exc)
+        )
 
 
 async def _transition_sub_session_status(

@@ -57,6 +57,7 @@ from lmchat.services.streaming_service import (
     _grammar_degrade_eligible,
     _grammar_degrade_warning,
     _release_stuck_draft_impl,
+    _salvage_aborted_sub_session_row,
     _transition_sub_session_status,
 )
 
@@ -2451,11 +2452,20 @@ async def _sub_session_sse(
             # (no re-raise) is for.
             pass
         except* Exception as eg:
-            # Re-raise the first non-_SubSessionStreamDone exception so the
-            # caller (StreamingResponse) surfaces it correctly.
-            for exc in eg.exceptions:
-                if not isinstance(exc, _SubSessionStreamDone):
-                    raise exc from None
+            # Surface the first non-_SubSessionStreamDone exception to the
+            # caller (StreamingResponse). A TaskGroup can bundle more than one
+            # (the disconnect watcher AND the core both raising) — log any
+            # siblings before raising the first so a concurrent failure is not
+            # silently dropped (strong seat, P2 review 2026-08-12).
+            _real = [e for e in eg.exceptions if not isinstance(e, _SubSessionStreamDone)]
+            for _extra in _real[1:]:
+                log.warning(
+                    "sub_session.stream.masked_sibling_exception",
+                    sub_session_id=sub_session_id,
+                    error=repr(_extra),
+                )
+            if _real:
+                raise _real[0] from None
     finally:
         # SINGLE guaranteed-once teardown — runs for every exit including
         # GeneratorExit (client disconnect closes the response stream).
@@ -2487,6 +2497,25 @@ async def _sub_session_sse(
             # The shielded release still ran to completion; only the outer
             # await was cancelled. Swallow — no caller is left to
             # propagate to in this terminal teardown.
+            pass
+
+        # Disconnect salvage: if the row was moved to aborted_by_client (the
+        # disconnect watcher), _release_stuck_draft_impl above (WHERE draft)
+        # no-op'd, so persist the full accumulated content/reasoning/tool_calls
+        # onto the aborted row here — otherwise a reopened disconnected session
+        # loses reasoning + tool_calls (strong seat, P2 review). No-op on any
+        # non-aborted row (WHERE state='aborted_by_client').
+        try:
+            await asyncio.shield(
+                _salvage_aborted_sub_session_row(
+                    engine,
+                    msg_id,
+                    content=(_acc_content if isinstance(_acc_content, str) else None),
+                    reasoning=(_acc_reasoning if isinstance(_acc_reasoning, str) else None),
+                    tool_calls=(_acc_tools if isinstance(_acc_tools, list) else None),
+                )
+            )
+        except asyncio.CancelledError:
             pass
 
         # D9: final on a graceful _on_success finalize; aborted on every
