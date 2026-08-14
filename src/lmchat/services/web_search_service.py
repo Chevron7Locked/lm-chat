@@ -25,7 +25,9 @@ failed probe never blocks ``search()``, which always falls back to DDG.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import ipaddress
+import socket
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -44,24 +46,31 @@ log = get_logger(__name__)
 
 # ─── SSRF guard ───────────────────────────────────────────────────────────────
 
-# Private / loopback ranges forbidden as SearXNG targets unless the admin
-# explicitly sets LM_CHAT_ALLOW_PRIVATE_SEARXNG=1.
-_PRIVATE_NETWORKS = [
-    ipaddress.ip_network("127.0.0.0/8"),  # loopback IPv4
-    ipaddress.ip_network("::1/128"),  # loopback IPv6
-    ipaddress.ip_network("10.0.0.0/8"),  # RFC-1918
-    ipaddress.ip_network("172.16.0.0/12"),  # RFC-1918
-    ipaddress.ip_network("192.168.0.0/16"),  # RFC-1918
-    ipaddress.ip_network("fc00::/7"),  # ULA IPv6
-    ipaddress.ip_network("169.254.0.0/16"),  # link-local IPv4
-    ipaddress.ip_network("fe80::/10"),  # link-local IPv6
-]
+# Private/loopback/link-local/unspecified literal IPs are forbidden as
+# SearXNG targets unless the admin explicitly sets
+# LM_CHAT_ALLOW_PRIVATE_SEARXNG=1 — see _is_private_ip, which classifies
+# via stdlib ipaddress address properties (is_private/is_loopback/
+# is_link_local/is_unspecified) rather than a hand-rolled network list, so
+# an IPv4-mapped IPv6 literal (e.g. "::ffff:192.168.1.1") is caught too.
 
 # Tailscale CGNAT (100.64.0.0/10) — always allowed as a SearXNG target, no
-# escape hatch needed. Kept EXPLICIT (not just absent from
-# _PRIVATE_NETWORKS) so a future tightening can't silently break tailnet
-# self-hosting.
+# escape hatch needed. Kept as an EXPLICIT allow-list checked BEFORE
+# _is_private_ip in every caller (validate_searxng_url,
+# _resolve_pinned_target), rather than relying on _is_private_ip to treat
+# it as non-private: whether stdlib IPv4Address.is_private classifies
+# 100.64.0.0/10 as private has changed across Python versions, so it is
+# this ordering — not is_private's classification of the range — that
+# keeps the admin's tailnet self-hosted SearXNG reachable. Never reorder
+# the Tailscale check to run after the private-IP check.
 _TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+
+# getaddrinfo() is a blocking syscall with no built-in timeout. A hostname
+# that never registers (e.g. a typo'd ".local"/mDNS name) can hang for
+# several real seconds on some resolvers — and validate_searxng_url calls
+# this synchronously, including from the (unawaited) admin PATCH route.
+# Bound it so a bad hostname can't stall an admin settings save or a
+# service (re)construction.
+_DNS_RESOLVE_TIMEOUT_SEC = 3.0
 
 
 def _is_tailscale_ip(host: str) -> bool:
@@ -73,11 +82,24 @@ def _is_tailscale_ip(host: str) -> bool:
 
 
 def _is_private_ip(host: str) -> bool:
-    """Return True if *host* is a private/loopback literal IP address.
+    """Return True if *host* is a private/loopback/link-local/unspecified
+    literal IP address.
 
-    Only checks literal IPs; hostnames aren't resolved (DNS lookup would be
-    needed — acceptable risk for self-hosted SearXNG where the admin sets a
-    hostname explicitly).
+    Uses the stdlib's own address-classification properties rather than a
+    hand-rolled network list, and unwraps an IPv4-mapped IPv6 literal
+    (e.g. ``::ffff:192.168.1.1``) to its underlying IPv4 address first —
+    an ``IPv6Address`` is never itself a member of an IPv4
+    ``ip_network``, so a manual "address in list-of-networks" check let a
+    private target through whenever it was spelled in its IPv4-mapped
+    IPv6 form. ``is_unspecified`` also catches the bind-any addresses
+    (``0.0.0.0``, ``::``), which no RFC-1918/loopback/link-local range
+    covers.
+
+    Only checks literal IPs. Hostnames are resolved by the caller (see
+    ``_resolve_host_ips``) into literal IPs first, then each resolved IP
+    is checked here — this keeps the IP-membership logic in one place
+    regardless of whether the caller has an original literal or a
+    resolved address.
     """
     try:
         addr = ipaddress.ip_address(host)
@@ -85,15 +107,66 @@ def _is_private_ip(host: str) -> bool:
         # Not an IP literal — hostnames like "searxng.internal" pass
         # through; the admin chose the URL.
         return False
-    return any(addr in net for net in _PRIVATE_NETWORKS)
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_unspecified
+
+
+def _resolve_host_ips(host: str) -> list[str]:
+    """Resolve *host* to its IP address(es) via the system resolver.
+
+    Returns an empty list when *host* is already a literal IP (nothing to
+    resolve — callers check literal IPs directly via ``_is_private_ip``),
+    when resolution fails (unresolvable hostname; the connection attempt
+    itself will surface that on its own — not a private-IP exposure), or
+    when it doesn't complete within ``_DNS_RESOLVE_TIMEOUT_SEC``.
+    """
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return []
+
+    # getaddrinfo has no timeout param; run it in a throwaway thread and
+    # abandon that thread (don't join) on timeout, so a hung resolver
+    # can't block the caller past the bound.
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(socket.getaddrinfo, host, None, type=socket.SOCK_STREAM)
+    executor.shutdown(wait=False)
+    try:
+        infos = future.result(timeout=_DNS_RESOLVE_TIMEOUT_SEC)
+    except (OSError, concurrent.futures.TimeoutError):
+        return []
+
+    seen: set[str] = set()
+    ips: list[str] = []
+    for _family, _type, _proto, _canonname, sockaddr in infos:
+        ip = sockaddr[0]
+        # AF_INET/AF_INET6 sockaddrs always have a str host as element 0;
+        # the non-str union member (AF_UNIX-style) never occurs for a
+        # host-based lookup like this one — narrow for pyright.
+        if not isinstance(ip, str):
+            continue
+        if ip not in seen:
+            seen.add(ip)
+            ips.append(ip)
+    return ips
 
 
 def validate_searxng_url(url: str) -> None:
     """Validate *url* is safe to use as the SearXNG endpoint.
 
-    Raises ``ValueError`` if the URL targets a private/loopback address and
+    Raises ``ValueError`` if the URL targets a private/loopback address —
+    checked both as a literal IP and, for hostnames, by resolving DNS and
+    checking every returned address — and
     ``LM_CHAT_ALLOW_PRIVATE_SEARXNG=1`` is not set (the escape hatch for
     admins running a local instance, e.g. docker on 127.0.0.1:8888).
+
+    This is a config-time check (construction/reconfigure/admin save); a
+    hostname's DNS record can still change afterwards (rebinding), which
+    is why ``WebSearchService`` also re-resolves and re-checks immediately
+    before each actual connection (see ``_resolve_pinned_target``).
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -124,6 +197,19 @@ def validate_searxng_url(url: str) -> None:
             f"SearXNG URL {url!r} targets a private/loopback address ({host!r}). "
             "Set LM_CHAT_ALLOW_PRIVATE_SEARXNG=1 to allow self-hosted instances."
         )
+
+    # Not a literal IP — resolve the hostname and check every address it
+    # returns, so "searxng.internal" pointing at 10.0.0.5 can't bypass the
+    # guard just because it isn't a literal IP.
+    for ip in _resolve_host_ips(host):
+        if _is_tailscale_ip(ip):
+            continue
+        if _is_private_ip(ip):
+            raise ValueError(
+                f"SearXNG URL {url!r} hostname {host!r} resolves to a "
+                f"private/loopback address ({ip!r}). Set "
+                "LM_CHAT_ALLOW_PRIVATE_SEARXNG=1 to allow self-hosted instances."
+            )
 
 
 # Below this many results, SearXNG's result set is too sparse and
@@ -313,6 +399,111 @@ class WebSearchUnavailable(Exception):
     """
 
 
+async def _resolve_pinned_target(
+    url: str,
+) -> tuple[httpx.URL, dict[str, str], dict[str, str]]:
+    """Resolve *url*'s host and return a request target pinned to a
+    validated IP, plus a ``Host`` header and SNI override that preserve
+    the original hostname for the TLS handshake and cert check.
+
+    Re-resolves and re-checks right before the actual connection, closing
+    most of the window between ``validate_searxng_url`` (config time) and
+    the request itself — the window in which a hostname's DNS record
+    could change (rebinding) to point at a private target.
+
+    One residual gap remains, and it's narrow: the DNS answer is looked
+    up here and then reused for one connection attempt, so a rebind that
+    races the resolution itself (rather than happening between config
+    time and request time) is not eliminated — httpx has no lower-level
+    hook to resolve and connect as one atomic step. That is not a
+    regression versus no pinning at all (the prior behavior for every
+    request), just a bound on how much of the window this closes.
+
+    No-op (URL unchanged, empty headers/extensions) when the host is
+    already a literal IP (static — nothing to re-resolve; already vetted
+    at config time), or when ``lm_chat_allow_private_searxng`` is set
+    (private/Tailscale targets are explicitly trusted — pinning would
+    only add overhead to the admin's own trusted endpoint).
+
+    Fails CLOSED — raises instead of connecting unpinned — when
+    resolution returns no address, whether because it genuinely failed
+    or because it didn't complete within ``_DNS_RESOLVE_TIMEOUT_SEC``:
+    with no resolved address there is nothing to validate, and falling
+    back to an unpinned connect would hand the destination decision to
+    httpx's own (uncapped, unchecked) resolver — defeating the guard
+    right at the moment it matters most (an admin-configured hostname
+    whose DNS just became unreachable or slow).
+
+    Raises:
+        WebSearchUnavailable: If resolution returns no address (DNS
+            failure or timeout), or if a resolved IP is private/loopback
+            and not Tailscale-exempt.
+    """
+    from lmchat.config import get_settings  # noqa: PLC0415
+
+    parsed = httpx.URL(url)
+    host = parsed.host
+
+    if get_settings().lm_chat_allow_private_searxng:
+        return parsed, {}, {}
+
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        # Literal IP: there is no DNS to pin, but still re-validate here
+        # (defense-in-depth against a private literal reaching the connect
+        # path if config-time validation was ever bypassed). A Tailscale
+        # literal is allowed; any other private/loopback/unspecified is
+        # refused — mirroring the resolved-IP loop below.
+        if not _is_tailscale_ip(host) and _is_private_ip(host):
+            log.error(
+                "web_search.ssrf_guard.private_literal_blocked",
+                url=url,
+                host=host,
+            )
+            raise WebSearchUnavailable(
+                f"SearXNG host {host!r} is a private/loopback address; "
+                "refusing to connect. Set LM_CHAT_ALLOW_PRIVATE_SEARXNG=1 "
+                "to allow."
+            )
+        return parsed, {}, {}
+
+    ips = await asyncio.to_thread(_resolve_host_ips, host)
+    if not ips:
+        log.error(
+            "web_search.ssrf_guard.resolve_failed",
+            url=url,
+            host=host,
+        )
+        raise WebSearchUnavailable(
+            f"SearXNG host {host!r} could not be resolved (DNS lookup "
+            "failed or timed out) at connect time; refusing to connect "
+            "to an unvalidated target."
+        )
+
+    for ip in ips:
+        if _is_tailscale_ip(ip):
+            continue
+        if _is_private_ip(ip):
+            log.error(
+                "web_search.ssrf_guard.rebind_blocked",
+                url=url,
+                host=host,
+                resolved_ip=ip,
+            )
+            raise WebSearchUnavailable(
+                f"SearXNG host {host!r} resolved to a private/loopback "
+                f"address ({ip!r}) at connect time; refusing to connect "
+                "(possible DNS rebinding). Set "
+                "LM_CHAT_ALLOW_PRIVATE_SEARXNG=1 to allow."
+            )
+
+    pinned = parsed.copy_with(host=ips[0])
+    return pinned, {"Host": host}, {"sni_hostname": host}
+
+
 class WebSearchService:
     """Provider-agnostic web search service.
 
@@ -367,9 +558,14 @@ class WebSearchService:
             return True
 
         try:
+            url, extra_headers, extensions = await _resolve_pinned_target(
+                self._searxng_url
+            )
             resp = await self._http.get(
-                self._searxng_url,
+                url,
                 params={"q": "test", "format": "json"},
+                headers=extra_headers,
+                extensions=extensions,
             )
             if resp.status_code == 200:
                 body = resp.json()
@@ -475,9 +671,14 @@ class WebSearchService:
         sparse-result fallback threshold must be evaluated against (a small
         ``top_n`` must not itself look like a sparse SearXNG response).
         """
+        url, extra_headers, extensions = await _resolve_pinned_target(
+            self._searxng_url
+        )
         resp = await self._http.get(
-            self._searxng_url,
+            url,
             params={"q": query, "format": "json"},
+            headers=extra_headers,
+            extensions=extensions,
         )
         resp.raise_for_status()
         body = resp.json()

@@ -24,10 +24,13 @@ from lmchat.services.web_search_service import (
     SearchResult,
     WebSearchService,
     WebSearchUnavailable,
+    _is_private_ip,
     _parse_brave,
     _parse_brave_llm_context,
     _parse_ddgs_results,
     _parse_searxng,
+    _resolve_host_ips,
+    _resolve_pinned_target,
     validate_searxng_url,
 )
 
@@ -795,10 +798,288 @@ def test_ssrf_validator_allows_public_ip(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_ssrf_validator_allows_public_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
-    """validate_searxng_url passes for a public hostname (not a literal IP)."""
+    """validate_searxng_url passes for a hostname that resolves to a public IP.
+
+    DNS resolution is mocked — no real network lookup.
+    """
     monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
-    # Hostnames are not resolved; they pass through (admin-chosen).
-    validate_searxng_url("https://searx.be/search")
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips",
+        return_value=["1.1.1.1"],
+    ):
+        validate_searxng_url("https://searx.be/search")
+
+
+def test_ssrf_validator_rejects_hostname_resolving_to_private_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hostname that RESOLVES to a private/loopback IP is rejected without
+    the escape hatch — closes the gap where only literal IPs were checked.
+    DNS resolution is mocked — no real network lookup.
+    """
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips",
+        return_value=["10.0.0.5"],
+    ):
+        with pytest.raises(ValueError, match="resolves to a"):
+            validate_searxng_url("http://searxng.internal.example/search")
+
+
+def test_ssrf_validator_allows_hostname_resolving_to_private_ip_with_escape_hatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Escape hatch still allows a hostname that resolves to a private IP —
+    the toggle must keep working for hostnames, not just literal IPs.
+    """
+    monkeypatch.setenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", "1")
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips",
+        return_value=["10.0.0.5"],
+    ) as mock_resolve:
+        # Should not raise — escape hatch short-circuits before resolution.
+        validate_searxng_url("http://searxng.internal.example/search")
+    mock_resolve.assert_not_called()
+
+
+def test_ssrf_validator_allows_hostname_resolving_to_tailscale_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hostname resolving to a Tailscale CGNAT IP is allowed with no
+    escape hatch, same as a literal Tailscale IP.
+    """
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips",
+        return_value=["100.84.2.118"],
+    ):
+        validate_searxng_url("http://searxng.tailnet.example/search")
+
+
+def test_resolve_host_ips_returns_empty_for_literal_ip() -> None:
+    """_resolve_host_ips is a no-op for a host that's already a literal IP —
+    nothing to resolve, and it must never attempt a DNS lookup for one.
+    """
+    assert _resolve_host_ips("127.0.0.1") == []
+    assert _resolve_host_ips("::1") == []
+
+
+def test_resolve_host_ips_dedupes_resolved_addresses() -> None:
+    """_resolve_host_ips extracts and dedupes IP strings from getaddrinfo,
+    preserving first-seen order.
+    """
+    fake_infos = [
+        (2, 1, 6, "", ("203.0.113.1", 0)),
+        (2, 1, 6, "", ("203.0.113.1", 0)),  # duplicate
+        (10, 1, 6, "", ("2001:db8::1", 0, 0, 0)),
+    ]
+    with patch(
+        "lmchat.services.web_search_service.socket.getaddrinfo",
+        return_value=fake_infos,
+    ):
+        assert _resolve_host_ips("searx.example") == [
+            "203.0.113.1",
+            "2001:db8::1",
+        ]
+
+
+# ---------------------------------------------------------------------------
+# DNS-rebinding guard — _resolve_pinned_target (resolve+reject+pin at
+# connect time, closing the window between validate_searxng_url at config
+# time and the actual httpx request)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resolve_pinned_target_rejects_dns_rebind_to_private_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hostname that now resolves to a private IP (rebound after the
+    config-time check passed) is rejected at connect time too.
+    """
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips",
+        return_value=["10.0.0.5"],
+    ):
+        with pytest.raises(WebSearchUnavailable, match="rebinding"):
+            await _resolve_pinned_target("http://searxng.rebind.example/search")
+
+
+@pytest.mark.asyncio
+async def test_resolve_pinned_target_pins_public_hostname_to_resolved_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A public hostname is resolved and the request target is pinned to
+    the resolved IP, with a Host header + SNI override preserving the
+    original hostname (so TLS SNI/cert verification still targets it).
+    """
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips",
+        return_value=["1.1.1.1"],
+    ):
+        target, headers, extensions = await _resolve_pinned_target(
+            "https://searx.be/search"
+        )
+    assert target.host == "1.1.1.1"
+    assert target.path == "/search"
+    assert headers == {"Host": "searx.be"}
+    assert extensions == {"sni_hostname": "searx.be"}
+
+
+@pytest.mark.asyncio
+async def test_resolve_pinned_target_preserves_explicit_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pinning must RETAIN a non-default port — copy_with(host=) changes only
+    the host, so the pinned request still targets the configured port (not a
+    different service on the resolved IP). Locks in the copy_with(host=)
+    behaviour the review flagged as unverifiable.
+    """
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips",
+        return_value=["1.1.1.1"],
+    ):
+        target, headers, extensions = await _resolve_pinned_target(
+            "http://searxng.example.com:7980/search"
+        )
+    assert target.host == "1.1.1.1"
+    assert target.port == 7980  # explicit non-default port preserved by the pin
+    assert target.path == "/search"
+    assert headers == {"Host": "searxng.example.com"}
+    assert extensions == {"sni_hostname": "searxng.example.com"}
+
+
+@pytest.mark.asyncio
+async def test_resolve_pinned_target_allows_private_with_escape_hatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the escape hatch set, a private/Tailscale target is returned
+    unchanged — no resolution attempted, matching the admin's trusted
+    self-hosted (e.g. Tailscale) SearXNG setup exactly as before.
+    """
+    monkeypatch.setenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", "1")
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips"
+    ) as mock_resolve:
+        target, headers, extensions = await _resolve_pinned_target(
+            "http://100.84.2.118:7980/search"
+        )
+    mock_resolve.assert_not_called()
+    assert str(target) == "http://100.84.2.118:7980/search"
+    assert headers == {}
+    assert extensions == {}
+
+
+@pytest.mark.asyncio
+async def test_resolve_pinned_target_noop_for_literal_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A literal public IP is static — nothing to re-resolve, so the target
+    is returned unchanged and no DNS lookup is attempted.
+    """
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips"
+    ) as mock_resolve:
+        target, headers, extensions = await _resolve_pinned_target(
+            "https://1.1.1.1/search"
+        )
+    mock_resolve.assert_not_called()
+    assert str(target) == "https://1.1.1.1/search"
+    assert headers == {}
+    assert extensions == {}
+
+
+@pytest.mark.asyncio
+async def test_resolve_pinned_target_rejects_literal_private_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A literal private/loopback IP at connect time is refused (defense in
+    depth vs a private literal reaching this path) — no DNS lookup, and
+    WebSearchUnavailable is raised rather than connecting.
+    """
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips"
+    ) as mock_resolve:
+        with pytest.raises(WebSearchUnavailable):
+            await _resolve_pinned_target("http://192.168.1.10/search")
+    mock_resolve.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resolve_pinned_target_allows_literal_tailscale_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A literal Tailscale CGNAT IP passes the connect-time literal-IP check
+    unchanged — Tailscale is allowed before the private-IP reject.
+    """
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips"
+    ) as mock_resolve:
+        target, _headers, _extensions = await _resolve_pinned_target(
+            "http://100.84.2.118:7980/search"
+        )
+    mock_resolve.assert_not_called()
+    assert str(target) == "http://100.84.2.118:7980/search"
+
+
+@pytest.mark.asyncio
+async def test_searxng_search_blocks_dns_rebind_before_connecting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """WebSearchService._searxng_search refuses to connect when the
+    configured hostname resolves to a private IP at request time — the
+    block happens BEFORE ``self._http.get`` is ever called.
+    """
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    mock_http = MagicMock(spec=httpx.AsyncClient)
+    mock_http.get = AsyncMock()
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips",
+        return_value=["1.1.1.1"],  # public at construction time
+    ):
+        svc = WebSearchService(
+            provider="searxng",
+            searxng_url="http://searxng.rebind.example/search",
+            http_client=mock_http,
+        )
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips",
+        return_value=["192.168.1.50"],  # rebound to private by request time
+    ):
+        with pytest.raises(WebSearchUnavailable, match="rebinding"):
+            await svc._searxng_search("query")
+    mock_http.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_searxng_search_allows_real_tailscale_endpoint_with_escape_hatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end regression guard for the admin's real setup: a Tailscale
+    SearXNG endpoint with the escape hatch set must keep working exactly as
+    before — connects to the configured URL unchanged, unpinned.
+    """
+    monkeypatch.setenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", "1")
+    mock_http = MagicMock(spec=httpx.AsyncClient)
+    mock_http.get = AsyncMock(return_value=_make_json_response({"results": []}))
+
+    svc = WebSearchService(
+        provider="searxng",
+        searxng_url="http://100.84.2.118:7980/search",
+        http_client=mock_http,
+    )
+    results = await svc._searxng_search("query")
+
+    assert results == []
+    called_url = mock_http.get.call_args.args[0]
+    assert str(called_url) == "http://100.84.2.118:7980/search"
+    assert mock_http.get.call_args.kwargs["headers"] == {}
 
 
 def test_ssrf_validator_allows_private_with_escape_hatch(
@@ -847,3 +1128,180 @@ def test_ssrf_validator_follow_redirects_false(
         )
 
     assert captured.get("follow_redirects") is False
+
+
+# ---------------------------------------------------------------------------
+# P0/P1/P2 security-review remediation — IPv4-mapped IPv6 bypass, fail-open
+# on DNS timeout, and unspecified-address bypass.
+# ---------------------------------------------------------------------------
+
+
+def test_is_private_ip_rejects_ipv4_mapped_ipv6() -> None:
+    """P0: an IPv4-mapped IPv6 literal (e.g. ``::ffff:192.168.1.1``) is an
+    IPv6Address and was never itself a member of the old IPv4-only
+    network list, so it used to bypass the guard entirely. It must now
+    unwrap to its underlying IPv4 address and be classified the same way.
+    """
+    assert _is_private_ip("::ffff:192.168.1.1") is True
+    assert _is_private_ip("::ffff:127.0.0.1") is True
+    assert _is_private_ip("::ffff:10.0.0.5") is True
+
+
+def test_is_private_ip_allows_ipv4_mapped_public() -> None:
+    """An IPv4-mapped IPv6 literal wrapping a PUBLIC IPv4 address is not
+    flagged — confirms the unwrap doesn't over-block.
+    """
+    assert _is_private_ip("::ffff:8.8.8.8") is False
+
+
+def test_ssrf_validator_rejects_ipv4_mapped_private_ipv6(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P0 end-to-end: validate_searxng_url rejects an IPv4-mapped private
+    IPv6 literal without the escape hatch.
+    """
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    with pytest.raises(ValueError, match="private/loopback"):
+        validate_searxng_url("http://[::ffff:192.168.1.1]:8888/search")
+
+
+def test_is_private_ip_rejects_unspecified_addresses() -> None:
+    """P2: 0.0.0.0 and :: (the IPv4/IPv6 "bind any" / unspecified
+    addresses) are rejected — no RFC-1918/loopback/link-local range
+    covered these under the old hand-rolled network list.
+    """
+    assert _is_private_ip("0.0.0.0") is True
+    assert _is_private_ip("::") is True
+
+
+def test_ssrf_validator_rejects_unspecified_ipv4(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P2 end-to-end: validate_searxng_url rejects 0.0.0.0."""
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    with pytest.raises(ValueError, match="private/loopback"):
+        validate_searxng_url("http://0.0.0.0:8888/search")
+
+
+def test_ssrf_validator_rejects_unspecified_ipv6(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P2 end-to-end: validate_searxng_url rejects ::."""
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    with pytest.raises(ValueError, match="private/loopback"):
+        validate_searxng_url("http://[::]:8888/search")
+
+
+@pytest.mark.asyncio
+async def test_resolve_pinned_target_fails_closed_on_dns_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P1: when resolution returns nothing — which is exactly what a DNS
+    timeout collapses to, per ``_resolve_host_ips``'s own contract —
+    ``_resolve_pinned_target`` must fail CLOSED (raise
+    ``WebSearchUnavailable``) rather than falling back to an unpinned
+    connect that lets httpx's own (uncapped, unchecked) resolver decide
+    the destination.
+    """
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips",
+        return_value=[],
+    ):
+        with pytest.raises(WebSearchUnavailable, match="could not be resolved"):
+            await _resolve_pinned_target("http://searxng.slowdns.example/search")
+
+
+@pytest.mark.asyncio
+async def test_resolve_pinned_target_fails_closed_on_real_dns_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P1 end-to-end: a genuinely slow resolver — exceeding
+    ``_DNS_RESOLVE_TIMEOUT_SEC``, not just a mocked empty return — must
+    still raise ``WebSearchUnavailable``. The timeout is shrunk so the
+    test stays fast; the resolver thread sleeps well past it, which
+    reproduces the real ``concurrent.futures.TimeoutError`` path inside
+    ``_resolve_host_ips`` instead of only the empty-list mock above.
+    """
+    import time
+
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    monkeypatch.setattr(
+        "lmchat.services.web_search_service._DNS_RESOLVE_TIMEOUT_SEC", 0.05
+    )
+
+    def _slow_getaddrinfo(*args: object, **kwargs: object) -> list[object]:
+        time.sleep(0.5)
+        return []
+
+    with patch(
+        "lmchat.services.web_search_service.socket.getaddrinfo",
+        side_effect=_slow_getaddrinfo,
+    ):
+        with pytest.raises(WebSearchUnavailable, match="could not be resolved"):
+            await _resolve_pinned_target("http://searxng.slowdns.example/search")
+
+
+# ---------------------------------------------------------------------------
+# Regression guards — the Tailscale CGNAT allow and the
+# LM_CHAT_ALLOW_PRIVATE_SEARXNG escape hatch must keep working exactly as
+# before, for both the pre-existing categories and the newly-caught ones.
+# ---------------------------------------------------------------------------
+
+
+def test_ssrf_validator_allows_tailscale_cgnat_literal_without_escape_hatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: the admin's real Tailscale SearXNG IP (100.84.2.118)
+    must still be allowed with NO escape hatch set. The explicit
+    ``_is_tailscale_ip`` short-circuit runs BEFORE ``_is_private_ip`` in
+    ``validate_searxng_url`` — this must hold regardless of whether the
+    running stdlib's ``ipaddress.is_private`` classifies 100.64.0.0/10
+    (CGNAT) as private, which has varied across Python versions.
+    """
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    validate_searxng_url("http://100.84.2.118:7980/search")  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_resolve_pinned_target_allows_hostname_resolving_to_tailscale_cgnat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: connect-time pinning also allows a hostname that
+    resolves to Tailscale CGNAT (100.84.2.118) with NO escape hatch set —
+    the ``_is_tailscale_ip`` short-circuit inside the resolved-IP loop in
+    ``_resolve_pinned_target`` must run before ``_is_private_ip`` there
+    too, same ordering guarantee as the config-time validator.
+    """
+    monkeypatch.delenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", raising=False)
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips",
+        return_value=["100.84.2.118"],
+    ):
+        target, headers, extensions = await _resolve_pinned_target(
+            "http://searxng.tailnet.example:7980/search"
+        )
+    assert target.host == "100.84.2.118"
+    assert headers == {"Host": "searxng.tailnet.example"}
+
+
+def test_ssrf_validator_allows_ipv4_mapped_private_with_escape_hatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: the escape hatch still allows the newly-caught
+    IPv4-mapped-private category, same as it already does for plain
+    private IPv4/IPv6 literals.
+    """
+    monkeypatch.setenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", "1")
+    validate_searxng_url("http://[::ffff:192.168.1.1]:8888/search")  # must not raise
+
+
+def test_ssrf_validator_allows_unspecified_with_escape_hatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: the escape hatch still allows the newly-caught
+    unspecified-address category.
+    """
+    monkeypatch.setenv("LM_CHAT_ALLOW_PRIVATE_SEARXNG", "1")
+    validate_searxng_url("http://0.0.0.0:8888/search")  # must not raise
+    validate_searxng_url("http://[::]:8888/search")  # must not raise

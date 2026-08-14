@@ -15,7 +15,7 @@ Covers:
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -61,7 +61,14 @@ async def test_web_search_works_after_rewire_grace_period() -> None:
     probe_resp.json = MagicMock(return_value={"results": []})
     new_client.get = AsyncMock(return_value=probe_resp)
 
-    result = await svc.probe()
+    # The SSRF guard now resolves + pins the host at connect time; mock the
+    # resolver so this rewire test (which uses a non-resolvable example host)
+    # reaches the mocked client instead of failing closed on DNS.
+    with patch(
+        "lmchat.services.web_search_service._resolve_host_ips",
+        return_value=["1.1.1.1"],
+    ):
+        result = await svc.probe()
     assert result is True
     new_client.get.assert_called_once()
 
