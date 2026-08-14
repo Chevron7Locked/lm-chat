@@ -33,7 +33,7 @@ import {
   sendTurnAndWait,
 } from "./_dogfood-helpers";
 
-const TURN_TIMEOUT_MS = 180_000;
+const TURN_TIMEOUT_MS = 1_800_000;
 
 interface ChatDetailMessages {
   messages: Array<{ id: number; role: string; content: string }>;
@@ -42,7 +42,7 @@ interface ChatDetailMessages {
 test(
   "j9: forking from an earlier assistant message creates a new chat truncated at that point",
   async ({ page, backendURL, adminUsername, adminPassword }) => {
-    test.setTimeout(600_000);
+    test.setTimeout(3_600_000);
     const collectErrors = attachErrorCollector(page);
 
     await loginAndWait(page, backendURL, adminUsername, adminPassword);

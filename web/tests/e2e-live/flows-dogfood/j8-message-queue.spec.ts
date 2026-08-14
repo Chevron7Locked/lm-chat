@@ -37,15 +37,14 @@ import {
 import {
   classifyFleet,
   configureLmStudio,
-  sendTurnAndWait,
 } from "./_dogfood-helpers";
 
-const TURN_TIMEOUT_MS = 180_000;
+const TURN_TIMEOUT_MS = 1_800_000;
 
 test(
   "j8: a message typed and submitted mid-stream queues, then auto-sends once the current turn finishes",
   async ({ page, backendURL, adminUsername, adminPassword }) => {
-    test.setTimeout(600_000);
+    test.setTimeout(3_600_000);
     const collectErrors = attachErrorCollector(page);
 
     await loginAndWait(page, backendURL, adminUsername, adminPassword);
@@ -75,18 +74,17 @@ test(
       "In 3-4 sentences, explain how photosynthesis works.";
     const queuedTurnText = "In one sentence, name the capital of Japan.";
 
-    // Turn 1 — fill + Enter. sendTurnAndWait's own post-submit wait
-    // (`expect(composer).toBeEnabled()`) is a near no-op here BY DESIGN:
-    // the composer is intentionally never disabled while streaming (the
-    // fix under test), so that assertion resolves immediately rather than
-    // actually waiting out the turn. The real "is it streaming" signal —
-    // the send button's text — is asserted explicitly right after.
-    await sendTurnAndWait(page, firstTurnText, TURN_TIMEOUT_MS);
+    // Turn 1 — START it but DON'T wait for it to finish: we need it still
+    // streaming so the NEXT message queues rather than sends. (sendTurnAndWait
+    // now waits for turn completion, so it can't be used to start turn 1 here.)
+    await composer.fill(firstTurnText);
+    await page.keyboard.press("Enter");
 
-    // (1a) Confirm turn 1 is genuinely mid-stream before doing anything
-    // else — the button's text flips to "Queue" the instant `streaming`
-    // goes true (Composer.tsx).
-    await expect(sendBtn).toHaveText(/Queue/, { timeout: 15_000 });
+    // (1a) Confirm turn 1 is genuinely mid-stream — the send button flips to
+    // "Queue" the instant `streaming` goes true (Composer.tsx) and stays there
+    // for the whole stream, so this is observed reliably (we did not wait the
+    // turn out first, so there is no race against a finished turn).
+    await expect(sendBtn).toHaveText(/Queue/, { timeout: TURN_TIMEOUT_MS });
 
     // (1b) ASSERT typing is allowed during streaming — the textarea must
     // accept input and stay enabled while turn 1 is in flight.
@@ -125,7 +123,7 @@ test(
     // Belt-and-suspenders UI check: two assistant turns rendered.
     await expect(page.locator('[data-message-role="assistant"]')).toHaveCount(
       2,
-      { timeout: 10_000 },
+      { timeout: TURN_TIMEOUT_MS },
     );
 
     // (4) GROUND TRUTH — verify via the persisted transcript, not just the

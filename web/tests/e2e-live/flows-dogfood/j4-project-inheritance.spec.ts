@@ -21,7 +21,7 @@ import {
   sendTurnAndWait,
 } from "./_dogfood-helpers";
 
-const TURN_TIMEOUT_MS = 180_000;
+const TURN_TIMEOUT_MS = 1_800_000;
 const SENTINEL_INSTRUCTION =
   "You are a test bot. End EVERY reply with the exact tag [LMCHAT-J4] on its own line.";
 const SENTINEL_TAG = "[LMCHAT-J4]";
@@ -29,7 +29,7 @@ const SENTINEL_TAG = "[LMCHAT-J4]";
 test(
   "j4: project custom instructions auto-inherit into a project chat",
   async ({ page, backendURL, adminUsername, adminPassword }) => {
-    test.setTimeout(600_000);
+    test.setTimeout(3_600_000);
     const collectErrors = attachErrorCollector(page);
 
     await loginAndWait(page, backendURL, adminUsername, adminPassword);
@@ -116,7 +116,7 @@ test(
     // the stream's terminal, so the assistant message is complete by now.
     await expect(
       page.locator('[data-message-role="assistant"]').last(),
-    ).toContainText(SENTINEL_TAG, { timeout: 5_000 });
+    ).toContainText(SENTINEL_TAG, { timeout: TURN_TIMEOUT_MS });
 
     assertNoConsoleErrors(collectErrors(), "j4");
   },

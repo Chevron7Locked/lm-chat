@@ -26,16 +26,17 @@ import {
   sendTurnAndWait,
 } from "./_dogfood-helpers";
 
-const TURN_TIMEOUT_MS = 180_000;
+const TURN_TIMEOUT_MS = 1_800_000;
 // The finalize summary can trigger a long reasoning trace on a reasoning model
 // (observed live: the model reasons extensively before emitting the summary),
-// so allow a generous budget separate from a normal turn.
-const FINALIZE_TIMEOUT_MS = 300_000;
+// so allow a generous budget separate from a normal turn. This is a LOCAL-model
+// harness: prompt processing + generation can legitimately run many minutes.
+const FINALIZE_TIMEOUT_MS = 1_800_000;
 
 test(
   "j3: /research sub-session summarizes and injects into the main chat",
   async ({ page, backendURL, adminUsername, adminPassword }) => {
-    test.setTimeout(600_000);
+    test.setTimeout(3_600_000);
     const collectErrors = attachErrorCollector(page);
 
     await loginAndWait(page, backendURL, adminUsername, adminPassword);
@@ -90,13 +91,14 @@ test(
     // Belt-and-suspenders: the sub-session's completed answer renders with a
     // "Research" persona label (ChatMessage.tsx — suppressed while
     // streaming, so its presence confirms the turn actually finished).
+    // Model-gated (only renders once the turn finalizes) — generous budget.
     await expect(
       page
         .locator('[data-testid="chat-message-persona-label"]', {
           hasText: "Research",
         })
         .first(),
-    ).toBeVisible({ timeout: 10_000 });
+    ).toBeVisible({ timeout: TURN_TIMEOUT_MS });
 
     // Finalize — streams a summary from the sub-session (a second real
     // model call).

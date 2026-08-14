@@ -26,8 +26,11 @@ export default defineConfig({
   retries: 0,
   forbidOnly: !!process.env["CI"],
   reporter: [["list"], ["html", { open: "never" }]],
-  // Generous default — individual journeys raise it further via test.setTimeout.
-  timeout: 600_000,
+  // Generous default — this is a LOCAL-model harness; prompt processing +
+  // generation can legitimately take many minutes, so never let a fixed cap
+  // masquerade as a failure. Individual journeys raise it further via
+  // test.setTimeout.
+  timeout: 1_800_000,
   use: {
     trace: "retain-on-failure",
     screenshot: "only-on-failure",

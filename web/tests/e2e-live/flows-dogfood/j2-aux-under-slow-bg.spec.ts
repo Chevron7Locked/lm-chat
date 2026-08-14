@@ -40,15 +40,15 @@ import {
 // give up while the app is still (correctly) distilling — the same cloud-timeframe
 // assumption we removed from the app. These are POLL CEILINGS: the assertion
 // returns the instant a fact lands, so on a warm box J2 still finishes in seconds.
-const TURN_TIMEOUT_MS = 300_000;
+const TURN_TIMEOUT_MS = 1_800_000;
 const DISTILL_TIMEOUT_MS = 900_000;
 
 test(
   "j2: auto-memory + title + follow-ups succeed on a SLOW background model (grey-box)",
   async ({ page, backendURL, backendLogPath, adminUsername, adminPassword }) => {
-    // Ceiling covers TURN + DISTILL waits (300s + 900s) plus overhead on a
-    // pathologically-loaded box; a no-op on a warm box where J2 finishes fast.
-    test.setTimeout(1_300_000);
+    // Ceiling covers TURN + DISTILL waits (1800s + 900s = 2700s) plus overhead
+    // on a pathologically-loaded box; a no-op on a warm box where J2 finishes fast.
+    test.setTimeout(3_600_000);
     const collectErrors = attachErrorCollector(page);
 
     // Log in as ADMIN first — pinning the background-tasks model is an admin

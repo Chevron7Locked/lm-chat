@@ -30,7 +30,7 @@ import { classifyFleet } from "./_dogfood-helpers";
 test(
   "j1: fresh-install wizard seeds the FASTEST loaded model as the background default",
   async ({ page, backendURL, dbPath }) => {
-    test.setTimeout(600_000);
+    test.setTimeout(3_600_000);
     const collectErrors = attachErrorCollector(page);
 
     // Step 0 — wipe users to recreate the fresh-install state (mirrors

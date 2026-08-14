@@ -281,20 +281,22 @@ export async function sendTurnAndWait(
 ): Promise<void> {
   const composer = page.getByPlaceholder(/Message/);
   await composer.waitFor({ state: "visible", timeout: 15_000 });
+  // Anchor completion on the PERSISTENT assistant message, not the fleeting
+  // "Queue" button state. The composer no longer disables while streaming
+  // (message-queue feature), so `toBeEnabled` can't signal completion; and the
+  // "Queue" text is transient — a quick turn can flip past it before we observe
+  // it, hanging a "wait for Queue" for the whole (now huge) timeout. A new
+  // assistant message row instead appears and STAYS for the entire turn, in the
+  // main chat AND in sub-session panels (both render ChatMessage with
+  // data-message-role). Wait for that, then for streaming to end (button "Send").
+  const assistantMsgs = page.locator('[data-message-role="assistant"]');
+  const before = await assistantMsgs.count();
   await composer.fill(text);
   await page.keyboard.press("Enter");
-  // The composer no longer disables during a stream (message-queue feature —
-  // you can type/queue while streaming), so `toBeEnabled` is now always true
-  // and can't signal completion. The send button reads "Queue" while a
-  // response streams and returns to "Send" at the terminal.
-  //
-  // Best-effort confirm the stream STARTED (button -> "Queue") so a still-idle
-  // "Send" isn't mistaken for completion — but tolerate a very fast turn that
-  // flips back before we observe it. The terminal wait below is authoritative.
-  const sendBtn = page.getByTestId("composer-send-btn");
-  await sendBtn
-    .filter({ hasText: "Queue" })
-    .waitFor({ state: "visible", timeout: 10_000 })
-    .catch(() => undefined);
-  await expect(sendBtn).toContainText("Send", { timeout: turnTimeoutMs });
+  await expect
+    .poll(() => assistantMsgs.count(), { timeout: turnTimeoutMs })
+    .toBeGreaterThan(before);
+  await expect(page.getByTestId("composer-send-btn")).toHaveText(/Send/, {
+    timeout: turnTimeoutMs,
+  });
 }

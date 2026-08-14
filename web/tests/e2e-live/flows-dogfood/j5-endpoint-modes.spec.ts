@@ -22,13 +22,13 @@ import {
   sendTurnAndWait,
 } from "./_dogfood-helpers";
 
-const TURN_TIMEOUT_MS = 180_000;
+const TURN_TIMEOUT_MS = 1_800_000;
 const ENDPOINT_MODES = ["native", "openai_compat"] as const;
 
 test(
   "j5: native and openai_compat endpoint modes both reach a terminal",
   async ({ page, backendURL, adminUsername, adminPassword }) => {
-    test.setTimeout(600_000);
+    test.setTimeout(3_600_000);
     const collectErrors = attachErrorCollector(page);
 
     await loginAndWait(page, backendURL, adminUsername, adminPassword);

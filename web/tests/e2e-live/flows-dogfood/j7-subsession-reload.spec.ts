@@ -37,12 +37,12 @@ import {
   sendTurnAndWait,
 } from "./_dogfood-helpers";
 
-const TURN_TIMEOUT_MS = 180_000;
+const TURN_TIMEOUT_MS = 1_800_000;
 
 test(
   "j7: a /research sub-session survives a page reload (persisted + fetchable)",
   async ({ page, backendURL, adminUsername, adminPassword }) => {
-    test.setTimeout(600_000);
+    test.setTimeout(3_600_000);
     attachErrorCollector(page);
 
     await loginAndWait(page, backendURL, adminUsername, adminPassword);
@@ -79,13 +79,14 @@ test(
       TURN_TIMEOUT_MS,
     );
     // Turn finished when the Research persona label renders (suppressed mid-stream).
+    // Model-gated — generous budget.
     await expect(
       page
         .locator('[data-testid="chat-message-persona-label"]', {
           hasText: "Research",
         })
         .first(),
-    ).toBeVisible({ timeout: 10_000 });
+    ).toBeVisible({ timeout: TURN_TIMEOUT_MS });
 
     // --- THE RELOAD ---
     await page.reload();
@@ -185,11 +186,32 @@ test(
 
     // --- (5) P4 CONTINUE — a new turn from the reopened panel APPENDS onto
     // the SAME sub_session_id instead of creating a second row. ---
-    await sendTurnAndWait(
-      page,
-      "In one more sentence, name one popular vector database product.",
-      TURN_TIMEOUT_MS,
-    );
+    await page
+      .getByPlaceholder(/Message/)
+      .fill("In one more sentence, name one popular vector database product.");
+    await page.keyboard.press("Enter");
+    // Anchor completion on the persisted transcript (the ground truth this step
+    // verifies), NOT the DOM: the reopened sub-session panel renders the
+    // continued turn through a different path, so a new [data-message-role] node
+    // may not appear — but the backend appends the turn onto the same
+    // sub_session_id. Wait until the 2nd assistant row is finalized.
+    await expect
+      .poll(
+        async () => {
+          const r = await page.request.get(
+            `${backendURL}/api/chats/${String(chatId)}/sub-sessions/${String(sid)}`,
+          );
+          if (!r.ok()) return 0;
+          const d = (await r.json()) as {
+            messages: Array<{ role: string; state: string }>;
+          };
+          return d.messages.filter(
+            (m) => m.role === "assistant" && m.state === "final",
+          ).length;
+        },
+        { timeout: TURN_TIMEOUT_MS },
+      )
+      .toBeGreaterThanOrEqual(2);
 
     const listAfterContinueResp = await page.request.get(
       `${backendURL}/api/chats/${String(chatId)}/sub-sessions`,

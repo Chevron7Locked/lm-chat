@@ -56,7 +56,7 @@ import {
 // A tool round trip adds a real network fetch (DDG, pinned directly via
 // setWebSearchProvider) PLUS a second model completion on top of the
 // first — budget well past J5's trivial single-completion turn.
-const TURN_TIMEOUT_MS = 300_000;
+const TURN_TIMEOUT_MS = 1_800_000;
 
 const REFUSAL_PATTERNS = [
   /i can'?t browse/i,
@@ -68,7 +68,7 @@ const REFUSAL_PATTERNS = [
 test(
   "j6: web_search fires on openai_compat and its result reaches the final answer (grey-box)",
   async ({ page, backendURL, backendLogPath, adminUsername, adminPassword }) => {
-    test.setTimeout(600_000);
+    test.setTimeout(3_600_000);
     const collectErrors = attachErrorCollector(page);
 
     await loginAndWait(page, backendURL, adminUsername, adminPassword);
@@ -149,7 +149,7 @@ test(
       .locator(".lmchat-process-tool")
       .filter({ has: page.locator('.lmchat-process-tool__name[title="web_search"]') });
     await expect(toolLines.first()).toHaveAttribute("data-status", "success", {
-      timeout: 15_000,
+      timeout: TURN_TIMEOUT_MS,
     });
 
     // GREY-BOX 4 — the final answer is non-empty and not a browsing refusal
