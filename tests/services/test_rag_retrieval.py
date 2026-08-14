@@ -508,10 +508,9 @@ async def test_retrieve_fts_only_when_no_embedding_model(engine: AsyncEngine) ->
 async def test_retrieve_mmr_rerank_prefers_diversity_over_near_duplicate(
     engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """LM_CHAT_RAG_RERANK_MODE=mmr reorders the fused top_k away from a
-    near-duplicate pile-up toward a more diverse pick. Default ("off")
-    keeps the plain-RRF order — proven here directly, and by every other
-    test in this file, none of which sets the flag.
+    """LM_CHAT_RAG_RERANK_MODE=mmr (the DEFAULT) reorders the fused top_k away
+    from a near-duplicate pile-up toward a more diverse pick; explicit "off"
+    keeps the plain-RRF order.
     """
     from lmchat.config import get_settings
 
@@ -531,16 +530,22 @@ async def test_retrieve_mmr_rerank_prefers_diversity_over_near_duplicate(
     svc = _make_models_service()
     client = _make_embedding_client([1.0, 0.0, 0.0, 0.0])
 
-    # Default ("off"): plain RRF keeps the two most vector-similar
-    # (redundant) hits.
-    default_hits = await retrieve(
-        query="zzzznomatchtoken",
-        user_id=1,
-        top_k=2,
-        engine=engine,
-        embedding_client=client,
-        models_service=svc,
-    )
+    # Explicit "off": plain RRF keeps the two most vector-similar (redundant)
+    # hits (rerank is now ON by default, so this must be requested).
+    monkeypatch.setenv("LM_CHAT_RAG_RERANK_MODE", "off")
+    get_settings.cache_clear()
+    try:
+        default_hits = await retrieve(
+            query="zzzznomatchtoken",
+            user_id=1,
+            top_k=2,
+            engine=engine,
+            embedding_client=client,
+            models_service=svc,
+        )
+    finally:
+        monkeypatch.delenv("LM_CHAT_RAG_RERANK_MODE", raising=False)
+        get_settings.cache_clear()
     assert [h.ordinal for h in default_hits] == [0, 1]
 
     # Enable MMR rerank (default lambda=0.5) — the diverse-but-lower-relevance

@@ -165,17 +165,20 @@ class Settings(BaseSettings):
     # code change. Override via LM_CHAT_RRF_K.
     lm_chat_rrf_k: int = Field(default=60, ge=1)
 
-    # RAG post-fusion rerank stage. "off" (default) preserves the exact
-    # plain-RRF result order — byte-identical to pre-rerank behavior.
-    # "mmr" applies a dependency-free Maximal Marginal Relevance
-    # diversity rerank (Carbonell & Goldstein 1998) over the fused
-    # candidate pool, reusing embeddings already loaded for the vector
-    # stage — no new model, no new library. LM Studio's OpenAI-compat
-    # surface has no rerank/cross-encoder endpoint to call, and no
-    # cross-encoder dependency is present in this project (see
-    # retrieval_service._mmr_rerank for the full rationale). Override
-    # via LM_CHAT_RAG_RERANK_MODE.
-    lm_chat_rag_rerank_mode: Literal["off", "mmr"] = Field(default="off")
+    # RAG post-fusion rerank stage. "mmr" (default) applies a dependency-free
+    # Maximal Marginal Relevance diversity rerank (Carbonell & Goldstein 1998)
+    # over the fused candidate pool, reusing embeddings already loaded for the
+    # vector stage — no new model, no new library. It is a NO-OP when the top
+    # candidates are already diverse (verified live: modern embeddings
+    # self-diversify, so most queries are unaffected) and RESCUES the result
+    # when a doc has literal/near-duplicate chunks (repeated boilerplate) —
+    # where plain RRF returns the same chunk twice and buries the distinct one.
+    # Cost is a sub-millisecond cosine loop over the small candidate pool.
+    # "off" preserves the exact plain-RRF order. LM Studio's OpenAI-compat
+    # surface has no rerank/cross-encoder endpoint, and no cross-encoder
+    # dependency is present (see retrieval_service._mmr_rerank). Override via
+    # LM_CHAT_RAG_RERANK_MODE.
+    lm_chat_rag_rerank_mode: Literal["off", "mmr"] = Field(default="mmr")
     # MMR relevance/diversity trade-off, lambda in [0, 1]. 1.0 = pure
     # relevance (identical to no rerank); 0.0 = pure diversity. Override
     # via LM_CHAT_RAG_RERANK_MMR_LAMBDA.
