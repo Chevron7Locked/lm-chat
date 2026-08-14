@@ -365,3 +365,93 @@ async def test_recall_skips_group_when_resolver_reports_unresolvable(
     embed_calls = cast(AsyncMock, svc._embedding_client.embed_one).await_args_list
     called_model_ids = [c.kwargs.get("model_id") for c in embed_calls]
     assert unresolvable_id not in called_model_ids
+
+
+async def test_recall_matches_independently_computed_cosine_similarity(
+    engine: AsyncEngine,
+) -> None:
+    """Vectorized recall must produce the SAME ranking and (approximately)
+    the SAME scores as an independently computed brute-force cosine.
+
+    Proves the numpy matmul in ``_batch_cosine_similarity`` (which replaced
+    the old per-row Python cosine loop) didn't change ranking semantics or
+    the score scale that downstream (half-life/weight/Bayesian) scoring
+    depends on. The oracle below is a fresh, independent implementation —
+    it does NOT call ``_batch_cosine_similarity`` or
+    ``lmchat.embedding.vector_math.cosine_similarity`` — so a regression in
+    either the vectorization or the original formula would show up here.
+    """
+    await _insert_user(engine, 1)
+    await _insert_chat(engine, 1, user_id=1)
+
+    # Non-trivial, non-axis-aligned vectors so the ranking isn't obvious
+    # from inspection alone.
+    vectors = [
+        [0.8, 0.1, 0.3, -0.2],
+        [0.1, 0.9, -0.4, 0.05],
+        [0.5, 0.5, 0.5, 0.5],
+        [-0.3, 0.2, 0.9, 0.1],
+        [0.05, -0.6, 0.2, 0.7],
+        [0.4, 0.4, -0.1, 0.6],
+    ]
+    for i, vec in enumerate(vectors, start=1):
+        await _insert_message(engine, i, chat_id=1, content=f"msg {i}")
+        await _insert_embedding(
+            engine, i, "embed-model-v1", vec, text_hash="a" * 63 + str(i)
+        )
+
+    query_vec = [0.6, -0.2, 0.4, 0.3]
+    svc = _make_service(engine, query_vector=query_vec)
+
+    results = await svc.recall(user_id=1, query="anything", top_k=len(vectors))
+    assert len(results) == len(vectors)
+
+    def _independent_cosine(a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b, strict=True))
+        norm_a = sum(x * x for x in a) ** 0.5
+        norm_b = sum(y * y for y in b) ** 0.5
+        denom = norm_a * norm_b
+        return dot / denom if denom > 0.0 else 0.0
+
+    expected = sorted(
+        (
+            (_independent_cosine(query_vec, vec), i)
+            for i, vec in enumerate(vectors, start=1)
+        ),
+        key=lambda pair: pair[0],
+        reverse=True,
+    )
+
+    # Same ordering.
+    assert [r.message_id for r in results] == [mid for _, mid in expected]
+    # Same (approximate) scores, in the same order.
+    for result, (expected_sim, _) in zip(results, expected, strict=True):
+        assert result.similarity == pytest.approx(expected_sim, abs=1e-6)
+
+
+async def test_recall_skips_row_with_mismatched_embedding_dimension(
+    engine: AsyncEngine,
+) -> None:
+    """A stored row whose embedding dimension differs from the freshly
+    embedded query vector is skipped — the dim-guard runs before any row
+    is added to the vectorized candidate matrix, so a mismatched row can't
+    reach ``_batch_cosine_similarity`` (which assumes uniform dimension).
+    """
+    await _insert_user(engine, 1)
+    await _insert_chat(engine, 1, user_id=1)
+    await _insert_message(engine, 1, chat_id=1, content="3-dim message")
+    await _insert_message(engine, 2, chat_id=1, content="2-dim message")
+
+    # Row 1 matches the query's dimension (3); row 2 does not (2).
+    await _insert_embedding(
+        engine, 1, "embed-model-v1", [1.0, 0.0, 0.0], text_hash="a" * 64
+    )
+    await _insert_embedding(
+        engine, 2, "embed-model-v1", [1.0, 0.0], text_hash="b" * 64
+    )
+
+    svc = _make_service(engine, query_vector=[1.0, 0.0, 0.0])
+    results = await svc.recall(user_id=1, query="anything", top_k=10)
+
+    assert len(results) == 1
+    assert results[0].message_id == 1

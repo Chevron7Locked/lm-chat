@@ -9,9 +9,12 @@ Embedding storage: each vector is packed as little-endian float32 via
 Text hash: ``blake2b(digest_size=32)`` over the normalized text (whitespace-
 collapsed, case-folded) → 64 hex chars, matching the ``String(64)`` column.
 
-Cosine similarity: pure-Python O(n) dot-product + norm, adequate up to ~10k
-messages; sqlite-vec/pgvector acceleration would be a transparent swap since
-the ``recall()`` signature wouldn't change.
+Cosine similarity: ``recall()`` scores a query against all of a model
+group's candidates in one vectorized numpy matmul (``_batch_cosine_similarity``)
+rather than a per-row Python loop — same O(n) work, done via BLAS. Adequate
+up to ~50k-100k messages at single-admin scale; a true ANN index
+(sqlite-vec/pgvector/faiss) would be a transparent swap since the
+``recall()`` signature wouldn't change.
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ import time
 from datetime import datetime
 from typing import Any, Final
 
+import numpy as np
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import Row, delete, extract, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -39,9 +43,6 @@ from lmchat.db.schema import (
 )
 from lmchat.embedding.client import EmbeddingClient
 from lmchat.embedding.errors import EmbeddingError
-from lmchat.embedding.vector_math import (
-    cosine_similarity as _cosine_similarity,
-)
 from lmchat.embedding.vector_math import (
     pack_embedding as _pack_embedding,
 )
@@ -257,10 +258,63 @@ def _is_near_duplicate(candidate: str, existing: list[str]) -> bool:
     return False
 
 
-# _pack_embedding / _unpack_embedding / _cosine_similarity live in
-# lmchat.embedding.vector_math (imported above under their original private
-# names) — see that module's docstring for the storage format and the
-# dimension-mismatch policy (fail loud, no silent truncation).
+# _pack_embedding / _unpack_embedding live in lmchat.embedding.vector_math
+# (imported above under their original private names) — see that module's
+# docstring for the storage format and the dimension-mismatch policy (fail
+# loud, no silent truncation). The scalar ``cosine_similarity`` from that
+# module is no longer used here — recall()'s hot loop now scores a whole
+# candidate group at once via ``_batch_cosine_similarity`` below.
+
+
+def _batch_cosine_similarity(
+    query: list[float], candidates: list[list[float]]
+) -> list[float]:
+    """Vectorized cosine similarity between one query and many candidates.
+
+    Replaces an O(n) per-row Python dot-product loop — the previous
+    ``MemoryService.recall`` hot path — with a single normalized matmul:
+    stack *candidates* into an ``(N, D)`` matrix, normalize the query and
+    every row once, then compute all N similarities in one BLAS call.
+    Numerically equivalent (within float64 rounding — summation order
+    differs from the pure-Python left-to-right sum) to calling
+    ``lmchat.embedding.vector_math.cosine_similarity`` once per candidate,
+    including its zero-norm policy: a zero-norm query or candidate scores
+    0.0 rather than dividing by zero.
+
+    Callers must dim-guard first: every vector in *candidates* is assumed
+    to already match ``len(query)`` — ``recall()`` filters mismatched rows
+    (different embedding dimension) before calling this, exactly as it did
+    before the per-row loop was vectorized.
+
+    Args:
+        query:      Query embedding vector (length D).
+        candidates: Candidate embedding vectors, each length D.
+
+    Returns:
+        Cosine similarities in the same order as *candidates*, each in
+        [-1, 1] (0.0 when either vector is zero).
+    """
+    if not candidates:
+        return []
+
+    query_vec = np.asarray(query, dtype=np.float64)
+    candidate_matrix = np.asarray(candidates, dtype=np.float64)
+
+    query_norm = float(np.linalg.norm(query_vec))
+    if query_norm == 0.0:
+        # Matches cosine_similarity(): a zero-norm query makes the
+        # combined norm 0 for every row, so every row scores 0.0.
+        return [0.0] * len(candidates)
+
+    candidate_norms = np.linalg.norm(candidate_matrix, axis=1)
+    dots = candidate_matrix @ query_vec
+
+    # Guard zero-norm candidate rows against divide-by-zero; their result
+    # is overwritten to 0.0 by np.where regardless of what the division
+    # produces, so the placeholder divisor never affects the output.
+    safe_norms = np.where(candidate_norms > 0.0, candidate_norms, 1.0)
+    sims = np.where(candidate_norms > 0.0, dots / (safe_norms * query_norm), 0.0)
+    return [float(s) for s in sims]
 
 
 # ---------------------------------------------------------------------------
@@ -1058,6 +1112,12 @@ class MemoryService:
                     skipped_rows=len(model_rows),
                 )
                 continue
+            # Dim-guard every candidate row first (identical skip/log
+            # semantics to the old per-row loop), then score the whole
+            # surviving group in one vectorized matmul instead of an O(n)
+            # Python dot-product loop — see _batch_cosine_similarity.
+            valid_rows: list[Row] = []
+            candidate_vectors: list[list[float]] = []
             for row in model_rows:
                 candidate_vector = _unpack_embedding(row.embedding)
                 if len(qv) != len(candidate_vector):
@@ -1069,8 +1129,14 @@ class MemoryService:
                         stored_dim=len(candidate_vector),
                     )
                     continue
-                sim = _cosine_similarity(qv, candidate_vector)
-                scored.append((sim, row))
+                valid_rows.append(row)
+                candidate_vectors.append(candidate_vector)
+
+            if not valid_rows:
+                continue
+
+            sims = _batch_cosine_similarity(qv, candidate_vectors)
+            scored.extend(zip(sims, valid_rows, strict=True))
 
         scored.sort(key=lambda x: x[0], reverse=True)
 
