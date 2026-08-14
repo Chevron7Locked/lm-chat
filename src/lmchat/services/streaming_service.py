@@ -772,7 +772,20 @@ async def _assert_no_sub_session_stream_in_progress(
     engine: AsyncEngine, *, chat_id: int
 ) -> None:
     """Raise :class:`SubSessionStreamInProgressError` if *chat_id* has a
-    sub-session draft/pending_finalization row in flight.
+    sub-session row in the ``draft`` (actively streaming) state.
+
+    Blocks ONLY on ``draft`` — a genuinely in-flight stream — NOT on
+    ``pending_finalization``. A ``pending_finalization`` row is a turn whose
+    answer already completed (finalize step 1 ran); only the reaper's step-2
+    commit to ``final`` is pending. It is not an active stream, so it must not
+    block a follow-up operation on the same chat — most importantly the
+    ``/sub-session/finalize`` summary, which the FE fires the instant the
+    research turn's SSE closes (row = ``pending_finalization``): counting it as
+    "in progress" 409'd finalize against its own just-finished turn and hung the
+    panel on "Generating summary…". This mirrors the FE's D9 liveness rule
+    (``lib/subSession.ts``: only ``draft`` is "live"). The D4 "one active
+    sub-session stream per chat" invariant is still enforced — a second stream
+    can't start while the first is ``draft``.
 
     Must be called INSIDE the per-chat sub-session lock (D4) so the check
     and the subsequent draft insertion are atomic — mirrors why
@@ -786,9 +799,7 @@ async def _assert_no_sub_session_stream_in_progress(
             .select_from(sub_session_messages.join(sub_sessions))
             .where(
                 sub_sessions.c.chat_id == chat_id,
-                sub_session_messages.c.state.in_(
-                    [PersistState.DRAFT.value, PersistState.PENDING_FINALIZATION.value]
-                ),
+                sub_session_messages.c.state == PersistState.DRAFT.value,
             )
         )
         row = result.fetchone()

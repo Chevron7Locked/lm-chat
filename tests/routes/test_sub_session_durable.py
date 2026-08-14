@@ -47,6 +47,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event, func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+import lmchat.routes.chats as chats_module
 from lmchat.db.pragmas import apply_sqlite_pragmas
 from lmchat.db.schema import chats, metadata, sub_session_messages, sub_sessions, users
 from lmchat.lmstudio.types import CanonicalEvent
@@ -56,7 +57,6 @@ from lmchat.routes._dependencies import (
     get_engine_dep,
     get_integrations_service_dep,
 )
-import lmchat.routes.chats as chats_module
 from lmchat.routes.chats import (
     _get_chat_service,
     _get_message_service,
@@ -659,6 +659,142 @@ async def test_sub_session_concurrent_double_submit_blocked(db_engine: AsyncEngi
 
 
 @pytest.mark.asyncio
+async def test_sub_session_idle_timeout_tears_down_wedged_upstream(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A wedged (idle) sub-session upstream is torn down by the dead-man
+    idle-timeout instead of hanging the turn forever; the draft is salvaged
+    to FINAL.
+
+    Regression: the sub-session watcher used to lack the idle-timeout hedge
+    the main-chat watcher has, so a stalled upstream (e.g. a local model that
+    wedged mid-generation under sustained load) hung a /research turn until
+    the client gave up — live dogfood 2026-08-14, j7 continue turn stuck ~30
+    min. With the hedge, an upstream that emits no content for
+    ``lm_chat_stream_idle_timeout_sec`` is torn down and its partial salvaged.
+    """
+    monkeypatch.setenv("LM_CHAT_STREAM_IDLE_TIMEOUT_SEC", "1")
+    from lmchat.config import get_settings
+
+    get_settings.cache_clear()
+
+    chat_id = await _seed_chat(db_engine)
+    persist = _SubSessionPersistContext(engine=db_engine, chat_id=chat_id, preset_id="research")
+
+    _hang = asyncio.Event()
+
+    async def _wedged_stream(**_kwargs: object) -> AsyncIterator[CanonicalEvent]:
+        # chat.start then silence — NEVER a content delta, so last_content_ts
+        # is never bumped and the dead-man idle-timeout is what must fire.
+        yield CanonicalEvent(type="chat.start")
+        await _hang.wait()  # would hang forever without the hedge
+        yield CanonicalEvent(type="chat.end")  # pragma: no cover
+
+    lm_client = MagicMock()
+    lm_client.stream = _wedged_stream
+
+    gen = _sub_session_sse(
+        lm_client=lm_client,
+        model_id="test-model",
+        system_prompt="sys",
+        messages=[{"role": "user", "content": "wedge please"}],
+        request=_mock_request(disconnected=False),
+        persist=persist,
+    )
+
+    async def _drain() -> None:
+        async for _ in gen:
+            pass
+
+    # Without the hedge this never returns; the 1s idle-timeout must tear it
+    # down. The wall-clock guard fails a real hang FAST instead of stalling
+    # the whole suite for the 30 min the dogfood took to notice.
+    try:
+        await asyncio.wait_for(_drain(), timeout=20)
+    finally:
+        _hang.set()
+        get_settings.cache_clear()
+
+    _sess_rows, msg_rows = await _sub_session_rows(db_engine, chat_id)
+    assistant = next(m for m in msg_rows if m.role == "assistant")
+    assert assistant.state == "final", (
+        "idle-timeout salvage must force the wedged draft to final, "
+        f"got state={assistant.state!r}"
+    )
+    assert _sess_rows[0].status == "aborted", (
+        "a non-graceful (idle-timed-out) sub-session settles to 'aborted', "
+        f"got {_sess_rows[0].status!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_sub_session_idle_timeout_not_tripped_by_prefill_heartbeats(
+    db_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow-but-ALIVE upstream doing a long prefill is NOT torn down.
+
+    Regression (genesis review 2026-08-14): the dead-man idle-timeout must
+    treat ``prompt_processing.*`` heartbeats as liveness exactly like the
+    main-chat pump (streaming_service.py ~4621). A reopened multi-turn
+    sub-session re-sends its whole history, so its prefill can outlast the
+    idle timeout before the FIRST token — emitting only heartbeats, no
+    content. If those didn't reset the clock the turn would be wrongly
+    aborted mid-processing. Here the heartbeats span 2x the idle timeout,
+    then the turn completes gracefully: it must land 'final', not 'aborted'.
+    """
+    monkeypatch.setenv("LM_CHAT_STREAM_IDLE_TIMEOUT_SEC", "2")
+    from lmchat.config import get_settings
+
+    get_settings.cache_clear()
+
+    chat_id = await _seed_chat(db_engine)
+    persist = _SubSessionPersistContext(engine=db_engine, chat_id=chat_id, preset_id="research")
+
+    async def _long_prefill_then_finish(**_kwargs: object) -> AsyncIterator[CanonicalEvent]:
+        yield CanonicalEvent(type="chat.start")
+        # Long prefill: heartbeats every 0.5s for ~4s (2x the 2s idle-timeout).
+        # No content/reasoning/tool events — ONLY heartbeats keep it alive.
+        for _ in range(8):
+            await asyncio.sleep(0.5)
+            yield CanonicalEvent(type="prompt_processing.progress")
+        # First token finally arrives; graceful completion.
+        yield CanonicalEvent(type="message.delta", content="answer after long prefill")
+        yield CanonicalEvent(type="message.end")
+        yield CanonicalEvent(type="chat.end")
+
+    lm_client = MagicMock()
+    lm_client.stream = _long_prefill_then_finish
+
+    frames: list[bytes] = []
+
+    async def _drain() -> None:
+        async for frame in _sub_session_sse(
+            lm_client=lm_client,
+            model_id="test-model",
+            system_prompt="sys",
+            messages=[{"role": "user", "content": "slow prefill please"}],
+            request=_mock_request(disconnected=False),
+            persist=persist,
+        ):
+            frames.append(frame)
+
+    try:
+        await asyncio.wait_for(_drain(), timeout=30)
+    finally:
+        get_settings.cache_clear()
+
+    assert b"sub.complete" in b"".join(frames), "the prefill turn must complete gracefully"
+    sess_rows, msg_rows = await _sub_session_rows(db_engine, chat_id)
+    assert sess_rows[0].status == "final", (
+        "heartbeats during a long prefill must keep the turn alive → 'final', "
+        f"not torn down as 'aborted'; got {sess_rows[0].status!r}"
+    )
+    assistant = next(m for m in msg_rows if m.role == "assistant")
+    assert assistant.state == "final"
+    assert assistant.content == "answer after long prefill"
+
+
+@pytest.mark.asyncio
 async def test_sub_session_stream_aclose_mid_stream_salvages_cleanly(
     db_engine: AsyncEngine,
 ) -> None:
@@ -802,6 +938,58 @@ async def _seed_sub_session(
                 sub_session_messages.insert().values(sub_session_id=sub_session_id, **msg)
             )
     return sub_session_id
+
+
+@pytest.mark.asyncio
+async def test_in_progress_guard_ignores_pending_finalization(
+    db_engine: AsyncEngine,
+) -> None:
+    """The sub-session in-progress guard blocks ONLY on a genuinely-streaming
+    (``draft``) row — a ``pending_finalization`` row (a completed turn awaiting
+    the reaper's step-2 commit) must NOT block a follow-up operation.
+
+    Regression: finalize fired the instant the research turn's SSE closed (row =
+    ``pending_finalization``) and 409'd against its own just-finished turn,
+    hanging the panel on "Generating summary…". Mirrors the FE D9 liveness rule.
+    """
+    from lmchat.services.streaming_service import (
+        _assert_no_sub_session_stream_in_progress,
+    )
+
+    chat_id = await _seed_chat(db_engine)
+    await _seed_sub_session(
+        db_engine,
+        chat_id=chat_id,
+        status="active",
+        messages=[
+            {"role": "user", "content": "q", "state": "final"},
+            {"role": "assistant", "content": "done", "state": "pending_finalization"},
+        ],
+    )
+    # Must NOT raise — pending_finalization is not an in-flight stream.
+    await _assert_no_sub_session_stream_in_progress(db_engine, chat_id=chat_id)
+
+
+@pytest.mark.asyncio
+async def test_in_progress_guard_still_blocks_draft(db_engine: AsyncEngine) -> None:
+    """The guard STILL blocks an actively-streaming (``draft``) sub-session row —
+    the D4 'one active sub-session stream per chat' invariant is preserved."""
+    from lmchat.services.streaming_service import (
+        _assert_no_sub_session_stream_in_progress,
+    )
+
+    chat_id = await _seed_chat(db_engine)
+    await _seed_sub_session(
+        db_engine,
+        chat_id=chat_id,
+        status="active",
+        messages=[
+            {"role": "user", "content": "q", "state": "final"},
+            {"role": "assistant", "content": "partial", "state": "draft"},
+        ],
+    )
+    with pytest.raises(SubSessionStreamInProgressError):
+        await _assert_no_sub_session_stream_in_progress(db_engine, chat_id=chat_id)
 
 
 def test_list_sub_sessions_happy_newest_first(

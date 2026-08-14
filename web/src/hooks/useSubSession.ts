@@ -359,8 +359,11 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
   // restore its transcript into the panel.
   //
   // "Genuinely still live" (D9) is keyed off the newest
-  // `sub_session_messages.state` being `draft` or `pending_finalization`
-  // — NOT `sub_sessions.status` alone, which can briefly still read
+  // `sub_session_messages.state` being exactly `draft` — a
+  // `pending_finalization` row is a completed turn awaiting the reaper's
+  // final commit and is deliberately NOT auto-restored (mirrors
+  // `isSubSessionLive` / `LIVE_MESSAGE_STATES` in lib/subSession.ts). It is
+  // NOT keyed off `sub_sessions.status` alone, which can briefly still read
   // `active` after a graceful finish (the outer teardown's `final`
   // transition is a separate write that can lag the terminal SSE frame).
   // A finished/aborted session is deliberately NOT auto-restored here —
@@ -455,6 +458,31 @@ export function useSubSession(args: UseSubSessionArgs): UseSubSessionResult {
       },
     });
   }, [subSession, chatId, resolveTurnModel, subSessionSSE, push]);
+
+  // Failure-mode robustness: if the finalize (summary) stream ERRORS, clear
+  // `finalizing` and surface the error — otherwise the panel hangs on
+  // "Generating summary…" forever (dogfood-found: a sub-session/finalize 409 or
+  // any transport error left it stuck; the onComplete path clears the flag but
+  // there was no error path). The BE no longer 409s finalize against a
+  // just-finished (pending_finalization) turn, but a finalize can still fail for
+  // real reasons — a genuine concurrent stream, a network drop — and that must
+  // never hang the UI. Fires once: clearing `finalizing` gates the re-fire.
+  useEffect(() => {
+    if (subSessionSSE.state.status === "error" && subSession?.finalizing) {
+      setSubSession((prev) => (prev ? { ...prev, finalizing: false } : null));
+      push({
+        variant: "error",
+        message:
+          subSessionSSE.state.error?.message ??
+          "Couldn't generate the summary — try again.",
+      });
+    }
+  }, [
+    subSessionSSE.state.status,
+    subSessionSSE.state.error,
+    subSession?.finalizing,
+    push,
+  ]);
 
   // Inject the finalized summary into the main chat and exit sub-session.
   const handleSubSessionInject = useCallback((): void => {

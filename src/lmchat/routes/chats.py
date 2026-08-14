@@ -48,6 +48,8 @@ from lmchat.services.auth_service import User
 from lmchat.services.integrations_service import IntegrationsService
 from lmchat.services.streaming_errors import SubSessionStreamInProgressError
 from lmchat.services.streaming_service import (
+    _CONTENT_BEARING,
+    _KEEPALIVE_HEARTBEAT,
     StreamingService,
     _accumulate_tool_call,
     _append_turn_to_sub_session,
@@ -2309,6 +2311,23 @@ class _SubSessionStreamDone(Exception):
     """
 
 
+class _SubSessionStreamStalled(Exception):
+    """Sentinel raised inside the TaskGroup when the upstream goes idle.
+
+    The dead-man idle-timeout hedge for sub-session streams — the exact
+    parity the sub-session watcher used to lack (main-chat has had it since
+    launch; its absence let a stalled upstream hang a sub-session turn
+    indefinitely, live-dogfood-found 2026-08-14: a /research continue turn
+    whose local model wedged under sustained load never terminated, so the
+    draft row never reached a terminal state). Raising it cancels the
+    ``_sub_session_core`` sibling; the ``except*`` clause swallows it so the
+    SSE stream simply closes, and the single outer ``finally`` salvages
+    whatever partial content was coalesced (draft -> FINAL) exactly as it
+    does for any other non-graceful terminal. Carries the idle seconds for
+    the log line only.
+    """
+
+
 class _SubSessionPersistContext(NamedTuple):
     """Non-incognito persistence context for a durable sub-session stream.
 
@@ -2455,7 +2474,18 @@ async def _sub_session_sse(
     # Shared with the disconnect watcher + _sub_session_core via closure —
     # single-threaded event loop, no locking needed (mirrors _state in
     # StreamingService.stream_chat).
-    _pstate: dict[str, object] = {"done": False}
+    # Dead-man idle-timeout hedge (parity with the main-chat watcher,
+    # streaming_service.py ~4394): if the upstream emits no content for
+    # _idle_timeout_sec, the watcher below tears the stream down so a wedged
+    # local model can never hang a sub-session turn indefinitely. Same knob
+    # as main-chat (``lm_chat_stream_idle_timeout_sec``) — a genuinely slow
+    # but *alive* model keeps bumping ``last_content_ts`` on every delta.
+    from time import monotonic  # noqa: PLC0415
+
+    from lmchat.config import get_settings as _get_settings  # noqa: PLC0415
+
+    _idle_timeout_sec: float = float(_get_settings().lm_chat_stream_idle_timeout_sec)
+    _pstate: dict[str, object] = {"done": False, "last_content_ts": monotonic()}
     _graceful: dict[str, bool] = {"value": False}
     coalesce = _CoalesceTimer(engine=engine, message_id=msg_id, table=sub_session_messages)
 
@@ -2515,11 +2545,21 @@ async def _sub_session_sse(
         )
 
     async def _watch_disconnect() -> None:
-        """Watch for client disconnect via receive(); abort the draft.
+        """Watch for client disconnect via receive() AND enforce the
+        dead-man idle-timeout; abort or tear down the draft.
 
         See the main-chat ``_watch_disconnect`` (streaming_service.py
-        ~3941) for the full rationale — mirrored here without the
-        idle-timeout dead-man-hedge (not requested for sub-sessions).
+        ~3941) for the full rationale. This now mirrors it INCLUDING the
+        idle-timeout dead-man-hedge: on the same ``request.receive()`` poll
+        tick it raises :class:`_SubSessionStreamStalled` if the upstream
+        emits no content for ``_idle_timeout_sec``. The TaskGroup then
+        cancels ``_sub_session_core`` and the outer ``finally`` salvages the
+        partial (draft -> FINAL). Unlike main-chat there is no in-body grace
+        window / error frame: the sub-session core has no stall-frame path,
+        and a wedged upstream is blocked awaiting bytes so it could not emit
+        one anyway — raising is the only thing that can unblock it. Without
+        this hedge a stalled upstream hung the turn until the client gave up
+        (live dogfood 2026-08-14: a /research continue turn under load).
         """
         assert request is not None
         while not _pstate["done"]:
@@ -2528,7 +2568,26 @@ async def _sub_session_sse(
                     request.receive(), timeout=_SUB_SESSION_DISCONNECT_POLL_SEC
                 )
             except TimeoutError:
-                continue
+                _msg = None
+
+            # Dead-man idle-timeout, checked every tick regardless of
+            # heartbeat flow (mirrors streaming_service.py ~4394). A slow but
+            # ALIVE model keeps bumping ``last_content_ts`` on every delta;
+            # only a genuinely stalled/wedged upstream trips this.
+            _last_ts = _pstate["last_content_ts"]
+            assert isinstance(_last_ts, (int, float)), "last_content_ts must be numeric"
+            _idle_s = monotonic() - float(_last_ts)
+            if _idle_s > _idle_timeout_sec and not _pstate["done"]:
+                log.warning(
+                    "sub_session.stream.idle_timeout",
+                    chat_id=persist.chat_id,
+                    sub_session_id=sub_session_id,
+                    msg_id=msg_id,
+                    idle_s=round(_idle_s, 1),
+                    idle_timeout_sec=_idle_timeout_sec,
+                )
+                raise _SubSessionStreamStalled(_idle_s)
+
             if _msg is not None and _msg.get("type") == "http.disconnect":
                 log.info(
                     "sub_session.stream.disconnected",
@@ -2574,6 +2633,18 @@ async def _sub_session_sse(
                 raise _SubSessionStreamDone()
         except* _SubSessionStreamDone:
             pass  # Normal completion — TaskGroup cancelled the watcher.
+        except* _SubSessionStreamStalled:
+            # Dead-man idle-timeout fired (already logged in the watcher):
+            # swallow so the SSE closes cleanly. The outer `finally` salvages
+            # the partial (draft -> FINAL); `_graceful` stays False, so
+            # `sub_sessions.status` settles to 'aborted' unless a prior
+            # graceful turn on this row already set it 'final'. Mirrors the
+            # `except* _SubSessionStreamDone` swallow above.
+            log.warning(
+                "sub_session.stream.stalled_torn_down",
+                sub_session_id=sub_session_id,
+                msg_id=msg_id,
+            )
         except* GeneratorExit:
             # A consumer that stops iterating (Starlette exhausting the
             # response, or a test aclose()) throws GeneratorExit into
@@ -2781,6 +2852,24 @@ async def _sub_session_core(
     # None: ...` at each of the ~10 call sites below) purely to keep this
     # already-large function's control-flow graph within pyright's
     # per-function complexity budget — behaviorally identical to inlining.
+    from time import monotonic  # noqa: PLC0415
+
+    def _touch_idle_liveness(etype: str) -> None:
+        """Reset the dead-man idle clock on a content/heartbeat event.
+
+        Hoisted into a closure (like the persist closures below) to keep
+        ``_sub_session_core`` within pyright's per-function complexity budget.
+        Mirrors the main pump (streaming_service.py ~4621): any
+        content-bearing OR keepalive-heartbeat event — crucially including
+        ``prompt_processing.*`` prefill on a large composed context (a
+        reopened multi-turn sub-session re-sends its whole history) — proves
+        the upstream is alive, so a slow-but-alive model doing minutes of
+        prompt-processing before its first token is never torn down.
+        """
+        if persist_state is not None and (
+            etype in _CONTENT_BEARING or etype in _KEEPALIVE_HEARTBEAT
+        ):
+            persist_state["last_content_ts"] = monotonic()
 
     async def _persist_content_delta(delta_text: str) -> None:
         """Feed one message.delta chunk to the coalesce timer + persist_state.
@@ -2908,6 +2997,7 @@ async def _sub_session_core(
             async for event in _stream_iter:
                 etype = event.type
                 _event_tally[etype] = _event_tally.get(etype, 0) + 1
+                _touch_idle_liveness(etype)
                 if etype == "message.delta" and event.content:
                     accumulated.append(event.content)
                     await _persist_content_delta(event.content)
