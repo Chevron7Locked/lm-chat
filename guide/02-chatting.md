@@ -24,7 +24,7 @@ If your browser supports speech recognition, a microphone button sits in the com
 
 ## Streaming and reasoning
 
-Replies stream in token by token, with a soft caret blinking at the leading edge while the model writes. You can read along as the answer forms, and the **Stop** button replaces Send during a stream — click it to end the reply early. A stopped reply keeps whatever text arrived and is marked **Stopped**. If a reply runs into the model's output limit, it's marked **Cut off**; send another message to have the model continue.
+Replies stream in token by token, with a soft caret blinking at the leading edge while the model writes. You can read along as the answer forms. The composer stays open while a reply streams: a **Stop** button lets you end the reply early, and if you type and send another message mid-stream it's **queued** — shown as a pending row and sent automatically once the current reply finishes. Pressing Stop leaves a queued message waiting as a draft rather than firing it into an aborted turn. A stopped reply keeps whatever text arrived and is marked **Stopped**. If a reply runs into the model's output limit, it's marked **Cut off**; send another message to have the model continue.
 
 Reasoning models stream their thinking separately. You'll see a block labeled **Thinking…** while the model reasons, which switches to **Reasoning** once the answer begins. This block is collapsed by default — expand it to read the chain of thought, or leave it closed. A spell of "Thinking…" with no visible answer yet is normal for these models, not a hang; the reply follows once the model finishes reasoning. To expand or collapse every reasoning block at once, press **Cmd/Ctrl+J**.
 
@@ -38,6 +38,7 @@ Hover a message (or focus it) to reveal an action bar. Which actions appear depe
 
 - **Edit** (your messages) — rewrite a message you already sent. Saving re-runs the conversation from that point, so the model answers your revised wording. Press **Cmd/Ctrl+Enter** in the edit box to save, or **Esc** to cancel.
 - **Regenerate** (replies) — ask the model for a fresh take on the same prompt, replacing the current reply.
+- **Fork from here** (replies) — branch the conversation into a new chat containing everything up to and including this message, leaving the original untouched. (The `/fork` command does the same from the latest message.)
 - **Copy** (your messages and replies) — copy the message text to your clipboard.
 - **Delete** (your messages and replies) — remove a single message. LM Chat asks you to confirm first, and the removal can't be undone.
 

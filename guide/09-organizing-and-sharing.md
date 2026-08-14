@@ -1,6 +1,6 @@
 # Organizing and sharing
 
-Once you have more than a handful of chats, you'll want to keep them tidy and, now and then, hand one to someone else. This page covers the four tools LM Chat gives you for that: folders, pinned messages, share links, and incognito chats.
+Once you have more than a handful of chats, you'll want to keep them tidy and, now and then, hand one to someone else. This page covers the tools LM Chat gives you for that: folders, tags, archiving, pinned messages, share links, and incognito chats.
 
 If you're new here, start with [00-quickstart.md](00-quickstart.md) and [02-chatting.md](02-chatting.md) first. For the bigger organizing unit — grouping chats, files, and instructions together — see [06-projects.md](06-projects.md).
 
@@ -29,6 +29,14 @@ You can also right-click (or open the row's context menu on) a chat to **Move to
 Pinning lifts a chat out of its folder and into the **Pinned** band at the very top of the sidebar — handy for the one or two conversations you return to constantly. Pin and unpin from the chat row's context menu, or from the **Pin** action in the chat's top-bar menu while you're reading it. Pinned chats keep their own drag order.
 
 Pinning a *chat* is different from pinning a *message* (below) and from pinning an *insight* to memory — three separate features that happen to share the word "pin."
+
+### Tag a chat
+
+Tags are free-form labels you attach to a chat to group or find it across folders. Open the chat row's **tags** control in the sidebar, type a tag, and confirm; a small count badge then shows on the row. A chat can hold up to 20 tags (each up to 256 characters). Tags are private to your account and independent of folders — a chat can sit in one folder yet carry several tags.
+
+### Archive a chat
+
+Archiving hides a chat from your everyday list without deleting it. Use the **archive** action on the chat row; the chat drops out of the sidebar's main bands into a collapsible **Archived** section at the bottom. Expand that section and use **unarchive** to bring a chat back to the active list at any time. Archiving is reversible and keeps the whole conversation — the tidy alternative to deleting a chat you're done with but don't want to lose.
 
 ### Rename and delete chats
 

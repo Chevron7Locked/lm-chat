@@ -46,16 +46,18 @@ Create, read, organize, fork, compact, and share chats. Per-chat RAG mode, title
 | Method | Path | Purpose | Auth |
 | --- | --- | --- | --- |
 | POST | `/api/chats` | Create a chat | User |
-| GET | `/api/chats` | List chats | User |
+| GET | `/api/chats` | List chats (`?include_archived=true` to include archived) | User |
 | PATCH | `/api/chats/reorder` | Reorder chats | User |
 | GET | `/api/chats/{chat_id}` | Fetch a chat with its messages | User |
-| PATCH | `/api/chats/{chat_id}` | Update chat metadata (title, folder, settings) | User |
+| PATCH | `/api/chats/{chat_id}` | Update chat metadata (title, folder, tags, settings) | User |
 | DELETE | `/api/chats/{chat_id}` | Delete a chat | User |
 | GET | `/api/chats/{chat_id}/rag_mode` | Read the chat's RAG mode | User |
 | DELETE | `/api/chats/{chat_id}/messages` | Clear all messages in a chat | User |
 | POST | `/api/chats/{chat_id}/messages` | Append a message | User |
 | POST | `/api/chats/{chat_id}/messages/{message_id}/regenerate` | Regenerate a reply | User |
-| POST | `/api/chats/{chat_id}/fork` | Fork the chat | User |
+| POST | `/api/chats/{chat_id}/fork` | Fork the chat (from any message, via `at_message_id`) | User |
+| POST | `/api/chats/{chat_id}/archive` | Archive a chat (hidden from the default list) | User |
+| POST | `/api/chats/{chat_id}/unarchive` | Unarchive a chat | User |
 | POST | `/api/chats/{chat_id}/compact` | Summarize and archive the oldest message span (hybrid compaction) | User |
 | GET | `/api/chats/{chat_id}/compactions` | List a chat's compaction spans (folded recall tabs) | User |
 | GET | `/api/chats/{chat_id}/compactions/{compaction_id}/messages` | Read the archived messages for one compaction span | User |
