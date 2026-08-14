@@ -399,8 +399,9 @@ type LiveBackendFixture = {
   /** Pre-registered admin test password. */
   adminPassword: string;
   /**
-   * Auto-fixture: truncates per-test transient tables (chats, messages,
-   * documents, pinned_insights, shares, folders, prompts) BEFORE each
+   * Auto-fixture: truncates per-test transient tables (chats, sub_sessions,
+   * sub_session_messages, messages, documents, pinned_insights, shares,
+   * folders, prompts) BEFORE each
    * test runs.  Preserves the `users` table so seeded testUsername /
    * adminUsername stay valid.  Without this every test sees the
    * accumulated state of every prior test in the worker, which causes
@@ -630,8 +631,17 @@ export const test = base.extend<LiveBackendFixture>({
       // same worker). Deleting document_chunks also fires the FTS5 delete
       // trigger, keeping document_chunks_fts in sync. `projects` is cleared so
       // project-scoped RAG/memory isolation tests start from a clean slate.
+      // `sub_session_messages`/`sub_sessions` MUST be cleared too (and before
+      // `chats`, their parent) — otherwise a prior spec's sub-sessions survive
+      // this truncation, and because `chats` DOES reset (ids restart at 1) the
+      // next spec's recycled chat_id inherits the orphans. That made j7's
+      // `GET /chats/{id}/sub-sessions` count report 3 (its own + two leaked from
+      // j3's research turn + summary) instead of 1 — a misleading diagnostic and
+      // a fragile status assertion, root-caused via instrumented dogfood traces
+      // 2026-08-14 (NOT a product bug: the app creates one session per turn).
       const tables = [
-        "document_chunks", "chats", "messages", "documents", "projects",
+        "document_chunks", "sub_session_messages", "sub_sessions",
+        "chats", "messages", "documents", "projects",
         "pinned_insights", "shares", "folders", "prompts", "model_overrides",
       ];
       const script = [
