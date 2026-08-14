@@ -13,7 +13,29 @@ Algorithm
 4. **Reciprocal Rank Fusion (RRF)**: combine keyword and vector ranks.
    Score = Σ 1/(k + rank_i) with canonical k=60 (env-overridable via
    ``LM_CHAT_RRF_K``).
-5. Return top-k chunks with document metadata.
+5. **Optional rerank** (``LM_CHAT_RAG_RERANK_MODE``, default "off"):
+   see "Rerank stage" below.
+6. Return top-k chunks with document metadata.
+
+Rerank stage
+------------
+There is no cross-encoder / reranker model in this pipeline by default.
+Investigated and rejected for now (flag an operator decision before
+adding either):
+
+- LM Studio rerank endpoint: the app only talks to LM Studio's
+  OpenAI-compat surface (``/v1/chat/completions``, ``/v1/embeddings``,
+  ``/v1/models`` — see ``embedding/client.py``); there is no
+  ``/v1/rerank`` there to call.
+- Cross-encoder dependency: no ``sentence-transformers`` (or similar) in
+  ``pyproject.toml``; adding one would be a new heavy runtime
+  dependency + a reranker model the app doesn't ship.
+
+Instead, ``LM_CHAT_RAG_RERANK_MODE=mmr`` opts into a dependency-free
+Maximal Marginal Relevance diversity rerank (:func:`_mmr_rerank`) over an
+oversampled RRF pool, using only the embeddings already loaded for the
+vector stage — no new model, no new library, no extra network round
+trip. Default stays "off": the plain-RRF order is returned unchanged.
 
 Tenant isolation
 ----------------
@@ -171,6 +193,112 @@ def _rrf_score(ranks: list[int], k: int) -> float:
         Sum of 1/(k + rank) over all ranks.
     """
     return sum(1.0 / (k + r) for r in ranks)
+
+
+def _mmr_rerank(
+    *,
+    ranked_ids: list[int],
+    relevance_scores: dict[int, float],
+    embeddings: dict[int, list[float]],
+    top_k: int,
+    lambda_mult: float,
+) -> list[int]:
+    """Greedy Maximal Marginal Relevance rerank over a relevance-ordered pool.
+
+    Dependency-free diversity rerank: reuses the pure-Python cosine helper
+    already imported for the vector stage (:func:`_cosine_similarity`), so
+    it needs no new model, endpoint, or library. Investigated alternatives
+    (see module docstring "Rerank stage" section): LM Studio's OpenAI-compat
+    surface (the only backend this app talks to) exposes no rerank/
+    cross-encoder endpoint, and no cross-encoder dependency (e.g.
+    sentence-transformers) is present in ``pyproject.toml`` — adding one
+    would be a new heavy dependency, which is exactly what this function
+    avoids.
+
+    Each pick greedily maximizes::
+
+        lambda * relevance(c) - (1 - lambda) * max_similarity(c, selected)
+
+    where ``relevance`` is the fused score min-max normalised to [0, 1]
+    over *ranked_ids*, and ``max_similarity`` is the highest cosine
+    similarity between candidate *c* and any chunk already selected.
+    Candidates lacking a comparable embedding for a given already-selected
+    chunk (dimension mismatch — different embedding models, mirroring the
+    dim guard used elsewhere in this module) are simply excluded from that
+    one comparison; a candidate with no embedding at all degrades to
+    similarity 0 (never penalised for redundancy, ranked on relevance
+    alone) — so unusual multi-model / no-vector rows never get silently
+    dropped, only left unaffected by the diversity term.
+
+    ``lambda_mult >= 1.0`` degenerates to pure-relevance order — identical
+    to skipping MMR entirely (used as the escape hatch for the default
+    "off" mode's exact-match guarantee at the caller).
+
+    Reference: Carbonell & Goldstein (1998), "The Use of MMR,
+    Diversity-Based Reranking for Reordering Documents and Producing
+    Summaries."
+
+    Args:
+        ranked_ids:        Candidate chunk IDs already sorted by fused
+            relevance, descending (an oversampled RRF-ranked pool).
+        relevance_scores:  chunk_id -> fused relevance score (RRF score).
+            Must contain every id in *ranked_ids*.
+        embeddings:        chunk_id -> embedding vector. May omit ids with
+            no embedding available; those are treated as similarity 0.
+        top_k:             Number of ids to select.
+        lambda_mult:       Trade-off in [0, 1]; 1.0 = pure relevance,
+            0.0 = pure diversity.
+
+    Returns:
+        Reordered chunk-id list, length ``min(top_k, len(ranked_ids))``.
+    """
+    if not ranked_ids:
+        return []
+    if lambda_mult >= 1.0 or len(ranked_ids) <= 1:
+        return ranked_ids[:top_k]
+
+    pool_scores = {cid: relevance_scores[cid] for cid in ranked_ids}
+    lo, hi = min(pool_scores.values()), max(pool_scores.values())
+    spread = hi - lo
+    norm_relevance = (
+        dict.fromkeys(pool_scores, 1.0)
+        if spread < 1e-12
+        else {cid: (v - lo) / spread for cid, v in pool_scores.items()}
+    )
+
+    remaining = list(ranked_ids)
+    selected: list[int] = []
+    selected_vecs: list[list[float]] = []
+
+    while remaining and len(selected) < top_k:
+        if not selected:
+            # First pick is always the top relevance hit — identical to
+            # the unranked order at rank 1, same as plain RRF.
+            pick = remaining[0]
+        else:
+            pick = remaining[0]
+            best_mmr = float("-inf")
+            for cid in remaining:
+                cand_vec = embeddings.get(cid)
+                max_sim = 0.0
+                if cand_vec:
+                    for sel_vec in selected_vecs:
+                        if len(cand_vec) != len(sel_vec):
+                            continue
+                        sim = _cosine_similarity(cand_vec, sel_vec)
+                        if sim > max_sim:
+                            max_sim = sim
+                mmr = lambda_mult * norm_relevance[cid] - (1 - lambda_mult) * max_sim
+                if mmr > best_mmr:
+                    best_mmr = mmr
+                    pick = cid
+        selected.append(pick)
+        vec = embeddings.get(pick)
+        if vec:
+            selected_vecs.append(vec)
+        remaining.remove(pick)
+
+    return selected
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +570,11 @@ async def retrieve(
     """
     settings = get_settings()
     rrf_k: int = getattr(settings, "lm_chat_rrf_k", _DEFAULT_RRF_K)
+    # Optional post-fusion rerank stage — see the module docstring's
+    # "Rerank stage" section. Default "off" is a strict no-op: the plain
+    # RRF order below is untouched.
+    rerank_mode: str = getattr(settings, "lm_chat_rag_rerank_mode", "off")
+    rerank_lambda: float = getattr(settings, "lm_chat_rag_rerank_mmr_lambda", 0.5)
 
     # Read-time embedding-model resolution. Resolution order with NULL
     # fallback:
@@ -677,9 +810,6 @@ async def retrieve(
             ranks.append(vec_ranks[chunk_id])
         rrf_scores[chunk_id] = _rrf_score(ranks, rrf_k)
 
-    # Sort by RRF score descending, take top_k.
-    sorted_ids = sorted(rrf_scores, key=lambda cid: rrf_scores[cid], reverse=True)[:top_k]
-
     # Build result list from the cached rows (vec scan loaded all rows).
     row_by_id: dict[int, Row[Any]] = {row.id: row for _, row in scored}
 
@@ -704,6 +834,33 @@ async def retrieve(
         for row in extra_rows:
             row_by_id[row.id] = row
 
+    # Sort by RRF score descending.
+    ranked_ids = sorted(rrf_scores, key=lambda cid: rrf_scores[cid], reverse=True)
+
+    # ------------------------------------------------------------------
+    # Step 3b — Optional MMR rerank (default "off" → identical top_k slice)
+    # ------------------------------------------------------------------
+    if rerank_mode == "mmr":
+        # Same 4x oversampling window already used by the FTS/vector
+        # candidate stages above, so the diversity rerank has real
+        # alternatives to pick from beyond the final top_k.
+        pool = ranked_ids[: top_k * 4]
+        pool_embeddings: dict[int, list[float]] = {}
+        for cid in pool:
+            row = row_by_id.get(cid)
+            blob = getattr(row, "embedding", None) if row is not None else None
+            if blob:
+                pool_embeddings[cid] = _unpack_embedding(blob)
+        sorted_ids = _mmr_rerank(
+            ranked_ids=pool,
+            relevance_scores=rrf_scores,
+            embeddings=pool_embeddings,
+            top_k=top_k,
+            lambda_mult=rerank_lambda,
+        )
+    else:
+        sorted_ids = ranked_ids[:top_k]
+
     hits: list[ChunkHit] = []
     for chunk_id in sorted_ids:
         row = row_by_id.get(chunk_id)
@@ -727,5 +884,6 @@ async def retrieve(
         vec_candidates=len(vec_ranks),
         rrf_hits=len(hits),
         top_k=top_k,
+        rerank_mode=rerank_mode,
     )
     return hits

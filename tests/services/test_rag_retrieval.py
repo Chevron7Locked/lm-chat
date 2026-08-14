@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from lmchat.db.schema import document_chunks
 from lmchat.services.models_service import Capabilities, ModelInfo
-from lmchat.services.retrieval_service import retrieve
+from lmchat.services.retrieval_service import _mmr_rerank, retrieve
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -81,6 +81,75 @@ def _make_embedding_client(query_vec: list[float]) -> MagicMock:
     client.embed_one = AsyncMock(return_value=query_vec)
     client.embed_batch = AsyncMock(return_value=[query_vec])
     return client
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _mmr_rerank (pure function, no DB)
+# ---------------------------------------------------------------------------
+
+
+def test_mmr_rerank_lambda_one_is_pure_relevance() -> None:
+    """lambda_mult=1.0 degenerates to the plain relevance-ordered top_k —
+    the exact-match guarantee the "off" mode's default relies on."""
+    ranked_ids = [1, 2, 3]
+    relevance = {1: 1.0, 2: 0.9, 3: 0.5}
+    embeddings = {1: [1.0, 0.0], 2: [0.99, 0.01], 3: [0.0, 1.0]}
+
+    result = _mmr_rerank(
+        ranked_ids=ranked_ids,
+        relevance_scores=relevance,
+        embeddings=embeddings,
+        top_k=2,
+        lambda_mult=1.0,
+    )
+    assert result == [1, 2]
+
+
+def test_mmr_rerank_prefers_diverse_candidate_over_near_duplicate() -> None:
+    """A lower-relevance but diverse candidate can outrank a higher-relevance
+    near-duplicate of an already-selected chunk — the whole point of MMR."""
+    ranked_ids = [1, 2, 3]
+    relevance = {1: 1.0, 2: 0.9, 3: 0.5}
+    embeddings = {
+        1: [1.0, 0.0],  # selected first (top relevance)
+        2: [0.99, 0.01],  # near-duplicate of 1 — high redundancy penalty
+        3: [0.0, 1.0],  # orthogonal to 1 — no redundancy penalty
+    }
+
+    result = _mmr_rerank(
+        ranked_ids=ranked_ids,
+        relevance_scores=relevance,
+        embeddings=embeddings,
+        top_k=2,
+        lambda_mult=0.3,
+    )
+    assert result == [1, 3], "diverse candidate 3 should displace redundant candidate 2"
+
+
+def test_mmr_rerank_missing_embedding_not_penalized() -> None:
+    """Candidates absent from the embeddings map get similarity 0 (never
+    penalised for redundancy) rather than raising or being silently dropped."""
+    ranked_ids = [1, 2, 3]
+    relevance = {1: 1.0, 2: 0.9, 3: 0.5}
+    embeddings = {1: [1.0, 0.0]}  # 2 and 3 have no embedding on file
+
+    result = _mmr_rerank(
+        ranked_ids=ranked_ids,
+        relevance_scores=relevance,
+        embeddings=embeddings,
+        top_k=2,
+        lambda_mult=0.3,
+    )
+    # Neither 2 nor 3 has an embedding to compare against, so relevance
+    # alone decides — same order as plain relevance ranking.
+    assert result == [1, 2]
+
+
+def test_mmr_rerank_empty_input_returns_empty() -> None:
+    result = _mmr_rerank(
+        ranked_ids=[], relevance_scores={}, embeddings={}, top_k=5, lambda_mult=0.5
+    )
+    assert result == []
 
 
 @pytest.fixture()
@@ -433,3 +502,62 @@ async def test_retrieve_fts_only_when_no_embedding_model(engine: AsyncEngine) ->
     assert "ORCHIDKEY" in hits[0].content
     # The vector stage was skipped entirely → the query was never embedded.
     client.embed_one.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_retrieve_mmr_rerank_prefers_diversity_over_near_duplicate(
+    engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LM_CHAT_RAG_RERANK_MODE=mmr reorders the fused top_k away from a
+    near-duplicate pile-up toward a more diverse pick. Default ("off")
+    keeps the plain-RRF order — proven here directly, and by every other
+    test in this file, none of which sets the flag.
+    """
+    from lmchat.config import get_settings
+
+    await _insert_user(engine, 1)
+    await _insert_document(engine, 1, 1, "doc1")
+
+    # chunk 0: exact match to the query vector (highest relevance).
+    # chunk 1: near-duplicate of chunk 0 (high relevance, high redundancy).
+    # chunk 2: lower relevance but diverse from chunk 0.
+    # No chunk text shares a token with the query, so FTS contributes
+    # nothing — ranking is driven entirely by vector similarity, keeping
+    # the RRF math (and thus the expected MMR pick) deterministic.
+    await _insert_chunk(engine, 1, 1, 0, "alpha content one", [1.0, 0.0, 0.0, 0.0])
+    await _insert_chunk(engine, 2, 1, 1, "beta content two", [0.99, 0.01, 0.0, 0.0])
+    await _insert_chunk(engine, 3, 1, 2, "gamma content three", [0.3, 1.0, 0.0, 0.0])
+
+    svc = _make_models_service()
+    client = _make_embedding_client([1.0, 0.0, 0.0, 0.0])
+
+    # Default ("off"): plain RRF keeps the two most vector-similar
+    # (redundant) hits.
+    default_hits = await retrieve(
+        query="zzzznomatchtoken",
+        user_id=1,
+        top_k=2,
+        engine=engine,
+        embedding_client=client,
+        models_service=svc,
+    )
+    assert [h.ordinal for h in default_hits] == [0, 1]
+
+    # Enable MMR rerank (default lambda=0.5) — the diverse-but-lower-relevance
+    # chunk 2 should displace the near-duplicate chunk 1 in the top_k=2 slice.
+    monkeypatch.setenv("LM_CHAT_RAG_RERANK_MODE", "mmr")
+    get_settings.cache_clear()
+    try:
+        mmr_hits = await retrieve(
+            query="zzzznomatchtoken",
+            user_id=1,
+            top_k=2,
+            engine=engine,
+            embedding_client=client,
+            models_service=svc,
+        )
+    finally:
+        monkeypatch.delenv("LM_CHAT_RAG_RERANK_MODE", raising=False)
+        get_settings.cache_clear()
+
+    assert [h.ordinal for h in mmr_hits] == [0, 2]
