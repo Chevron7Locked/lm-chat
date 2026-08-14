@@ -108,6 +108,13 @@ export interface ChatSummary {
     detached_at: number;
     system_prompt_hash: string;
   } | null;
+  /** Free-form user tags. Empty array = no tags. */
+  tags: string[];
+  /**
+   * ISO timestamp the chat was archived at; null means it's active.
+   * Soft — archiving never touches the chat's messages.
+   */
+  archived_at: string | null;
 }
 
 export interface MessageRecord {
@@ -182,6 +189,10 @@ function toChatSummary(c: ChatWire): ChatSummary {
     incognito: c.incognito,
     incognito_expires_at: c.incognito_expires_at ?? null,
     project_id: c.project_id ?? null,
+    // Boundary tolerance: older backends omit `tags` — default to no tags
+    // rather than letting `.map`/`.includes` call sites crash on undefined.
+    tags: tagsOrEmpty(c.tags),
+    archived_at: c.archived_at ?? null,
   };
 }
 
@@ -193,6 +204,16 @@ function toChatSummary(c: ChatWire): ChatSummary {
  */
 function hasMoreOrFalse(v: unknown): boolean {
   return v === true;
+}
+
+/**
+ * Runtime tolerance (tested): older backends omit `tags` even though the
+ * generated type marks it required on the modern wire. The `unknown`
+ * parameter keeps the legacy-absence branch honest under the type-aware
+ * lint — same pattern as `hasMoreOrFalse` above.
+ */
+function tagsOrEmpty(v: unknown): string[] {
+  return Array.isArray(v) ? (v as string[]) : [];
 }
 
 /** Normalise one generated Message into the UI-facing MessageRecord. */
@@ -288,6 +309,11 @@ interface UpdateChatBody {
    * ``String(n)`` to set, ``""`` to clear.
    */
   repeat_warning_cut_k?: string | undefined;
+  /**
+   * Replaces the chat's whole tag list. Sent as a JSON-encoded array —
+   * mirrors the ``ab_compare`` JSON-blob wire shape.
+   */
+  tags?: string[] | undefined;
 }
 
 // ─── Query keys ────────────────────────────────────────────────────────────
@@ -465,6 +491,7 @@ export function useUpdateChat(chatId: number) {
       if (body.title !== undefined) params.set("title", body.title);
       if (body.folder !== undefined) params.set("folder", body.folder);
       if (body.pinned !== undefined) params.set("pinned", String(body.pinned));
+      if (body.tags !== undefined) params.set("tags", JSON.stringify(body.tags));
       if (body.model_id !== undefined) params.set("model_id", body.model_id);
       if (body.rag_enabled !== undefined)
         params.set("rag_enabled", String(body.rag_enabled));
@@ -952,6 +979,69 @@ export function useGenerateTitle() {
       // it from the sidebar UI.
       void qc.invalidateQueries({ queryKey: chatKeys.all });
       void qc.invalidateQueries({ queryKey: chatKeys.detail(chatId) });
+    },
+  });
+}
+
+// ─── Archive ─────────────────────────────────────────────────────────────────
+//
+// Soft-archive, mirroring useProjects' useArchiveProject / useUnarchiveProject
+// (see hooks/useProjects.ts). GET /api/chats excludes archived chats by
+// default (backend `include_archived` query param defaults to false), so the
+// existing useChats/useChatsDirect list queries already reflect archiving
+// with no changes needed there — only a dedicated query for the "Archived"
+// section is new.
+
+/**
+ * List the caller's archived chats (un-projected — matches the sidebar's
+ * scope). Fetches with `include_archived=true` then filters client-side to
+ * just the archived subset, mirroring Projects.tsx's active/archived split.
+ * A separate cache key from `chatKeys.listDirect()` — same reasoning as
+ * `projectKeys.list(includeArchived)` getting its own slot in useProjects.ts.
+ */
+export function useArchivedChats() {
+  const { isInitializing, user } = useAuthStore();
+  return useQuery<ChatSummary[], ApiError>({
+    queryKey: [...chatKeys.all, "list-direct", "archived"] as const,
+    queryFn: async () => {
+      const raw = await api.request<ChatsListWire>(
+        "/api/chats?unscoped=true&include_archived=true",
+      );
+      return raw.map(toChatSummary).filter((c) => c.archived_at !== null);
+    },
+    enabled: !isInitializing && user !== null,
+  });
+}
+
+/** Archive a chat. Soft — messages are untouched; the chat just drops out
+ *  of the default sidebar/list. */
+export function useArchiveChat() {
+  const qc = useQueryClient();
+  return useMutation<ChatSummary, ApiError, number>({
+    // Caller (Sidebar row action) shows its own catch toast —
+    // meta.errorHandled keeps the global MutationCache fallback silent.
+    meta: { errorHandled: true },
+    mutationFn: async (chatId) =>
+      toChatSummary(
+        await api.postForm<ChatWire>(`/api/chats/${String(chatId)}/archive`, {}),
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: chatKeys.all });
+    },
+  });
+}
+
+/** Unarchive a chat. Reverses `useArchiveChat`. */
+export function useUnarchiveChat() {
+  const qc = useQueryClient();
+  return useMutation<ChatSummary, ApiError, number>({
+    meta: { errorHandled: true },
+    mutationFn: async (chatId) =>
+      toChatSummary(
+        await api.postForm<ChatWire>(`/api/chats/${String(chatId)}/unarchive`, {}),
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: chatKeys.all });
     },
   });
 }

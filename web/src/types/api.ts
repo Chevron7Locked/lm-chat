@@ -1151,6 +1151,10 @@ export interface paths {
          *                       (``project_id IS NULL``). When False (default),
          *                       returns every chat the user owns regardless of
          *                       project_id (existing behavior preserved).
+         *         include_archived: When False (default), archived chats are
+         *                       filtered out — matches ``GET /api/projects``'s
+         *                       default sidebar/list behavior. Pass True for an
+         *                       "Archived" section.
          *         user:         Authenticated user.
          *         chat_service: Injected ``ChatService``.
          *
@@ -1304,6 +1308,8 @@ export interface paths {
          *         folder:           New folder value (optional form field; empty string
          *                           is treated as a folder name, not as "remove folder").
          *         pinned:           New pinned flag (optional form field).
+         *         tags:             JSON-encoded array of tag strings; replaces the
+         *                           chat's whole tag list.
          *         rag_enabled:      Toggle RAG augmentation for this chat.
          *         reasoning_effort: Per-chat reasoning level
          *                           (``"off"``, ``"low"``, ``"medium"``, ``"high"``,
@@ -1352,6 +1358,29 @@ export interface paths {
          *                        validation (range / type errors).
          */
         patch: operations["patch_chat_api_chats__chat_id__patch"];
+        trace?: never;
+    };
+    "/api/chats/{chat_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Chat
+         * @description Archive the caller's chat.
+         *
+         *     Soft — messages are untouched; the chat just drops out of the
+         *     default sidebar/list until unarchived. 404 if not owned by the caller.
+         */
+        post: operations["archive_chat_api_chats__chat_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/chats/{chat_id}/compact": {
@@ -1566,7 +1595,8 @@ export interface paths {
          * @description Inject a pre-generated assistant message into a chat's main thread.
          *
          *     Used by the sub-session frontend to add the finalized summary to the
-         *     main chat context after the sub-session completes.
+         *     main chat context after the sub-session completes. The content is
+         *     capped (see ``_cap_sub_session_output``) before it is persisted.
          */
         post: operations["inject_message_api_chats__chat_id__inject_message_post"];
         delete?: never;
@@ -2080,6 +2110,26 @@ export interface paths {
         get: operations["get_sub_session_api_chats__chat_id__sub_sessions__sub_session_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chats/{chat_id}/unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unarchive Chat
+         * @description Unarchive the caller's chat. 404 if not owned.
+         */
+        post: operations["unarchive_chat_api_chats__chat_id__unarchive_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4218,6 +4268,8 @@ export interface components {
             stateless?: boolean | null;
             /** System Prompt */
             system_prompt?: string | null;
+            /** Tags */
+            tags?: string | null;
             /** Temperature */
             temperature?: string | null;
             /** Title */
@@ -4559,6 +4611,8 @@ export interface components {
          *                     incognito=False.
          */
         ChatResponse: {
+            /** Archived At */
+            archived_at?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -4593,6 +4647,11 @@ export interface components {
             settings: {
                 [key: string]: unknown;
             };
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
             /** Title */
             title: string;
             /**
@@ -7726,6 +7785,7 @@ export interface operations {
                 folder?: string | null;
                 project_id?: number | null;
                 unscoped?: boolean;
+                include_archived?: boolean;
             };
             header?: never;
             path?: never;
@@ -7997,6 +8057,51 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden — insufficient privileges or cross-tenant access. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_chat_api_chats__chat_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chat_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatResponse"];
+                };
             };
             /** @description Authentication required. */
             401: {
@@ -8890,6 +8995,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubSessionDetail"];
+                };
+            };
+            /** @description Authentication required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden — insufficient privileges or cross-tenant access. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unarchive_chat_api_chats__chat_id__unarchive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chat_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatResponse"];
                 };
             };
             /** @description Authentication required. */

@@ -82,6 +82,10 @@ AuditEvent = Literal[
     # Incognito flag toggled on a chat (only allowed on empty chats
     # per the privacy-invariant rule in ChatService.set_incognito).
     "chat.incognito_set",
+    # Tags + soft-archive (migration 0046; mirrors project archiving).
+    "chat.tags_updated",
+    "chat.archived",
+    "chat.unarchived",
     # Message lifecycle events
     "message.appended",
     "message.edited",

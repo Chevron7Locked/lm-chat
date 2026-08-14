@@ -136,7 +136,7 @@ def test_migration_0010_head_version(tmp_path: Path) -> None:
 
     version = _get_version(db_url)
     assert version in {
-        "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044", "0045"
+        "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046"
     }, f"Expected head version, got {version!r}"
 
 
@@ -182,7 +182,7 @@ def test_migration_0010_round_trip(tmp_path: Path) -> None:
     db_url = f"sqlite+aiosqlite:///{tmp_path}/test.db"
     _run_upgrade(db_url, "head")
     assert "insight_activations" in _table_names(db_url)
-    assert _get_version(db_url) in {"0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044", "0045"}
+    assert _get_version(db_url) in {"0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046"}
 
     # Downgrade past 0010 to 0009 — drops head → 0010 in order, including
     # the insight_activations table + memory_insights score columns.
@@ -192,4 +192,4 @@ def test_migration_0010_round_trip(tmp_path: Path) -> None:
 
     _run_upgrade(db_url, "head")
     assert "insight_activations" in _table_names(db_url)
-    assert _get_version(db_url) in {"0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044", "0045"}
+    assert _get_version(db_url) in {"0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046"}

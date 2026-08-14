@@ -241,6 +241,163 @@ async def test_pin_toggle(engine: AsyncEngine) -> None:
     assert unpinned.pinned is False
 
 
+# ---------------------------------------------------------------------------
+# Tags + archive (migration 0046)
+# ---------------------------------------------------------------------------
+
+
+async def test_create_defaults_to_empty_tags_and_active(engine: AsyncEngine) -> None:
+    """A freshly-created chat has an empty tag list and is not archived."""
+    await _insert_user(engine)
+    svc = _make_service(engine)
+
+    chat = await svc.create(user_id=1, title="Chat")
+
+    assert chat.tags == []
+    assert chat.archived_at is None
+
+
+async def test_set_tags_replaces_whole_list(engine: AsyncEngine) -> None:
+    """set_tags() replaces the tag list, dedupes, and strips blanks."""
+    await _insert_user(engine)
+    svc = _make_service(engine)
+    chat = await svc.create(user_id=1, title="Chat")
+
+    await svc.set_tags(chat.id, user_id=1, tags=["work", "urgent", "work", " ", ""])
+    tagged = await svc.get(chat.id, user_id=1)
+    assert tagged.tags == ["work", "urgent"]
+
+    # A second call fully replaces the prior list (not merges).
+    await svc.set_tags(chat.id, user_id=1, tags=["personal"])
+    replaced = await svc.get(chat.id, user_id=1)
+    assert replaced.tags == ["personal"]
+
+    # Empty list clears all tags.
+    await svc.set_tags(chat.id, user_id=1, tags=[])
+    cleared = await svc.get(chat.id, user_id=1)
+    assert cleared.tags == []
+
+
+async def test_set_tags_writes_audit_log(engine: AsyncEngine) -> None:
+    """set_tags() writes a chat.tags_updated audit_log row."""
+    await _insert_user(engine)
+    svc = _make_service(engine)
+    chat = await svc.create(user_id=1, title="Chat")
+
+    await svc.set_tags(chat.id, user_id=1, tags=["work"])
+
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            select(audit_log).where(audit_log.c.event == "chat.tags_updated")
+        )
+        rows = result.fetchall()
+    assert len(rows) >= 1
+
+
+async def test_set_tags_missing_chat_raises_ChatNotFoundError(
+    engine: AsyncEngine,
+) -> None:
+    """set_tags() on a non-existent chat raises ChatNotFoundError."""
+    await _insert_user(engine)
+    svc = _make_service(engine)
+
+    with pytest.raises(ChatNotFoundError):
+        await svc.set_tags(9999, user_id=1, tags=["work"])
+
+
+async def test_set_tags_cross_user_raises_ChatNotFoundError(
+    engine: AsyncEngine,
+) -> None:
+    """set_tags() on another user's chat raises ChatNotFoundError (not 403)."""
+    await _insert_user(engine, user_id=1, username="alice")
+    await _insert_user(engine, user_id=2, username="bob")
+    svc = _make_service(engine)
+    chat = await svc.create(user_id=1, title="Alice Chat")
+
+    with pytest.raises(ChatNotFoundError):
+        await svc.set_tags(chat.id, user_id=2, tags=["nope"])
+
+
+async def test_set_archived_sets_and_clears_archived_at(engine: AsyncEngine) -> None:
+    """set_archived() sets archived_at to a timestamp, then clears it back to None."""
+    await _insert_user(engine)
+    svc = _make_service(engine)
+    chat = await svc.create(user_id=1, title="Chat")
+    assert chat.archived_at is None
+
+    await svc.set_archived(chat.id, user_id=1, archived=True)
+    archived = await svc.get(chat.id, user_id=1)
+    assert archived.archived_at is not None
+
+    await svc.set_archived(chat.id, user_id=1, archived=False)
+    restored = await svc.get(chat.id, user_id=1)
+    assert restored.archived_at is None
+
+
+async def test_set_archived_writes_audit_log(engine: AsyncEngine) -> None:
+    """set_archived() writes chat.archived / chat.unarchived audit_log rows."""
+    await _insert_user(engine)
+    svc = _make_service(engine)
+    chat = await svc.create(user_id=1, title="Chat")
+
+    await svc.set_archived(chat.id, user_id=1, archived=True)
+    await svc.set_archived(chat.id, user_id=1, archived=False)
+
+    async with engine.connect() as conn:
+        archived_rows = (
+            await conn.execute(
+                select(audit_log).where(audit_log.c.event == "chat.archived")
+            )
+        ).fetchall()
+        unarchived_rows = (
+            await conn.execute(
+                select(audit_log).where(audit_log.c.event == "chat.unarchived")
+            )
+        ).fetchall()
+    assert len(archived_rows) >= 1
+    assert len(unarchived_rows) >= 1
+
+
+async def test_set_archived_missing_chat_raises_ChatNotFoundError(
+    engine: AsyncEngine,
+) -> None:
+    """set_archived() on a non-existent chat raises ChatNotFoundError."""
+    await _insert_user(engine)
+    svc = _make_service(engine)
+
+    with pytest.raises(ChatNotFoundError):
+        await svc.set_archived(9999, user_id=1, archived=True)
+
+
+async def test_set_archived_cross_user_raises_ChatNotFoundError(
+    engine: AsyncEngine,
+) -> None:
+    """set_archived() on another user's chat raises ChatNotFoundError (not 403)."""
+    await _insert_user(engine, user_id=1, username="alice")
+    await _insert_user(engine, user_id=2, username="bob")
+    svc = _make_service(engine)
+    chat = await svc.create(user_id=1, title="Alice Chat")
+
+    with pytest.raises(ChatNotFoundError):
+        await svc.set_archived(chat.id, user_id=2, archived=True)
+
+
+async def test_list_for_user_excludes_archived_by_default(engine: AsyncEngine) -> None:
+    """list_for_user() excludes archived chats unless include_archived=True."""
+    await _insert_user(engine)
+    svc = _make_service(engine)
+
+    active = await svc.create(user_id=1, title="Active Chat")
+    archived = await svc.create(user_id=1, title="Archived Chat")
+    await svc.set_archived(archived.id, user_id=1, archived=True)
+
+    default_list = await svc.list_for_user(1)
+    assert [c.id for c in default_list] == [active.id]
+
+    full_list = await svc.list_for_user(1, include_archived=True)
+    assert {c.id for c in full_list} == {active.id, archived.id}
+
+
 async def test_delete_cascades_to_messages_and_embeddings(engine: AsyncEngine) -> None:
     """delete() removes the chat, its messages, and message_embeddings rows."""
     await _insert_user(engine)

@@ -340,6 +340,93 @@ describe("useUpdateChat", () => {
     expect(params.get("folder")).toBe("f");
     expect(params.get("pinned")).toBe("false");
   });
+
+  it("JSON-encodes tags in the form body (replaces the whole list)", async () => {
+    const { useUpdateChat } = await import("@/hooks/useChats");
+    const { wrapper } = makeWrapper();
+    const updated = { id: 3, title: "T", folder: null, pinned: false, updated_at: "2026-01-01T00:00:00Z", model_id: null, tags: ["work", "urgent"] };
+    mockRequest.mockResolvedValue(updated);
+
+    const { result } = renderHook(() => useUpdateChat(3), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({ tags: ["work", "urgent"] });
+    });
+
+    const callArgs = mockRequest.mock.calls[0];
+    const bodyStr = (callArgs?.[1] as { body?: string })?.body ?? "";
+    const params = new URLSearchParams(bodyStr);
+    expect(params.get("tags")).toBe(JSON.stringify(["work", "urgent"]));
+  });
+});
+
+describe("useArchivedChats", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("fetches /api/chats with unscoped + include_archived=true", async () => {
+    const { useArchivedChats } = await import("@/hooks/useChats");
+    const { wrapper } = makeWrapper();
+    mockRequest.mockResolvedValue([]);
+
+    const { result } = renderHook(() => useArchivedChats(), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockRequest).toHaveBeenCalledWith(
+      "/api/chats?unscoped=true&include_archived=true",
+    );
+  });
+
+  it("filters the response to only archived rows", async () => {
+    const { useArchivedChats } = await import("@/hooks/useChats");
+    const { wrapper } = makeWrapper();
+    const active = { id: 1, title: "Active", folder: null, pinned: false, updated_at: "2026-01-01T00:00:00Z", model_id: null, archived_at: null };
+    const archived = { id: 2, title: "Archived", folder: null, pinned: false, updated_at: "2026-01-01T00:00:00Z", model_id: null, archived_at: "2026-01-02T00:00:00Z" };
+    mockRequest.mockResolvedValue([active, archived]);
+
+    const { result } = renderHook(() => useArchivedChats(), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toHaveLength(1);
+    expect(result.current.data?.[0]?.id).toBe(2);
+  });
+});
+
+describe("useArchiveChat / useUnarchiveChat", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("useArchiveChat posts to /api/chats/:id/archive", async () => {
+    const { useArchiveChat } = await import("@/hooks/useChats");
+    const { wrapper } = makeWrapper();
+    const archived = { id: 5, title: "T", folder: null, pinned: false, updated_at: "2026-01-01T00:00:00Z", model_id: null, archived_at: "2026-01-02T00:00:00Z" };
+    mockPostForm.mockResolvedValue(archived);
+
+    const { result } = renderHook(() => useArchiveChat(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync(5);
+    });
+
+    expect(mockPostForm).toHaveBeenCalledWith("/api/chats/5/archive", {});
+  });
+
+  it("useUnarchiveChat posts to /api/chats/:id/unarchive", async () => {
+    const { useUnarchiveChat } = await import("@/hooks/useChats");
+    const { wrapper } = makeWrapper();
+    const restored = { id: 5, title: "T", folder: null, pinned: false, updated_at: "2026-01-01T00:00:00Z", model_id: null, archived_at: null };
+    mockPostForm.mockResolvedValue(restored);
+
+    const { result } = renderHook(() => useUnarchiveChat(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync(5);
+    });
+
+    expect(mockPostForm).toHaveBeenCalledWith("/api/chats/5/unarchive", {});
+  });
 });
 
 describe("useForkChat", () => {

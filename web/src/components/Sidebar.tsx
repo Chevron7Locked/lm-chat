@@ -61,13 +61,18 @@ import {
   useCreateChat,
   useDeleteChat,
   useReorderChat,
+  useArchivedChats,
+  useArchiveChat,
+  useUnarchiveChat,
+  useUpdateChat,
 } from "@/hooks/useChats";
 import type { ChatSummary } from "@/hooks/useChats";
+import { ChatTagsMenu } from "@/components/ChatTagsMenu";
 import {
   useCreateChatInProject,
   useCreateProject,
 } from "@/hooks/useProjects";
-import { Trash2 } from "lucide-react";
+import { Trash2, Archive, ArchiveRestore } from "lucide-react";
 import { useSubSessionStore } from "@/stores/subSessionStore";
 import { useTitleGenerationStore } from "@/stores/titleGenerationStore";
 import {
@@ -96,6 +101,7 @@ import {
   Library,
   ChevronLeft,
   ChevronRight,
+  Tag as TagIcon,
 } from "lucide-react";
 import { usePlatform } from "@/hooks/usePlatform";
 import { formatShortcut } from "@/lib/formatShortcut";
@@ -153,6 +159,12 @@ export function Sidebar({
     projectId: null,
     unscoped: true,
   });
+  // Archived chats get their OWN query (GET /api/chats excludes archived
+  // by default) — a dedicated "Archived" section below the main list,
+  // mirroring the Projects page's active/archived split.
+  const { data: archivedChatsData } = useArchivedChats();
+  const archivedChats = archivedChatsData ?? [];
+  const unarchiveChat = useUnarchiveChat();
   const { data: foldersData } = useFolders();
   const addFolder = useAddFolder();
   const renameFolder = useRenameFolder();
@@ -940,6 +952,40 @@ export function Sidebar({
                 : "No chats yet — click + New Chat above."}
             </p>
           )}
+
+          {/* Archived chats — collapsed section, mirrors the Projects
+              page's active/archived split. Not part of the DnD tree
+              (archived chats aren't reorderable/foldered while archived). */}
+          {archivedChats.length > 0 && (
+            <details
+              className="lmchat-folder-header-row"
+              style={{ display: "block", marginTop: "var(--space-group)" }}
+              data-testid="sidebar-archived-section"
+            >
+              <summary className="lmchat-group-label" style={{ cursor: "pointer" }}>
+                Archived ({archivedChats.length})
+              </summary>
+              {archivedChats.map((c) => (
+                <ArchivedChatItem
+                  key={c.id}
+                  chat={c}
+                  onUnarchive={() => {
+                    unarchiveChat.mutate(c.id, {
+                      onSuccess: () => {
+                        push({ variant: "success", message: "Chat unarchived." });
+                      },
+                      onError: () => {
+                        push({
+                          variant: "error",
+                          message: "Couldn't unarchive that chat.",
+                        });
+                      },
+                    });
+                  }}
+                />
+              ))}
+            </details>
+          )}
         </nav>
       )}
 
@@ -1282,6 +1328,52 @@ function ChatGroup({
   );
 }
 
+// ─── ArchivedChatItem ──────────────────────────────────────────────────────
+//
+// Simple (non-DnD) row for the "Archived" section — archived chats aren't
+// reorderable/foldered, so this skips useSortable entirely rather than
+// carrying dead drag machinery. Mirrors Projects.tsx's ProjectCard.
+
+interface ArchivedChatItemProps {
+  chat: ChatSummary;
+  onUnarchive: () => void;
+}
+
+function ArchivedChatItem({ chat, onUnarchive }: ArchivedChatItemProps) {
+  return (
+    <div
+      className="lmchat-chat-item lmchat-chat-item--inactive lmchat-sidebar-item"
+      data-testid={`sidebar-archived-chat-${String(chat.id)}`}
+      style={{ opacity: 0.75 }}
+    >
+      <span
+        style={{
+          flex: 1,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {chat.title || "New Chat"}
+      </span>
+      <button
+        type="button"
+        aria-label={`Unarchive "${chat.title}"`}
+        title="Unarchive"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onUnarchive();
+        }}
+        className="lmchat-chat-row-delete-btn"
+        data-testid={`sidebar-chat-${String(chat.id)}-unarchive`}
+      >
+        <ArchiveRestore size={14} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
 // ─── SortableChatItem ────────────────────────────────────────────────────────
 
 interface SortableChatItemProps {
@@ -1309,6 +1401,8 @@ function SortableChatItem({ chat, active }: SortableChatItemProps) {
   // so it lives here, next to Delete.
   const deleteChat = useDeleteChat();
   const reorderChat = useReorderChat();
+  const updateChat = useUpdateChat(chat.id);
+  const archiveChat = useArchiveChat();
   const push = useToastStore((s) => s.push);
   const navigate = useNavigate();
 
@@ -1373,6 +1467,35 @@ function SortableChatItem({ chat, active }: SortableChatItemProps) {
         },
       },
     );
+  }
+
+  // Replace the chat's whole tag list (ChatTagsMenu computes the desired
+  // end state — add or remove — and hands back the full array).
+  function handleTagsChange(tags: string[]): void {
+    updateChat.mutate(
+      { tags },
+      {
+        onError: () => {
+          push({ variant: "error", message: "Couldn't update tags." });
+        },
+      },
+    );
+  }
+
+  // Archive is reversible (see the sidebar's "Archived" section), so it
+  // fires immediately without a delete-style confirm prompt.
+  function handleArchiveClick(e: ReactMouseEvent): void {
+    e.preventDefault();
+    e.stopPropagation();
+    archiveChat.mutate(chat.id, {
+      onSuccess: () => {
+        push({ variant: "success", message: "Chat archived." });
+        if (active) void navigate("/");
+      },
+      onError: () => {
+        push({ variant: "error", message: "Couldn't archive that chat." });
+      },
+    });
   }
 
   // Incognito chats render dimmer + with an eye-with-slash glyph
@@ -1453,6 +1576,17 @@ function SortableChatItem({ chat, active }: SortableChatItemProps) {
         >
           {displayTitle}
         </span>
+        {chat.tags.length > 0 && (
+          <span
+            className="lmchat-chat-meta"
+            title={chat.tags.join(", ")}
+            data-testid={`sidebar-chat-${String(chat.id)}-tags-badge`}
+            style={{ display: "inline-flex", alignItems: "center", gap: 2 }}
+          >
+            <TagIcon size={11} aria-hidden />
+            {chat.tags.length}
+          </span>
+        )}
         <span className="lmchat-chat-meta">
           {relativeTime(chat.updated_at)}
         </span>
@@ -1470,6 +1604,22 @@ function SortableChatItem({ chat, active }: SortableChatItemProps) {
             testIdPrefix={`sidebar-chat-${String(chat.id)}-move-to-folder`}
             ariaLabel={`Move "${chat.title}" to folder`}
           />
+          <ChatTagsMenu
+            tags={chat.tags}
+            onChange={handleTagsChange}
+            testIdPrefix={`sidebar-chat-${String(chat.id)}-tags`}
+            ariaLabel={`Edit tags for "${chat.title}"`}
+          />
+          <button
+            type="button"
+            className="lmchat-chat-row-delete-btn"
+            aria-label={`Archive "${chat.title}"`}
+            title={`Archive "${chat.title}"`}
+            onClick={handleArchiveClick}
+            data-testid={`sidebar-chat-${String(chat.id)}-archive`}
+          >
+            <Archive size={14} aria-hidden />
+          </button>
           <button
             type="button"
             className="lmchat-chat-row-delete-btn"

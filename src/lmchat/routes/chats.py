@@ -88,8 +88,16 @@ from lmchat.services.message_service import (
 from lmchat.services.prompt_assembly import serialize_prior_turns
 from lmchat.utils.lru_counter import LruCappedCounter
 from lmchat.utils.task_lifetime import spawn_background_task
+from lmchat.utils.text_input_policy import SHORT_FIELD_MAX_LENGTH
 
 log = get_logger(__name__)
+
+# Chat tags: cap count + per-tag length so a malicious/buggy client can't
+# grow the chats.tags JSON blob unbounded. Length mirrors the repo's
+# short-field convention (SHORT_FIELD_MAX_LENGTH); count is a reasonable
+# UI-driven ceiling — nothing in the product needs more than a couple dozen
+# tags per chat.
+_TAGS_MAX_COUNT: Final[int] = 20
 
 # ---------------------------------------------------------------------------
 # Sub-session cross-turn MTP counter
@@ -213,6 +221,12 @@ class ChatResponse(BaseModel):
     # Optional project membership. None ↔ the
     # chat is un-projected (legacy / default).
     project_id: int | None = None
+    # Free-form user tags. Empty list = no tags.
+    tags: list[str] = []  # type: ignore[assignment]
+    # None = active chat (default listing). A timestamp = archived at
+    # that instant — same "None = active" convention as
+    # ProjectResponse.archived_at.
+    archived_at: datetime | None = None
 
 
 class ChatWithMessagesResponse(BaseModel):
@@ -233,6 +247,9 @@ class ChatWithMessagesResponse(BaseModel):
                     incognito=False.
         project_id: Owning project PK, or null when the chat
                     is not attached to a project.
+        tags:       Free-form user tags. Empty list = no tags.
+        archived_at: None = active chat; a timestamp = archived at that
+                    instant.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -258,6 +275,15 @@ class ChatWithMessagesResponse(BaseModel):
     # endpoint (the field existed on ChatResponse but the detail response never
     # set it — a project-linked chat reported project_id: null).
     project_id: int | None = None
+    # Free-form user tags. Empty list = no tags. MUST be populated at the
+    # construction site (get_chat below) from the chat row — declaring the
+    # field here is not enough; see the project_id comment above for the
+    # exact failure mode this guards against (a field that exists on the
+    # model but the detail route never sets).
+    tags: list[str] = []  # type: ignore[assignment]
+    # None = active chat. A timestamp = archived at that instant — same
+    # "None = active" convention as ChatResponse.archived_at.
+    archived_at: datetime | None = None
 
 
 class CompactResultResponse(BaseModel):
@@ -432,6 +458,7 @@ async def list_chats(
     folder: str | None = None,
     project_id: int | None = None,
     unscoped: bool = False,
+    include_archived: bool = False,
     user: User = Depends(require_user),
     chat_service: ChatService = Depends(_get_chat_service),
 ) -> list[ChatResponse]:
@@ -446,6 +473,10 @@ async def list_chats(
                       (``project_id IS NULL``). When False (default),
                       returns every chat the user owns regardless of
                       project_id (existing behavior preserved).
+        include_archived: When False (default), archived chats are
+                      filtered out — matches ``GET /api/projects``'s
+                      default sidebar/list behavior. Pass True for an
+                      "Archived" section.
         user:         Authenticated user.
         chat_service: Injected ``ChatService``.
 
@@ -457,6 +488,7 @@ async def list_chats(
         folder=folder,
         project_id=project_id,
         unscoped=unscoped,
+        include_archived=include_archived,
     )
     return [ChatResponse.model_validate(c.model_dump()) for c in chats]
 
@@ -596,6 +628,8 @@ async def get_chat(
         incognito=chat.incognito,
         incognito_expires_at=chat.incognito_expires_at,
         project_id=chat.project_id,
+        tags=chat.tags,
+        archived_at=chat.archived_at,
     )
 
 
@@ -611,6 +645,9 @@ async def patch_chat(
     title: str | None = Form(default=None),
     folder: str | None = Form(default=None),
     pinned: bool | None = Form(default=None),
+    # JSON-encoded array of tag strings (e.g. '["work","urgent"]'); replaces
+    # the chat's whole tag list. Mirrors the ab_compare JSON-blob pattern.
+    tags: str | None = Form(default=None),
     model_id: str | None = Form(default=None),
     rag_enabled: bool | None = Form(default=None),
     reasoning_effort: str | None = Form(default=None),
@@ -685,6 +722,9 @@ async def patch_chat(
         folder:           New folder value (optional form field; empty string
                           is treated as a folder name, not as "remove folder").
         pinned:           New pinned flag (optional form field).
+        tags:             JSON-encoded array of tag strings; replaces the
+                          chat's whole tag list. At most 20 tags, each at
+                          most SHORT_FIELD_MAX_LENGTH (256) characters.
         rag_enabled:      Toggle RAG augmentation for this chat.
         reasoning_effort: Per-chat reasoning level
                           (``"off"``, ``"low"``, ``"medium"``, ``"high"``,
@@ -741,6 +781,32 @@ async def patch_chat(
             await chat_service.move_to_folder(chat_id, user_id=user.id, folder=folder)
         if pinned is not None:
             await chat_service.pin(chat_id, user_id=user.id, pinned=pinned)
+        if tags is not None:
+            try:
+                tags_parsed = _json.loads(tags)
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(
+                    status_code=_HTTP_422,
+                    detail=f"tags must be valid JSON: {exc}",
+                ) from exc
+            if not isinstance(tags_parsed, list) or not all(
+                isinstance(t, str) for t in tags_parsed
+            ):
+                raise HTTPException(
+                    status_code=_HTTP_422,
+                    detail="tags must be a JSON array of strings",
+                )
+            if len(tags_parsed) > _TAGS_MAX_COUNT:
+                raise HTTPException(
+                    status_code=_HTTP_422,
+                    detail=f"tags: at most {_TAGS_MAX_COUNT} tags allowed",
+                )
+            if any(len(t) > SHORT_FIELD_MAX_LENGTH for t in tags_parsed):
+                raise HTTPException(
+                    status_code=_HTTP_422,
+                    detail=f"tags: each tag must be at most {SHORT_FIELD_MAX_LENGTH} characters",
+                )
+            await chat_service.set_tags(chat_id, user_id=user.id, tags=tags_parsed)
         if model_id is not None and model_id != "":
             await chat_service.set_model_id(chat_id, user_id=user.id, model_id=model_id)
         # Incognito toggle. Must apply BEFORE the settings merge so
@@ -1168,6 +1234,46 @@ async def delete_chat(
         streaming_service.reset_counter(chat_id)
     except ChatNotFoundError as exc:
         raise HTTPException(status_code=_HTTP_404, detail="chat not found") from exc
+
+
+# ---------------------------------------------------------------------------
+# POST /api/chats/{chat_id}/archive | /unarchive — soft-archive a chat
+# ---------------------------------------------------------------------------
+# Mirrors POST /api/projects/{id}/archive | /unarchive (routes/projects.py).
+
+
+@router.post("/{chat_id}/archive", response_model=ChatResponse)
+async def archive_chat(
+    chat_id: int,
+    user: User = Depends(require_user),
+    chat_service: ChatService = Depends(_get_chat_service),
+) -> ChatResponse:
+    """Archive the caller's chat.
+
+    Soft — messages are untouched; the chat just drops out of the
+    default sidebar/list until unarchived. 404 if not owned by the caller.
+    """
+    try:
+        await chat_service.set_archived(chat_id, user_id=user.id, archived=True)
+        chat = await chat_service.get(chat_id, user_id=user.id)
+    except ChatNotFoundError as exc:
+        raise HTTPException(status_code=_HTTP_404, detail="chat not found") from exc
+    return ChatResponse.model_validate(chat.model_dump())
+
+
+@router.post("/{chat_id}/unarchive", response_model=ChatResponse)
+async def unarchive_chat(
+    chat_id: int,
+    user: User = Depends(require_user),
+    chat_service: ChatService = Depends(_get_chat_service),
+) -> ChatResponse:
+    """Unarchive the caller's chat. 404 if not owned."""
+    try:
+        await chat_service.set_archived(chat_id, user_id=user.id, archived=False)
+        chat = await chat_service.get(chat_id, user_id=user.id)
+    except ChatNotFoundError as exc:
+        raise HTTPException(status_code=_HTTP_404, detail="chat not found") from exc
+    return ChatResponse.model_validate(chat.model_dump())
 
 
 # ---------------------------------------------------------------------------

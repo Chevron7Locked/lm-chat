@@ -135,7 +135,7 @@ def test_0030_round_trip_upgrade_downgrade_upgrade(tmp_path: Path) -> None:
     assert "allowed_models" in _column_info(db, "provider_configs")
     assert _get_version(db) in {
         "0030", "0031", "0032", "0033", "0034", "0035", "0036",
-        "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044", "0045",
+        "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046",
     }
 
     _downgrade(db, "0029")
@@ -148,5 +148,5 @@ def test_0030_round_trip_upgrade_downgrade_upgrade(tmp_path: Path) -> None:
     assert "allowed_models" in _column_info(db, "provider_configs")
     assert _get_version(db) in {
         "0030", "0031", "0032", "0033", "0034", "0035", "0036",
-        "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044", "0045",
+        "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0044", "0045", "0046",
     }

@@ -55,6 +55,8 @@ vi.mock("@/hooks/useChats", () => ({
         updated_at: "2026-01-01T00:00:00Z",
         model_id: null,
         display_order: 0,
+        tags: [],
+        archived_at: null,
       },
       {
         id: 2,
@@ -64,6 +66,8 @@ vi.mock("@/hooks/useChats", () => ({
         updated_at: "2026-01-02T00:00:00Z",
         model_id: null,
         display_order: 1,
+        tags: [],
+        archived_at: null,
       },
     ],
     isLoading: false,
@@ -73,6 +77,10 @@ vi.mock("@/hooks/useChats", () => ({
   useClearChatMessages: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   useCreateChat: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useReorderChat: () => ({ mutate: mockMutate }),
+  useArchivedChats: () => ({ data: [] }),
+  useArchiveChat: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
+  useUnarchiveChat: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
+  useUpdateChat: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/components/UserMenu", () => ({

@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import re
 import secrets
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Final
 
 import httpx
@@ -227,6 +227,12 @@ class Chat(BaseModel):
     # None = un-projected (default; legacy rows). Set via PATCH /api/chats/{id}
     # or the project-scoped create route.
     project_id: int | None = None
+    # Free-form user tags (migration 0046). Empty list = no tags.
+    tags: list[str] = []  # type: ignore[assignment]
+    # None = active chat (default listing); a timestamp = archived at
+    # that instant. Same "None = active" convention as
+    # ``projects_service.Project.archived_at``.
+    archived_at: datetime | None = None
 
 
 class CompactResult(BaseModel):
@@ -681,6 +687,7 @@ class ChatService:
         folder: str | None = None,
         project_id: int | None = None,
         unscoped: bool = False,
+        include_archived: bool = False,
     ) -> list[Chat]:
         """Return chats for *user_id*, optionally filtered.
 
@@ -691,6 +698,11 @@ class ChatService:
                        ``project_id IS NULL`` (legacy un-projected set).
                        Default False applies no project filter (backward
                        compat).
+            include_archived: When False (default), archived chats
+                       (``archived_at IS NOT NULL``) are filtered out —
+                       matches ``ProjectsService.list_for_user``'s default
+                       sidebar/list behavior. Pass True for an "Archived"
+                       section.
 
         Returns:
             List of :class:`Chat`, newest first.
@@ -700,6 +712,8 @@ class ChatService:
             .where(chats.c.user_id == user_id)
             .order_by(chats.c.created_at.desc())
         )
+        if not include_archived:
+            stmt = stmt.where(chats.c.archived_at.is_(None))
         if folder is not None:
             stmt = stmt.where(chats.c.folder == folder)
         project_clause = project_scope_clause(
@@ -1291,6 +1305,97 @@ class ChatService:
             event="chat.pinned",
             user_id=user_id,
             detail={"chat_id": chat_id, "pinned": pinned},
+        )
+
+    async def set_tags(
+        self, chat_id: int, *, user_id: int, tags: list[str]
+    ) -> None:
+        """Replace the tag list on *chat_id*.
+
+        Sets the whole list atomically (mirrors ``pin`` / ``move_to_folder``
+        single-field setters) — the caller computes the desired end state
+        (add/remove a tag) and sends the full list, so there is no
+        server-side add/remove race between concurrent requests.
+
+        Args:
+            chat_id: PK of the chat.
+            user_id: Must be the owning user.
+            tags:    New tag list. Deduplicated and stripped of blanks;
+                     order preserved for the first occurrence of each tag.
+
+        Raises:
+            ChatNotFoundError: If missing or owned by another user.
+        """
+        await self._get_chat_row(chat_id, user_id=user_id)
+
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for tag in tags:
+            trimmed = tag.strip()
+            if trimmed == "" or trimmed in seen:
+                continue
+            seen.add(trimmed)
+            normalized.append(trimmed)
+
+        async def _update() -> None:
+            async with self._engine.begin() as conn:
+                await conn.execute(
+                    update(chats)
+                    .where(chats.c.id == chat_id, chats.c.user_id == user_id)
+                    .values(tags=normalized)
+                )
+
+        await with_write_retry(_update)
+
+        log.info(
+            "chat.tags_updated",
+            chat_id=chat_id,
+            user_id=user_id,
+            tags=normalized,
+        )
+        await self._write_audit(
+            event="chat.tags_updated",
+            user_id=user_id,
+            detail={"chat_id": chat_id, "tags": normalized},
+        )
+
+    async def set_archived(
+        self, chat_id: int, *, user_id: int, archived: bool
+    ) -> None:
+        """Archive or unarchive *chat_id*.
+
+        Soft — never deletes messages; archiving only drops the chat out
+        of the default ``list_for_user`` filter until unarchived. Mirrors
+        ``ProjectsService.set_archived``.
+
+        Args:
+            chat_id:  PK of the chat.
+            user_id:  Must be the owning user.
+            archived: ``True`` sets ``archived_at`` to now; ``False``
+                      clears it back to NULL.
+
+        Raises:
+            ChatNotFoundError: If missing or owned by another user.
+        """
+        await self._get_chat_row(chat_id, user_id=user_id)
+        archived_at = datetime.now(UTC) if archived else None
+
+        async def _update() -> None:
+            async with self._engine.begin() as conn:
+                await conn.execute(
+                    update(chats)
+                    .where(chats.c.id == chat_id, chats.c.user_id == user_id)
+                    .values(archived_at=archived_at)
+                )
+
+        await with_write_retry(_update)
+
+        event: AuditEvent = "chat.archived" if archived else "chat.unarchived"
+        log.info(event, chat_id=chat_id, user_id=user_id)
+        await self._write_audit(
+            event=event,
+            user_id=user_id,
+            detail={"chat_id": chat_id},
         )
 
     async def update_settings(

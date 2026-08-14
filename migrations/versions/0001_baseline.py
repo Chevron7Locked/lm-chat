@@ -129,7 +129,12 @@ depends_on: str | None = None
 # table on purpose so sub-session content is schema-isolated from the main
 # chat / replay context / search / analytics / summaries. Value verified via
 # `schema_fingerprint(metadata)` against the updated db/schema.py.
-SCHEMA_FINGERPRINT: str = "3dc4e1a0f22d7fd5458562f7d5c3c8db"
+# Bumped 2026-08-13 by migration 0046 (chat tags + archive) — added
+# chats.tags (JSON list[str], '[]' default) and chats.archived_at
+# (nullable DateTime(timezone=True), NULL = active — same convention as
+# projects.archived_at from migration 0038). Value verified via
+# `schema_fingerprint(metadata)` against the updated db/schema.py.
+SCHEMA_FINGERPRINT: str = "b59fb1cd5cd5134b0cfbd675cd5652b3"
 
 
 def upgrade() -> None:

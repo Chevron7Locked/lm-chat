@@ -208,6 +208,22 @@ chats = Table(
     # The chat's history can render a "Detached from X on Y" separator
     # turn even if the project is later deleted. NULL = never detached.
     Column("detached_from_project_meta", JSON, nullable=True),
+    # Free-form user tags for organizing/searching chats (migration 0046).
+    # JSON list[str]; server_default '[]' gives every chat an empty-list
+    # baseline so NULL checks are unnecessary — same convention as
+    # ``settings`` above.
+    Column(
+        "tags",
+        JSON,
+        nullable=False,
+        server_default=text("'[]'"),
+    ),
+    # Soft-archive, NOT delete (migration 0046). NULL = active chat
+    # (default listing filter); non-NULL = archived at that timestamp.
+    # Same "NULL = active" convention as ``projects.archived_at``
+    # (migration 0038). Archiving never deletes messages — the chat just
+    # drops out of the default sidebar/list until unarchived.
+    Column("archived_at", DateTime(timezone=True), nullable=True),
     Index("ix_chats_project_id", "project_id"),
 )
 

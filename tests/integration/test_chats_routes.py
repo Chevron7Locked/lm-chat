@@ -22,6 +22,7 @@ Cross-cutting invariants
 """
 from __future__ import annotations
 
+import json
 import secrets
 from typing import Any
 
@@ -242,6 +243,35 @@ async def test_get_chat_happy(client: httpx.AsyncClient) -> None:
     assert isinstance(body["messages"], list)
 
 
+async def test_get_chat_returns_tags_and_archived_at(client: httpx.AsyncClient) -> None:
+    """The single-chat detail response (ChatWithMessagesResponse) must carry
+    tags + archived_at, not just the list response (ChatResponse) — this is
+    the same class of bug the pre-existing project_id comment warns about
+    (a field declared on the model but never set at the construction site).
+    """
+    _, cookie = await register_and_login(client)
+    chat = await _create_chat(client, cookie, "detail tags")
+
+    await client.patch(
+        f"/api/chats/{chat['id']}",
+        data={"tags": '["work", "urgent"]'},
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    await client.post(
+        f"/api/chats/{chat['id']}/archive",
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+
+    resp = await client.get(
+        f"/api/chats/{chat['id']}",
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["tags"] == ["work", "urgent"]
+    assert body["archived_at"] is not None
+
+
 async def test_get_chat_cross_user_404(client: httpx.AsyncClient) -> None:
     _, cookie_a = await register_and_login(client)
     _, cookie_b = await register_and_login(client)
@@ -297,6 +327,109 @@ async def test_patch_chat_pin(client: httpx.AsyncClient) -> None:
     )
     assert resp.status_code == 200
     assert resp.json()["pinned"] is True
+
+
+async def test_patch_chat_tags_sets_and_replaces(client: httpx.AsyncClient) -> None:
+    _, cookie = await register_and_login(client)
+    chat = await _create_chat(client, cookie)
+
+    resp = await client.patch(
+        f"/api/chats/{chat['id']}",
+        data={"tags": '["work", "urgent"]'},
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["tags"] == ["work", "urgent"]
+
+    # A second PATCH replaces the whole list rather than merging.
+    resp2 = await client.patch(
+        f"/api/chats/{chat['id']}",
+        data={"tags": '["personal"]'},
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert resp2.status_code == 200
+    assert resp2.json()["tags"] == ["personal"]
+
+    # An empty array clears all tags.
+    resp3 = await client.patch(
+        f"/api/chats/{chat['id']}",
+        data={"tags": "[]"},
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert resp3.status_code == 200
+    assert resp3.json()["tags"] == []
+
+
+async def test_patch_chat_tags_invalid_json_422(client: httpx.AsyncClient) -> None:
+    _, cookie = await register_and_login(client)
+    chat = await _create_chat(client, cookie)
+
+    resp = await client.patch(
+        f"/api/chats/{chat['id']}",
+        data={"tags": "not-json"},
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_patch_chat_tags_not_string_array_422(client: httpx.AsyncClient) -> None:
+    _, cookie = await register_and_login(client)
+    chat = await _create_chat(client, cookie)
+
+    resp = await client.patch(
+        f"/api/chats/{chat['id']}",
+        data={"tags": '[1, 2]'},
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_patch_chat_tags_too_many_422(client: httpx.AsyncClient) -> None:
+    """More than 20 tags in one PATCH is rejected (unbounded-growth guard)."""
+    _, cookie = await register_and_login(client)
+    chat = await _create_chat(client, cookie)
+
+    too_many = json.dumps([f"tag{i}" for i in range(21)])
+    resp = await client.patch(
+        f"/api/chats/{chat['id']}",
+        data={"tags": too_many},
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert resp.status_code == 422
+
+    # Exactly the cap is still accepted.
+    exactly_cap = json.dumps([f"tag{i}" for i in range(20)])
+    ok_resp = await client.patch(
+        f"/api/chats/{chat['id']}",
+        data={"tags": exactly_cap},
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert ok_resp.status_code == 200
+    assert len(ok_resp.json()["tags"]) == 20
+
+
+async def test_patch_chat_tags_too_long_422(client: httpx.AsyncClient) -> None:
+    """A single tag over SHORT_FIELD_MAX_LENGTH (256 chars) is rejected."""
+    _, cookie = await register_and_login(client)
+    chat = await _create_chat(client, cookie)
+
+    too_long = json.dumps(["x" * 257])
+    resp = await client.patch(
+        f"/api/chats/{chat['id']}",
+        data={"tags": too_long},
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert resp.status_code == 422
+
+    # Exactly the cap is still accepted.
+    exactly_cap = json.dumps(["x" * 256])
+    ok_resp = await client.patch(
+        f"/api/chats/{chat['id']}",
+        data={"tags": exactly_cap},
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert ok_resp.status_code == 200
+    assert ok_resp.json()["tags"] == ["x" * 256]
 
 
 async def test_patch_chat_settings_rag_enabled(client: httpx.AsyncClient) -> None:
@@ -442,6 +575,114 @@ async def test_delete_chat_not_found_404(client: httpx.AsyncClient) -> None:
 
 async def test_delete_chat_unauth(client: httpx.AsyncClient) -> None:
     resp = await client.delete("/api/chats/1")
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# POST /api/chats/{chat_id}/archive | /unarchive
+# ---------------------------------------------------------------------------
+
+
+async def test_archive_chat_happy(client: httpx.AsyncClient) -> None:
+    _, cookie = await register_and_login(client)
+    chat = await _create_chat(client, cookie, "to archive")
+
+    resp = await client.post(
+        f"/api/chats/{chat['id']}/archive",
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == chat["id"]
+    assert body["archived_at"] is not None
+
+
+async def test_unarchive_chat_happy(client: httpx.AsyncClient) -> None:
+    _, cookie = await register_and_login(client)
+    chat = await _create_chat(client, cookie, "roundtrip")
+
+    await client.post(
+        f"/api/chats/{chat['id']}/archive",
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    resp = await client.post(
+        f"/api/chats/{chat['id']}/unarchive",
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["archived_at"] is None
+
+
+async def test_archive_chat_excluded_from_default_list(
+    client: httpx.AsyncClient,
+) -> None:
+    """An archived chat drops out of GET /api/chats unless include_archived=true."""
+    _, cookie = await register_and_login(client)
+    tag = secrets.token_hex(8)
+    chat = await _create_chat(client, cookie, f"archived-{tag}")
+
+    await client.post(
+        f"/api/chats/{chat['id']}/archive",
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+
+    default_resp = await client.get(
+        "/api/chats",
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert default_resp.status_code == 200
+    default_titles = {c["title"] for c in default_resp.json()}
+    assert f"archived-{tag}" not in default_titles
+
+    full_resp = await client.get(
+        "/api/chats?include_archived=true",
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert full_resp.status_code == 200
+    full_titles = {c["title"] for c in full_resp.json()}
+    assert f"archived-{tag}" in full_titles
+
+
+async def test_archive_chat_cross_user_404(client: httpx.AsyncClient) -> None:
+    _, cookie_a = await register_and_login(client)
+    _, cookie_b = await register_and_login(client)
+    chat = await _create_chat(client, cookie_a)
+
+    resp = await client.post(
+        f"/api/chats/{chat['id']}/archive",
+        headers={"Cookie": f"lmchat_session={cookie_b}"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_unarchive_chat_cross_user_404(client: httpx.AsyncClient) -> None:
+    _, cookie_a = await register_and_login(client)
+    _, cookie_b = await register_and_login(client)
+    chat = await _create_chat(client, cookie_a)
+
+    resp = await client.post(
+        f"/api/chats/{chat['id']}/unarchive",
+        headers={"Cookie": f"lmchat_session={cookie_b}"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_archive_chat_not_found_404(client: httpx.AsyncClient) -> None:
+    _, cookie = await register_and_login(client)
+    resp = await client.post(
+        "/api/chats/999999/archive",
+        headers={"Cookie": f"lmchat_session={cookie}"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_archive_chat_unauth(client: httpx.AsyncClient) -> None:
+    resp = await client.post("/api/chats/1/archive")
+    assert resp.status_code == 401
+
+
+async def test_unarchive_chat_unauth(client: httpx.AsyncClient) -> None:
+    resp = await client.post("/api/chats/1/unarchive")
     assert resp.status_code == 401
 
 
