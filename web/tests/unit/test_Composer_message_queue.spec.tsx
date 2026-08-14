@@ -1,0 +1,259 @@
+/**
+ * Message queue (streaming submit) — the composer's single submit choke
+ * point (handleSubmit, hooked from both the Send/Queue button and Enter/
+ * Cmd+Enter via handleKeyDown) now enqueues instead of dropping a message
+ * submitted while `streaming` is true.
+ *
+ * Covers:
+ *  1. The textarea stays typable while streaming (not `disabled`).
+ *  2. Submitting while streaming enqueues — onSubmit is NOT called yet, and
+ *     a visible queued-message indicator appears; the draft is cleared.
+ *  3. When the CURRENT stream finishes naturally (streaming: true → false),
+ *     the queued message auto-sends exactly once.
+ *  4. Abort behavior (documented decision): if the stream ends because the
+ *     user clicked Stop, the queued message is NOT auto-fired into the
+ *     interrupted conversation — it stays queued, discoverable via the
+ *     queue row's "Send now" (manual flush) and remove controls.
+ */
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { Composer } from "@/components/Composer";
+
+// ─── Mocks (same set as test_Composer_integrations_picker.spec.tsx) ─────────
+
+vi.mock("@/stores/toastStore", () => ({
+  useToast: () => ({ push: vi.fn() }),
+}));
+
+vi.mock("@/hooks/useSTT", () => ({
+  useSTT: () => ({
+    capability: { available: false, engine: null },
+    state: { listening: false, error: null },
+    start: vi.fn(),
+    stop: vi.fn(),
+  }),
+  detectSTT: () => ({ available: false, engine: null }),
+}));
+
+vi.mock("@/components/MicButton", () => ({
+  MicButton: () => null,
+}));
+
+vi.mock("@/components/InProjectChip", () => ({
+  InProjectChip: () => null,
+}));
+
+vi.mock("@/components/RagModeBadge", () => ({
+  RagModeBadge: () => null,
+}));
+
+vi.mock("@/components/SlashMenu", () => ({
+  SlashMenu: () => null,
+  parseSlashCommand: () => null,
+  BUILTIN_COMMANDS: [],
+}));
+
+vi.mock("@/hooks/usePrompts", () => ({
+  usePrompts: () => ({ data: [], isLoading: false, isError: false }),
+}));
+
+vi.mock("@/hooks/useIntegrationsList", () => ({
+  useIntegrationsList: () => ({ data: [], isLoading: false, isError: false }),
+  useUpdateIntegrationsList: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
+vi.mock("@/hooks/useChatPreset", () => ({
+  useChatPreset: () => ({
+    activePreset: "",
+    preset: null,
+    setPreset: vi.fn(),
+    clearPreset: vi.fn(),
+  }),
+  useHydrateChatPresets: () => undefined,
+  useChatPresetStore: vi.fn(),
+}));
+
+vi.mock("@/hooks/useLmStudioConfig", () => ({
+  useLmStudioConfig: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+  }),
+  lmStudioConfigKeys: { resolved: () => ["lmstudio-config", "resolved"] },
+}));
+
+const mockModelsData = {
+  models: [
+    {
+      id: "test-model",
+      name: "Test Model",
+      loaded: true,
+      loaded_instance_ids: ["test-model"],
+      capabilities: {
+        vision: false,
+        trained_for_tool_use: false,
+        reasoning: null,
+        embedding: false,
+      },
+      max_context_length: 8192,
+      size_bytes: 0,
+      params_string: "",
+    },
+  ],
+};
+
+vi.mock("@/hooks/useModels", () => ({
+  useModels: () => ({ data: mockModelsData, isLoading: false, isError: false, refetch: vi.fn() }),
+}));
+
+// ─── Tests ────────────────────────────────────────────────────────────────
+
+describe("Composer message queue (streaming submit)", () => {
+  const baseProps = {
+    chatId: 1,
+    onSubmit: vi.fn(),
+    onStop: vi.fn(),
+    onClear: vi.fn(),
+    onFork: vi.fn(),
+    onCompact: vi.fn(),
+    onMemoryPin: vi.fn(),
+    modelId: "test-model",
+  };
+
+  it("keeps the textarea typable while streaming", () => {
+    render(<Composer {...baseProps} streaming onSubmit={vi.fn()} />);
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    expect(textarea.disabled).toBe(false);
+
+    fireEvent.change(textarea, { target: { value: "still typing mid-stream" } });
+    expect(textarea.value).toBe("still typing mid-stream");
+  });
+
+  it("enqueues on submit while streaming instead of calling onSubmit, and shows a queued indicator", () => {
+    const onSubmit = vi.fn();
+    render(<Composer {...baseProps} streaming onSubmit={onSubmit} />);
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+
+    fireEvent.change(textarea, { target: { value: "queued message" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    // The send handler must NOT fire yet — the message is only queued.
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // Draft is cleared, same as a normal send.
+    expect(textarea.value).toBe("");
+
+    // A visible pending/queued indicator appears with the message text.
+    expect(screen.getByTestId("composer-queue")).toBeTruthy();
+    const item = screen.getByTestId("composer-queue-item");
+    expect(item.textContent).toContain("queued message");
+  });
+
+  it("supports at least one queued message via a small FIFO queue (two messages queue in order)", () => {
+    const onSubmit = vi.fn();
+    render(<Composer {...baseProps} streaming onSubmit={onSubmit} />);
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+
+    fireEvent.change(textarea, { target: { value: "first" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.change(textarea, { target: { value: "second" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    const items = screen.getAllByTestId("composer-queue-item");
+    expect(items).toHaveLength(2);
+    expect(items[0]?.textContent).toContain("first");
+    expect(items[1]?.textContent).toContain("second");
+  });
+
+  it("auto-sends the queued message exactly once when the current stream finishes naturally", () => {
+    const onSubmit = vi.fn();
+    const { rerender } = render(
+      <Composer {...baseProps} streaming onSubmit={onSubmit} />,
+    );
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "queued message" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // The stream completes naturally: streaming flips true -> false.
+    rerender(<Composer {...baseProps} streaming={false} onSubmit={onSubmit} />);
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const [sentChatId, sentPayload, sentUserText] = onSubmit.mock.calls[0];
+    expect(sentChatId).toBe(1);
+    expect(sentUserText).toBe("queued message");
+    expect(sentPayload.input).toEqual([{ type: "text", content: "queued message" }]);
+
+    // The queue is now empty — re-rendering again must not resend.
+    expect(screen.queryByTestId("composer-queue")).toBeNull();
+    rerender(<Composer {...baseProps} streaming={false} onSubmit={onSubmit} />);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT auto-fire a queued message when the stream ends via Stop (abort) — it stays queued", () => {
+    const onSubmit = vi.fn();
+    const onStop = vi.fn();
+    const { rerender } = render(
+      <Composer {...baseProps} streaming onSubmit={onSubmit} onStop={onStop} />,
+    );
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "queued message" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // User clicks Stop.
+    fireEvent.click(screen.getByLabelText("Stop generation"));
+    expect(onStop).toHaveBeenCalledTimes(1);
+
+    // The parent tears the stream down: streaming -> false.
+    rerender(
+      <Composer {...baseProps} streaming={false} onSubmit={onSubmit} onStop={onStop} />,
+    );
+
+    // No auto-send into the aborted state.
+    expect(onSubmit).not.toHaveBeenCalled();
+    // The draft is preserved, not discarded.
+    const item = screen.getByTestId("composer-queue-item");
+    expect(item.textContent).toContain("queued message");
+  });
+
+  it("lets the user manually flush a stranded (post-abort) queued message via Send now", () => {
+    const onSubmit = vi.fn();
+    const onStop = vi.fn();
+    const { rerender } = render(
+      <Composer {...baseProps} streaming onSubmit={onSubmit} onStop={onStop} />,
+    );
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "stranded message" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.click(screen.getByLabelText("Stop generation"));
+    rerender(
+      <Composer {...baseProps} streaming={false} onSubmit={onSubmit} onStop={onStop} />,
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // "Send now" only appears once idle — flushes the head item manually.
+    fireEvent.click(screen.getByTestId("composer-queue-send-now"));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const [, , sentUserText] = onSubmit.mock.calls[0];
+    expect(sentUserText).toBe("stranded message");
+    expect(screen.queryByTestId("composer-queue")).toBeNull();
+  });
+
+  it("removes a queued message without sending it", () => {
+    const onSubmit = vi.fn();
+    render(<Composer {...baseProps} streaming onSubmit={onSubmit} />);
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "will be removed" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(screen.getByTestId("composer-queue-item")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("composer-queue-remove"));
+
+    expect(screen.queryByTestId("composer-queue")).toBeNull();
+    // Rerendering to idle must not send a removed item.
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});

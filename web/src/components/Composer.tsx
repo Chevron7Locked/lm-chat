@@ -188,6 +188,22 @@ export function resolveChatIntegrationsField(
 
 const NO_SELECTED_INTEGRATIONS: string[] = [];
 
+// ─── Message queue (streaming submit) ───────────────────────────────────────
+
+/**
+ * A user message submitted while a stream is already in flight. The
+ * `ChatStreamPayload` is built in full at submit time (same code path as a
+ * normal send) and captured here verbatim — it is NOT re-derived when the
+ * queue drains, so it reflects the model/preset/tools that were active when
+ * the user hit send, not whatever the composer's state happens to be later.
+ */
+interface QueuedMessage {
+  id: number;
+  userText: string;
+  payload: ChatStreamPayload;
+  presetLabel: string | undefined;
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function Composer({
@@ -272,6 +288,11 @@ export function Composer({
   const [showComparePicker, setShowComparePicker] = useState(false);
   const [compareModelA, setCompareModelA] = useState("");
   const [compareModelB, setCompareModelB] = useState("");
+
+  // Messages submitted while `streaming` is true land here instead of being
+  // dropped; see the streaming→idle effect below (defined after handleSubmit)
+  // for the auto-send + Stop-abort behavior.
+  const [queue, setQueue] = useState<QueuedMessage[]>([]);
 
   // Per-chat integrations state, seeded from admin defaults.
   // Decision: per-chat (state persists for this chat session, resets on new
@@ -397,6 +418,20 @@ export function Composer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queueIdRef = useRef(0);
+  // Tracks the PREVIOUS value of `streaming` so the effect below can detect
+  // a genuine true→false edge (stream just finished) instead of acting on
+  // every render where `streaming` happens to already be false. Reading AND
+  // writing this ref synchronously inside the same effect pass makes it
+  // self-correcting under React 18 StrictMode's dev-only double-invoke of
+  // effects (same idiom as Chat.tsx's staleModelSwitchedForChatIdRef): a
+  // second back-to-back invocation sees the ref already updated by the
+  // first, so it no-ops instead of double-firing.
+  const prevStreamingRef = useRef(streaming);
+  // Set by handleStop just before calling onStop; consumed by the very next
+  // streaming→false transition so an ABORTED stream does not auto-send the
+  // next queued message (see the effect below).
+  const wasStoppedRef = useRef(false);
   const { push } = useToast();
   const { data: prompts } = usePrompts();
 
@@ -665,14 +700,22 @@ function handleChange(e: ChangeEvent<HTMLTextAreaElement>): void {
     }
 
     // modelId undefined/empty means no model selected; block submission to
-    // prevent a 422 from CanonicalChatRequest.model (required field).
-    // This guard mirrors the canSubmit check so Cmd+Enter also respects it.
-    if (trimmed === "" || streaming || modelId === undefined || modelId === "")
-      return;
+    // prevent a 422 from CanonicalChatRequest.model (required field). This
+    // guard mirrors canSubmit so Cmd+Enter also respects it. `streaming` is
+    // deliberately NOT part of this bail — a message typed mid-stream still
+    // needs to reach the enqueue path below instead of being dropped.
+    if (trimmed === "" || modelId === undefined || modelId === "") return;
 
-    // Slash command dispatch.
+    // Slash command dispatch. Side-effecting (opens pickers, forks the chat,
+    // clears it, activates a preset sub-session, …) so it only runs when
+    // nothing is actively streaming — those actions assume a settled UI, and
+    // "queue a slash command for later" doesn't make sense the way queuing a
+    // plain message does. While streaming this silently no-ops and the text
+    // stays put, same as the whole-composer behavior before message
+    // queuing existed.
     const parsed = parseSlashCommand(trimmed);
     if (parsed !== null) {
+      if (streaming) return;
       setText("");
       setShowSlash(false);
       dispatchSlashCommandRef.current(parsed.name, parsed.args);
@@ -753,8 +796,23 @@ function handleChange(e: ChangeEvent<HTMLTextAreaElement>): void {
 
     // active_preset is persistent — it stays until the user changes it
     // via the rail picker.  No auto-clear here.
-    // Clear attachments after submit.
+    // Clear attachments after submit (whether sent now or queued — a
+    // queued item's payload already has its own copy of the data URLs).
     setAttachedImages([]);
+
+    if (streaming) {
+      // A response is already in flight: enqueue instead of dropping the
+      // message. It auto-sends as the next turn once the CURRENT stream
+      // finishes on its own (see the streaming→idle effect below); if the
+      // user hits Stop instead, it stays queued rather than firing into the
+      // now-interrupted conversation.
+      const id = (queueIdRef.current += 1);
+      setQueue((prev) => [
+        ...prev,
+        { id, userText: trimmed, payload, presetLabel: presetSnapshot?.label },
+      ]);
+      return;
+    }
 
     // Pass the preset label (if any) so Chat.tsx can render the
     // subchat-frame divider.
@@ -774,8 +832,66 @@ function handleChange(e: ChangeEvent<HTMLTextAreaElement>): void {
     push,
   ]);
 
+  // Stop button wrapper — records that THIS streaming→false transition is an
+  // abort before calling the real onStop, so the effect below can skip the
+  // auto-send for it.
+  const handleStop = useCallback((): void => {
+    wasStoppedRef.current = true;
+    onStop();
+  }, [onStop]);
+
+  // Drains the queue when the active stream finishes.
+  //  - Natural completion (the model finished / errored / hit a stop
+  //    reason on its own): send the oldest queued message as the next turn.
+  //  - User-initiated Stop (wasStoppedRef, set by handleStop above): skip
+  //    the auto-send. The stream ended because the user chose to interrupt
+  //    it — auto-firing another generation right into that would defeat the
+  //    point of stopping. The queued message(s) are NOT discarded; they
+  //    stay visible (queue chip row below) and can be sent manually via
+  //    "Send now" once idle, or will still auto-send after whatever stream
+  //    completes next.
+  useEffect(() => {
+    const wasStreaming = prevStreamingRef.current;
+    prevStreamingRef.current = streaming;
+    if (!wasStreaming || streaming) return; // only a true → false edge matters
+    if (wasStoppedRef.current) {
+      wasStoppedRef.current = false;
+      return;
+    }
+    const next = queue[0];
+    if (next === undefined) return;
+    setQueue((prev) => prev.filter((item) => item.id !== next.id));
+    onSubmit(chatId, next.payload, next.userText, next.presetLabel);
+  }, [streaming, queue, chatId, onSubmit]);
+
+  // Manually fire a queued message right now (only meaningful once idle —
+  // sending while another stream is active would race two streams for the
+  // same chat). Used by the queue chip row's "Send now" control, mainly to
+  // recover a message stranded by a Stop-abort (see the effect above).
+  const sendQueuedMessageNow = useCallback(
+    (id: number): void => {
+      const target = queue.find((item) => item.id === id);
+      if (target === undefined) return;
+      setQueue((prev) => prev.filter((item) => item.id !== id));
+      onSubmit(chatId, target.payload, target.userText, target.presetLabel);
+    },
+    [queue, chatId, onSubmit],
+  );
+
+  // Discard a queued message without sending it.
+  const removeQueuedMessage = useCallback((id: number): void => {
+    setQueue((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
   function handleSlashSelect(cmd: SlashCommand): void {
     setShowSlash(false);
+    // The slash menu can now be opened mid-stream (the textarea stays
+    // typable while streaming — see the queue feature above), but actuating
+    // a command is still blocked: dispatchSlashCommand's side effects
+    // (opening pickers, forking, clearing, activating a preset session, …)
+    // assume a settled UI. Close the menu and leave the typed text as-is so
+    // the user can complete the command once the stream finishes.
+    if (streaming) return;
     if (cmd.comingSoon === true) {
       setText("");
       textareaRef.current?.focus();
@@ -796,8 +912,11 @@ function handleChange(e: ChangeEvent<HTMLTextAreaElement>): void {
 
   // modelId undefined/empty means no model selected — block submission to
   // prevent a 422 from CanonicalChatRequest.model (required field).
+  // `streaming` is deliberately NOT part of this gate: while a response is
+  // in flight the Send button becomes "Queue" (see the actions row below)
+  // and stays enabled for a non-empty draft, same as a normal send.
   const canSubmit =
-    text.trim() !== "" && !streaming && modelId !== undefined && modelId !== "";
+    text.trim() !== "" && modelId !== undefined && modelId !== "";
 
   return (
     <div className="lmchat-composer-wrapper">
@@ -1010,6 +1129,87 @@ function handleChange(e: ChangeEvent<HTMLTextAreaElement>): void {
         </div>
       )}
 
+      {/* Message queue — messages submitted while a stream is active (see
+          handleSubmit). Visible so "where did my message go" never has to
+          be asked. The head item auto-sends once the CURRENT stream
+          finishes naturally; a Stop-initiated abort skips that auto-send
+          (wasStoppedRef) so nothing fires into the interrupted response —
+          each item stays here with its own Send now / remove controls. */}
+      {queue.length > 0 && (
+        <div
+          role="list"
+          aria-label="Queued messages"
+          aria-live="polite"
+          data-testid="composer-queue"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-glue, 4px)",
+            marginBottom: "var(--space-glue, 4px)",
+          }}
+        >
+          {queue.map((item, idx) => (
+            <div
+              key={item.id}
+              role="listitem"
+              data-testid="composer-queue-item"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                background: "color-mix(in oklch, var(--color-surface) 85%, var(--color-accent))",
+                border: "1px solid var(--color-border)",
+                borderRadius: "var(--radius-sm, 4px)",
+                padding: "4px 8px",
+                fontSize: "var(--fs-caption)",
+              }}
+            >
+              <span style={{ opacity: 0.7, whiteSpace: "nowrap" }}>
+                {idx === 0 ? "Queued — sends next" : `Queued #${String(idx + 1)}`}
+              </span>
+              <span
+                style={{
+                  maxWidth: "220px",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  flex: 1,
+                }}
+              >
+                {item.userText}
+              </span>
+              {!streaming && (
+                <button
+                  type="button"
+                  onClick={() => { sendQueuedMessageNow(item.id); }}
+                  aria-label={`Send queued message now: ${item.userText}`}
+                  data-testid="composer-queue-send-now"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                    color: "var(--color-accent)",
+                    fontSize: "var(--fs-caption)",
+                  }}
+                >
+                  Send now
+                </button>
+              )}
+              <button
+                type="button"
+                aria-label={`Remove queued message: ${item.userText}`}
+                onClick={() => { removeQueuedMessage(item.id); }}
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center" }}
+                data-testid="composer-queue-remove"
+              >
+                <X size={12} aria-hidden="true" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Slash command menu — relative container scoped to the same max-width
           as the bar so the menu never exceeds the input column. */}
       <div className="lmchat-composer-inner">
@@ -1061,7 +1261,10 @@ function handleChange(e: ChangeEvent<HTMLTextAreaElement>): void {
             onBlur={() => {
               presence?.onComposerBlurred?.();
             }}
-            disabled={streaming}
+            // Intentionally NOT `disabled={streaming}` — the composer
+            // supports a message queue: typing (and submitting, which
+            // enqueues — see handleSubmit) must keep working while a
+            // response streams so the user isn't blocked waiting on it.
             // Placeholder no longer dumps 3 keyboard
             // hints (WCAG 2.5: placeholders aren't the place for
             // instructions). The Cmd+K palette + the `?` keyboard-help
@@ -1112,29 +1315,35 @@ function handleChange(e: ChangeEvent<HTMLTextAreaElement>): void {
               disabled={streaming}
             />
 
-            {/* Stop / Send */}
-            {streaming ? (
+            {/* Stop / Send. Both render while streaming: Stop aborts the
+                live response; Send becomes "Queue" and stays enabled for a
+                non-empty draft — see handleSubmit's streaming branch. */}
+            {streaming && (
               <button
                 type="button"
-                onClick={onStop}
+                onClick={handleStop}
                 aria-label="Stop generation"
                 title="Stop generation"
                 className="lmchat-composer-stop-btn"
               >
                 <Square size={16} fill="currentColor" aria-hidden />
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!canSubmit}
-                aria-label="Send message"
-                title="Send message"
-                className="lmchat-composer-send-btn"
-              >
-                <SendHorizontal size={16} aria-hidden /> Send
-              </button>
             )}
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!canSubmit}
+              aria-label={streaming ? "Queue message" : "Send message"}
+              title={
+                streaming
+                  ? "Queue — sends automatically once the current response finishes"
+                  : "Send message"
+              }
+              className="lmchat-composer-send-btn"
+              data-testid="composer-send-btn"
+            >
+              <SendHorizontal size={16} aria-hidden /> {streaming ? "Queue" : "Send"}
+            </button>
           </div>
         </div>
       </div>
