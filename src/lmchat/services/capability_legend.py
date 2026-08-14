@@ -6,11 +6,17 @@ model has no way to know that unless it's told. This module renders a
 compact reference block — a menu the model self-navigates, not a script it
 gets pushed through.
 
-Two kinds of capability, and the distinction is load-bearing:
+Three kinds of capability, and the distinctions are load-bearing:
 
+- **ADOPT** — ways of working the model applies to ITSELF, inline, with no
+  command and no sub-agent: the preset modes as postures (research,
+  architect, code, write, analyze). Stating this is the whole point of the
+  block's first section — without it the model reads the modes as things
+  only the user can invoke and never shifts its own approach.
 - **OFFER** — user-invoked; the model can only *suggest* these, never call
-  them: the sub-agent preset modes (mirrors ``web/src/lib/presets.ts``) and
-  the chat-feature slash commands.
+  them: the slash commands, which launch the SAME modes in a dedicated
+  clean-context sub-agent (mirrors ``web/src/lib/presets.ts``), plus the
+  chat-feature commands. The user-driven sub-agent path is unchanged.
 - **DO** — the model calls these directly: whatever tools are enabled for
   the current chat.
 
@@ -46,18 +52,28 @@ class CapabilityRow:
     description: str
 
 
-# OFFER — sub-agent preset modes. Order and wording mirror the locked
-# legend rendering; commands match the slashCmd values in
-# web/src/lib/presets.ts. "general" has no distinct slash worth suggesting
-# here — it's the silent default, not a mode to reach for.
+# ADOPT + OFFER — the preset modes, as POSTURES the model can take on
+# itself. ``command`` holds the BARE mode name (no slash): the same tuple
+# renders both sections — the adopt list uses the name, the suggest list
+# prefixes "/" to name the sub-agent command. One source of truth, and the
+# five slash rows collapse to a single line, which holds the net cost of
+# the added adopt section to +189 chars (~50 tokens) per turn. This block
+# rides EVERY turn, so that cost is deliberate and measured, not incidental.
+#
+# Descriptions are the WAY OF WORKING, not the delivery mechanism — the old
+# wording ("runs in a clean-context sub-agent") described the sub-agent
+# rather than the posture, which is precisely what taught the model these
+# were not its to adopt. "general" is omitted: it's the silent default, not
+# a mode to reach for. Names match the slashCmd values in
+# web/src/lib/presets.ts.
 MODES: tuple[CapabilityRow, ...] = (
     CapabilityRow(
-        "/research", "deep, multi-step research; runs in a clean-context sub-agent"
+        "research", "deep, multi-step investigation: gather, cross-check, cite"
     ),
-    CapabilityRow("/architect", "design a system or plan before building"),
-    CapabilityRow("/code", "focused coding in a clean-context sub-agent"),
-    CapabilityRow("/write", "long-form / creative writing"),
-    CapabilityRow("/analyze", "structured data / document analysis"),
+    CapabilityRow("architect", "design the system or plan the approach before building"),
+    CapabilityRow("code", "focused implementation: precise, minimal, tested"),
+    CapabilityRow("write", "long-form or creative prose"),
+    CapabilityRow("analyze", "structured data / document analysis"),
 )
 
 # OFFER — stable chat-feature slash commands.
@@ -110,9 +126,20 @@ def render_capability_legend(
         "Reference — reach for one of these only when it clearly fits the "
         "task; most turns need none. Compose freely.",
         "",
-        "Suggest to the user (they run these):",
+        "How you can work (adopt any of these yourself — no command needed):",
     ]
-    for row in (*MODES, *FEATURES):
+    for row in MODES:
+        lines.append(f"- {row.command} — {row.description}")
+    lines.append("")
+    lines.append("Suggest to the user (they run these):")
+    # The same modes, but as the user-run clean-context sub-agent. One line,
+    # not five — the sub-agent variant is a single fact, and keeping it terse
+    # is what makes room for the adopt section above at no net per-turn cost.
+    lines.append(
+        f"- {', '.join('/' + row.command for row in MODES)} — the same modes, "
+        "run in a separate clean-context sub-agent"
+    )
+    for row in FEATURES:
         lines.append(f"- {row.command} — {row.description}")
     lines.append("")
     lines.append("Tools you can call directly:")

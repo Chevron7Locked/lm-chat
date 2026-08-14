@@ -4,7 +4,7 @@
 Covers the render function in isolation (no StreamingService, no DB):
 modes + features are always present, tools reflect the enabled list via
 the catalog lookup, the empty-tools fallback line renders, and the
-OFFER/DO framing survives.
+ADOPT/OFFER/DO framing survives.
 """
 from __future__ import annotations
 
@@ -23,10 +23,42 @@ def _fake_catalog(entry_id: str) -> dict | None:
     return None
 
 
-def test_all_modes_present_with_slash_and_description() -> None:
+def test_all_modes_present_as_adoptable_postures() -> None:
+    """Each mode renders in the ADOPT section by its BARE name (no slash).
+
+    The bare name is the point: these are ways the model can work, not
+    commands only the user can run.
+    """
     legend = render_capability_legend(enabled_tools=[], catalog=_fake_catalog)
     for row in MODES:
+        assert not row.command.startswith("/"), (
+            f"MODES carries bare mode names, not slash commands; got {row.command!r}"
+        )
         assert f"- {row.command} — {row.description}" in legend
+
+
+def test_model_is_told_it_can_adopt_modes_itself() -> None:
+    """The model must be told the modes are its OWN to adopt, with no command.
+
+    Red-on-revert for C2: the legend used to file every mode under
+    "Suggest to the user (they run these)" with sub-agent-flavoured
+    descriptions, so the model read them as things only the user could
+    invoke and never shifted its own approach.
+    """
+    legend = render_capability_legend(enabled_tools=[], catalog=_fake_catalog)
+    assert "How you can work (adopt any of these yourself — no command needed):" in legend
+    # Menu, not nudge — the block must never grow eager directive language
+    # (an injected directive once inflated local-model reasoning 30x).
+    for nudge in ("you should", "proactively", "always ", "make sure you"):
+        assert nudge not in legend.lower(), f"legend must stay a menu, found {nudge!r}"
+
+
+def test_slash_commands_still_offered_as_user_run_sub_agents() -> None:
+    """The user-driven sub-agent path is preserved, one line, slash-prefixed."""
+    legend = render_capability_legend(enabled_tools=[], catalog=_fake_catalog)
+    for row in MODES:
+        assert f"/{row.command}" in legend
+    assert "run in a separate clean-context sub-agent" in legend
 
 
 def test_all_features_present_with_slash_and_description() -> None:
@@ -35,8 +67,9 @@ def test_all_features_present_with_slash_and_description() -> None:
         assert f"- {row.command} — {row.description}" in legend
 
 
-def test_offer_and_do_headers_present() -> None:
+def test_adopt_offer_and_do_headers_present() -> None:
     legend = render_capability_legend(enabled_tools=[], catalog=_fake_catalog)
+    assert "How you can work (adopt any of these yourself — no command needed):" in legend
     assert "Suggest to the user (they run these):" in legend
     assert "Tools you can call directly:" in legend
 

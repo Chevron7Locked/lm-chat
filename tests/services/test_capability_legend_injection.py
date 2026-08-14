@@ -139,6 +139,9 @@ async def test_chain_mode_injects_capability_legend(engine: AsyncEngine) -> None
     assert sent is not None, "lm_client.stream was not called"
     sys_p = getattr(sent, "system_prompt", "") or ""
     assert "[Capabilities]" in sys_p
+    # C2: the ADOPT framing must survive assembly — the model is told the
+    # modes are its own to take on, not merely commands to suggest.
+    assert "adopt any of these yourself" in sys_p
     assert "Suggest to the user (they run these):" in sys_p
     assert "Tools you can call directly:" in sys_p
     assert "- searxng —" in sys_p
