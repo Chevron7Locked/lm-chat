@@ -283,6 +283,18 @@ export async function sendTurnAndWait(
   await composer.waitFor({ state: "visible", timeout: 15_000 });
   await composer.fill(text);
   await page.keyboard.press("Enter");
-  // Composer disables during the stream and re-enables at the terminal.
-  await expect(composer).toBeEnabled({ timeout: turnTimeoutMs });
+  // The composer no longer disables during a stream (message-queue feature —
+  // you can type/queue while streaming), so `toBeEnabled` is now always true
+  // and can't signal completion. The send button reads "Queue" while a
+  // response streams and returns to "Send" at the terminal.
+  //
+  // Best-effort confirm the stream STARTED (button -> "Queue") so a still-idle
+  // "Send" isn't mistaken for completion — but tolerate a very fast turn that
+  // flips back before we observe it. The terminal wait below is authoritative.
+  const sendBtn = page.getByTestId("composer-send-btn");
+  await sendBtn
+    .filter({ hasText: "Queue" })
+    .waitFor({ state: "visible", timeout: 10_000 })
+    .catch(() => undefined);
+  await expect(sendBtn).toContainText("Send", { timeout: turnTimeoutMs });
 }
