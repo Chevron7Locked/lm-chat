@@ -39,7 +39,7 @@ function loadLightModeAllowlist(): AllowlistEntry[] {
   try {
     const jsonPath = join(__dirname, "known-fail-light-mode.json");
     const raw = readFileSync(jsonPath, "utf-8");
-    const parsed = JSON.parse(raw) as { allowlist: AllowlistEntry[] };
+    const parsed = JSON.parse(raw) as { allowlist?: AllowlistEntry[] };
     return parsed.allowlist ?? [];
   } catch {
     return [];
@@ -110,7 +110,7 @@ async function checkA11y(
     // Assert the allowlist has NOT grown since the frozen baseline.
       expect(
         allowlist.length,
-        `Light-mode allowlist grew from ${EXPECTED_ALLOWLIST_SIZE} to ${allowlist.length} — new violations must be reviewed`
+        `Light-mode allowlist grew from ${String(EXPECTED_ALLOWLIST_SIZE)} to ${String(allowlist.length)} — new violations must be reviewed`
       ).toBeLessThanOrEqual(EXPECTED_ALLOWLIST_SIZE);
 
       // Match on BOTH rule ID AND target (selector), so a prior exception for
@@ -127,7 +127,7 @@ async function checkA11y(
       const msg = unlisted
         .map(
           (v) =>
-            `[${v.impact}] ${v.id}: ${v.description} (${v.nodes.length} node(s)) — ${routeLabel} [light-mode, not in allowlist]`
+            `[${String(v.impact)}] ${v.id}: ${v.description} (${String(v.nodes.length)} node(s)) — ${routeLabel} [light-mode, not in allowlist]`
         )
         .join("\n");
       throw new Error(
@@ -149,7 +149,7 @@ async function checkA11y(
       const msg = blockers
         .map(
           (v) =>
-            `[${v.impact}] ${v.id}: ${v.description} (${v.nodes.length} node(s)) — ${routeLabel}`
+            `[${String(v.impact)}] ${v.id}: ${v.description} (${String(v.nodes.length)} node(s)) — ${routeLabel}`
         )
         .join("\n");
       throw new Error(`axe critical/serious violations on ${routeLabel}:\n${msg}`);
@@ -190,7 +190,7 @@ async function createChatForTest(
       body: new URLSearchParams({ title: "A11y Test Chat" }).toString(),
       credentials: "include",
     });
-    if (!resp.ok) throw new Error(`POST /api/chats → ${resp.status}`);
+    if (!resp.ok) throw new Error(`POST /api/chats → ${String(resp.status)}`);
     const data = await resp.json() as { id: number };
     return data.id;
   }, backendURL);
@@ -212,13 +212,13 @@ async function navigateToChatPage(
       body: new URLSearchParams({ title: "A11y Test Chat" }).toString(),
       credentials: "include",
     });
-    if (!resp.ok) throw new Error(`POST /api/chats → ${resp.status}`);
+    if (!resp.ok) throw new Error(`POST /api/chats → ${String(resp.status)}`);
     const data = await resp.json() as { id: number };
     return data.id;
   }, backendURL);
 
-  await page.goto(`${backendURL}/chats/${chatId}`);
-  await page.waitForURL(`${backendURL}/chats/${chatId}`, { timeout: 10_000 });
+  await page.goto(`${backendURL}/chats/${String(chatId)}`);
+  await page.waitForURL(`${backendURL}/chats/${String(chatId)}`, { timeout: 10_000 });
   await page.waitForLoadState("networkidle", { timeout: 10_000 });
   return chatId;
 }
@@ -314,10 +314,10 @@ test.describe("axe-core WCAG 2a+2aa sweep — dark mode (0-violation)", () => {
   test("chat page (with created chat)", async ({ page, backendURL, testUsername, testPassword }) => {
     await loginAndWait(page, backendURL, testUsername, testPassword);
     const chatId = await createChatForTest(page, backendURL);
-    await page.goto(`${backendURL}/chats/${chatId}`);
-    await page.waitForURL(`${backendURL}/chats/${chatId}`, { timeout: 10_000 });
+    await page.goto(`${backendURL}/chats/${String(chatId)}`);
+    await page.waitForURL(`${backendURL}/chats/${String(chatId)}`, { timeout: 10_000 });
     await page.waitForLoadState("networkidle", { timeout: 10_000 });
-    await checkA11y(page, `/chats/${chatId}`, "dark");
+    await checkA11y(page, `/chats/${String(chatId)}`, "dark");
   });
 
   test("settings page", async ({ page, backendURL, testUsername, testPassword }) => {
@@ -379,7 +379,7 @@ test.describe("axe-core WCAG 2a+2aa sweep — dark mode (0-violation)", () => {
         body: new URLSearchParams({ title: "A11y AB Compare Chat" }).toString(),
         credentials: "include",
       });
-      if (!resp.ok) throw new Error(`POST /api/chats → ${resp.status}`);
+      if (!resp.ok) throw new Error(`POST /api/chats → ${String(resp.status)}`);
       const data = await resp.json() as { id: number };
       return data.id;
     }, backendURL);
@@ -394,7 +394,7 @@ test.describe("axe-core WCAG 2a+2aa sweep — dark mode (0-violation)", () => {
             model_b: "stub-b",
           }),
         });
-        await fetch(`${url}/api/chats/${id}`, {
+        await fetch(`${url}/api/chats/${String(id)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: body.toString(),
@@ -404,8 +404,8 @@ test.describe("axe-core WCAG 2a+2aa sweep — dark mode (0-violation)", () => {
       { url: backendURL, id: chatId }
     );
 
-    await page.goto(`${backendURL}/chats/${chatId}`);
-    await page.waitForURL(`${backendURL}/chats/${chatId}`, { timeout: 10_000 });
+    await page.goto(`${backendURL}/chats/${String(chatId)}`);
+    await page.waitForURL(`${backendURL}/chats/${String(chatId)}`, { timeout: 10_000 });
     await page.waitForLoadState("networkidle", { timeout: 10_000 });
     await checkA11y(page, "/compare", "dark");
   });

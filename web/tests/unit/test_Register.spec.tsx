@@ -111,7 +111,7 @@ describe("Register", () => {
     // Fetch call 0 = setup_status; call 1 = /api/auth/register; call 2 = /api/auth/login.
     const registerCall = vi.mocked(global.fetch).mock.calls[1];
     expect(registerCall?.[0]).toBe("/api/auth/register");
-    const init = registerCall?.[1] as RequestInit | undefined;
+    const init = registerCall?.[1];
     expect(init?.method).toBe("POST");
     const headers = init?.headers as Record<string, string> | undefined;
     expect(headers?.["Content-Type"]).toBe("application/x-www-form-urlencoded");

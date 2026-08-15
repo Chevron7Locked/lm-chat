@@ -65,7 +65,8 @@ test(
     const newUrl = page.url();
     const newIdMatch = /\/chats\/(\d+)/.exec(newUrl);
     expect(newIdMatch).not.toBeNull();
-    const newChatId = Number(newIdMatch![1]);
+    if (newIdMatch == null) throw new Error(`expected a /chats/:id URL, got ${newUrl}`);
+    const newChatId = Number(newIdMatch[1]);
 
     // The fork must be a different chat.
     expect(newChatId).not.toBe(originalChatId);

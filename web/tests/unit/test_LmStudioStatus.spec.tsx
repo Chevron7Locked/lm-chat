@@ -17,7 +17,7 @@ import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 
 /** A health response indicating LM Studio is reachable with 1 loaded model. */
 const HEALTHY = {
@@ -92,7 +92,7 @@ describe("useLmStudioStatus", () => {
     ]);
     const { useLmStudioStatus } = await import("@/hooks/useLmStudioStatus");
     const { result } = renderHook(() => useLmStudioStatus(), { wrapper: makeWrapper() });
-    await waitFor(() => expect(result.current.status).toBe("ok"));
+    await waitFor(() => { expect(result.current.status).toBe("ok"); });
     expect(result.current.tooltip.toLowerCase()).toContain("connected");
   });
 
@@ -100,7 +100,7 @@ describe("useLmStudioStatus", () => {
     mockRequest.mockRejectedValue(new Error("network"));
     const { useLmStudioStatus } = await import("@/hooks/useLmStudioStatus");
     const { result } = renderHook(() => useLmStudioStatus(), { wrapper: makeWrapper() });
-    await waitFor(() => expect(result.current.status).toBe("error"));
+    await waitFor(() => { expect(result.current.status).toBe("error"); });
     expect(result.current.tooltip.toLowerCase()).toContain("probe");
   });
 
@@ -127,7 +127,7 @@ describe("useLmStudioStatus", () => {
     ]);
     const { useLmStudioStatus } = await import("@/hooks/useLmStudioStatus");
     const { result } = renderHook(() => useLmStudioStatus(), { wrapper: makeWrapper() });
-    await waitFor(() => expect(result.current.status).toBe("error"));
+    await waitFor(() => { expect(result.current.status).toBe("error"); });
     expect(result.current.tooltip.toLowerCase()).toContain("no models loaded");
   });
 });
@@ -179,6 +179,6 @@ describe("LmStudioStatusBadge", () => {
     );
     const badge = await screen.findByTestId("lm-studio-status-badge");
     // The aria-label still describes the connection, but the visible label is hidden.
-    expect(badge.textContent?.includes("LM Studio")).toBe(false);
+    expect(badge.textContent.includes("LM Studio")).toBe(false);
   });
 });

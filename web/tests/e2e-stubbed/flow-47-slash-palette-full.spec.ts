@@ -47,13 +47,13 @@ test.describe("Flow 47 — Cmd+/ palette completeness", () => {
     await expect(palette).toBeVisible({ timeout: 5000 });
   });
 
-  test("palette lists multiple slash commands", async () => {
+  test("palette lists multiple slash commands", () => {
     // This is a fixme because the SlashPalette component uses state-based rendering
     // and the exact testids/selectors may not be available without product-code changes.
     test.fixme(true, "SlashPalette lacks stable data-testid attributes for command items");
   });
 
-  test("selecting /research from palette activates research mode", async () => {
+  test("selecting /research from palette activates research mode", () => {
     test.fixme(true, "SlashPalette command selection routing requires real model and preset interaction");
   });
 });

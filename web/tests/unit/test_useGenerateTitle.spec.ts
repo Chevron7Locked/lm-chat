@@ -13,7 +13,7 @@ import type { ReactNode } from "react";
 
 // ─── Mock api module ──────────────────────────────────────────────────────────
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: {

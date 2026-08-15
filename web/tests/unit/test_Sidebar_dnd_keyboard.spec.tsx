@@ -22,7 +22,7 @@ import type { ReactNode } from "react";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 const mockMutate = vi.fn();
 
 vi.mock("@/lib/api", () => ({

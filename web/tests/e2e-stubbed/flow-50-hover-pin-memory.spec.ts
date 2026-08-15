@@ -52,7 +52,7 @@ test.describe("Flow 50 — Hover-bar message-level pin", () => {
     });
   });
 
-  test("hover assistant message reveals action bar with pin option", async () => {
+  test("hover assistant message reveals action bar with pin option", () => {
     // The ChatMessage component does not have a pin button in its hover
     // action bar. This feature requires a product-code change to add
     // a pin button to the lmchat-message-actions div.

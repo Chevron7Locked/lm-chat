@@ -74,7 +74,7 @@ describe("useSubSessionSSE", () => {
     const onComplete = vi.fn();
     const { result } = renderHook(() => useSubSessionSSE());
 
-    await act(async () => {
+    act(() => {
       result.current.stream({ ...baseParams, onComplete });
     });
 
@@ -106,7 +106,7 @@ describe("useSubSessionSSE", () => {
 
     const { result } = renderHook(() => useSubSessionSSE());
 
-    await act(async () => {
+    act(() => {
       result.current.stream({ ...baseParams, subSessionId: 42 });
     });
 
@@ -133,7 +133,7 @@ describe("useSubSessionSSE", () => {
 
     const { result } = renderHook(() => useSubSessionSSE());
 
-    await act(async () => {
+    act(() => {
       result.current.stream(baseParams);
     });
 
@@ -162,7 +162,7 @@ describe("useSubSessionSSE", () => {
     const onComplete = vi.fn();
     const { result } = renderHook(() => useSubSessionSSE());
 
-    await act(async () => {
+    act(() => {
       result.current.finalize({ ...baseParams, onComplete });
     });
 
@@ -194,7 +194,7 @@ describe("useSubSessionSSE", () => {
     const onComplete = vi.fn();
     const { result } = renderHook(() => useSubSessionSSE());
 
-    await act(async () => {
+    act(() => {
       result.current.stream({ ...baseParams, onComplete });
     });
 
@@ -219,7 +219,7 @@ describe("useSubSessionSSE", () => {
 
     const { result } = renderHook(() => useSubSessionSSE());
 
-    await act(async () => {
+    act(() => {
       result.current.stream(baseParams);
     });
 
@@ -268,7 +268,7 @@ describe("useSubSessionSSE", () => {
 
     const { result } = renderHook(() => useSubSessionSSE());
 
-    await act(async () => {
+    act(() => {
       result.current.stream(baseParams);
     });
 

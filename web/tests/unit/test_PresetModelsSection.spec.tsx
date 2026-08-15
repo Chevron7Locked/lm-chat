@@ -36,7 +36,7 @@ const mockSetMutate = vi.fn();
 
 // Mutable state object — tests mutate this before rendering.
 const mockPresetModelsState = vi.hoisted(() => ({
-  data: {} as Record<string, { provider: string; model_id: string }>,
+  data: {},
   isLoading: false,
   isPending: false,
 }));
@@ -188,7 +188,7 @@ describe("PresetModelsSection", () => {
     // Simulate an error on mutate call.
     mockSetMutate.mockImplementationOnce(
       (_mapping: unknown, options: { onError?: (err: { detail?: string }) => void }) => {
-        options?.onError?.({ detail: "Save failed." });
+        options.onError?.({ detail: "Save failed." });
       },
     );
 
@@ -198,8 +198,9 @@ describe("PresetModelsSection", () => {
     });
 
     expect(mockPush).toHaveBeenCalledOnce();
-    // Guaranteed non-null by the toHaveBeenCalledOnce() check just above.
-    expect(mockPush.mock.calls[0]![0]).toMatchObject({
+    const pushCall = mockPush.mock.calls[0];
+    if (!pushCall) throw new Error("expected mockPush to have been called");
+    expect(pushCall[0]).toMatchObject({
       variant: "error",
       message: "Save failed.",
     });
@@ -239,7 +240,8 @@ describe("PresetModelsSection", () => {
     // trigger renders the truth), carrying the "not loaded" marker.
     // A rendered <select> always has a selected option — DOM semantics, not
     // an assumption; the toBeTruthy() below is a runtime belt-and-braces.
-    const selected = coderSelect.selectedOptions[0]!;
+    const selected = coderSelect.selectedOptions[0];
+    if (!selected) throw new Error("expected a selected <option> in the coder preset select");
     expect(selected).toBeTruthy();
     expect(selected.value).toBe("lmstudio::laguna-s-2.1@q4_k_xl");
     expect(selected.textContent).toContain("laguna-s-2.1@q4_k_xl");
@@ -259,9 +261,9 @@ describe("PresetModelsSection", () => {
     // No "Saved but not loaded" group should appear for a valid pin.
     expect(screen.queryByText("Saved but not loaded")).toBeNull();
     // The selected option is the real loaded one, unmarked.
-    expect(coderSelect.selectedOptions[0]!.textContent).not.toContain(
-      "not loaded",
-    );
+    const unstaleSelected = coderSelect.selectedOptions[0];
+    if (!unstaleSelected) throw new Error("expected a selected <option> in the coder preset select");
+    expect(unstaleSelected.textContent).not.toContain("not loaded");
   });
 
   it("re-selecting a stale option persists the same composite value (no crash)", async () => {
@@ -304,14 +306,14 @@ describe("PresetModelsSection", () => {
 
     // Each row reflects its OWN stored value, provider prefix preserved.
     expect(coderSelect.value).toBe("lmstudio::laguna-s-2.1@q4_k_xl");
-    expect(coderSelect.selectedOptions[0]!.textContent).toContain("not loaded");
+    const coderSelected = coderSelect.selectedOptions[0];
+    if (!coderSelected) throw new Error("expected a selected <option> in the coder preset select");
+    expect(coderSelected.textContent).toContain("not loaded");
     expect(researchSelect.value).toBe("openrouter::acme/deprecated-70b");
-    expect(researchSelect.selectedOptions[0]!.textContent).toContain(
-      "acme/deprecated-70b",
-    );
-    expect(researchSelect.selectedOptions[0]!.textContent).toContain(
-      "not loaded",
-    );
+    const researchSelected = researchSelect.selectedOptions[0];
+    if (!researchSelected) throw new Error("expected a selected <option> in the research preset select");
+    expect(researchSelected.textContent).toContain("acme/deprecated-70b");
+    expect(researchSelected.textContent).toContain("not loaded");
   });
 });
 

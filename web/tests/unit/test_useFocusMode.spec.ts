@@ -12,11 +12,11 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useFocusMode } from "@/hooks/useFocusMode";
 
-const realMatchMedia = window.matchMedia;
+const realMatchMedia = window.matchMedia.bind(window);
 
 /** Stub matchMedia so the reduced-motion query resolves to `reduce`. */
 function setReducedMotion(reduce: boolean): void {
-  window.matchMedia = ((query: string) => ({
+  window.matchMedia = (query: string) => ({
     matches: reduce && query.includes("prefers-reduced-motion"),
     media: query,
     onchange: null,
@@ -25,7 +25,7 @@ function setReducedMotion(reduce: boolean): void {
     addEventListener: () => undefined,
     removeEventListener: () => undefined,
     dispatchEvent: () => false,
-  })) as unknown as typeof window.matchMedia;
+  });
 }
 
 afterEach(() => {

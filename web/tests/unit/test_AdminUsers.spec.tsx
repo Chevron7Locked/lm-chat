@@ -19,7 +19,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-const mockUseAdminUsers = vi.fn();
+interface MockAdminUsersResult {
+  data: AdminUser[] | undefined;
+  isLoading: boolean;
+  error: { detail: string; message: string } | null;
+}
+
+const mockUseAdminUsers = vi.fn<() => MockAdminUsersResult>();
 const mockSetRoleMutate = vi.fn();
 const mockRevokeMutate = vi.fn();
 const mockDeleteMutate = vi.fn();
@@ -85,7 +91,7 @@ beforeEach(() => {
 
 function renderPage(
   users: AdminUser[] | undefined,
-  opts: { isLoading?: boolean; error?: unknown } = {},
+  opts: { isLoading?: boolean; error?: { detail: string; message: string } | null } = {},
 ) {
   mockUseAdminUsers.mockReturnValue({
     data: users,
@@ -186,9 +192,11 @@ describe("AdminUsers", () => {
     fireEvent.click(screen.getByTestId("invite-admin-btn"));
     expect(mockInviteMutate).toHaveBeenCalledTimes(1);
     // Simulate the onSuccess callback that the page wires up.
-    const onSuccess = (mockInviteMutate.mock.calls[0]?.[1] as {
-      onSuccess?: (p: { token: string; expires_at: string }) => void;
-    })?.onSuccess;
+    const onSuccess = (
+      mockInviteMutate.mock.calls[0]?.[1] as
+        | { onSuccess?: (p: { token: string; expires_at: string }) => void }
+        | undefined
+    )?.onSuccess;
     expect(onSuccess).toBeTruthy();
     act(() => {
       onSuccess?.({ token: "tok_abc_xyz", expires_at: "2026-05-23T11:00:00Z" });

@@ -15,10 +15,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<
+  (path: string, init?: { method?: string; body?: string }) => Promise<unknown>
+>();
 
 vi.mock("@/lib/api", () => ({
-  api: { request: (...args: unknown[]) => mockRequest(...args), postForm: vi.fn() },
+  api: {
+    request: (...args: [path: string, init?: { method?: string; body?: string }]) =>
+      mockRequest(...args),
+    postForm: vi.fn(),
+  },
   ApiClient: vi.fn(),
 }));
 
@@ -85,7 +91,7 @@ function wireApi(
   } = {},
 ): void {
   const { bgPref = "already-chosen-model", endpointMode } = opts;
-  mockRequest.mockImplementation((path: string, init?: { method?: string }) => {
+  mockRequest.mockImplementation((path, init) => {
     if (path === "/api/settings/lmstudio" && (init?.method ?? "GET") === "GET") {
       return Promise.resolve({
         base_url: "http://localhost:1234",

@@ -31,7 +31,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { __resetChatScopedMemoryForTests } from "@/hooks/useChatScopedState";
 import type { StreamState } from "@/hooks/useSSE";
 
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
+if (typeof window !== "undefined" && !(Element.prototype as { scrollIntoView?: () => void }).scrollIntoView) {
   Element.prototype.scrollIntoView = function (): void { /* no-op */ };
 }
 
@@ -136,7 +136,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 
@@ -351,7 +351,10 @@ function renderChat(initialPath: string) {
 function navigateTo(path: string): void {
   act(() => {
     if (capturedNavigate === null) throw new Error("navigate not captured");
-    capturedNavigate(path);
+    // MemoryRouter (declarative mode, not a data router) always navigates
+    // synchronously — void the call to document that we deliberately don't
+    // await NavigateFunction's `void | Promise<void>` return type here.
+    void capturedNavigate(path);
   });
 }
 

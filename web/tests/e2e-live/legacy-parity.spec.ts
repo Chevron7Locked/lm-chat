@@ -209,7 +209,7 @@ test.describe("Orphan stream recovery (v0.5.x audit finding #2)", () => {
 
       // Seed a user message.
       await page.request.post(
-        `${backendURL}/api/chats/${chatId}/messages`,
+        `${backendURL}/api/chats/${String(chatId)}/messages`,
         {
           form: { role: "user", content: "Tell me a story" },
         }
@@ -221,7 +221,7 @@ test.describe("Orphan stream recovery (v0.5.x audit finding #2)", () => {
       await page.evaluate(
         (cId: number) => {
           try {
-            localStorage.setItem(`lmchat:sse:${cId}:msg_id`, "99999");
+            localStorage.setItem(`lmchat:sse:${String(cId)}:msg_id`, "99999");
           } catch {
             // ignore
           }
@@ -233,7 +233,7 @@ test.describe("Orphan stream recovery (v0.5.x audit finding #2)", () => {
       // loginAndWait already authenticated us).
       await page.evaluate(
         (cId: number) => {
-          window.history.pushState({}, "", `/chats/${cId}`);
+          window.history.pushState({}, "", `/chats/${String(cId)}`);
           window.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
         },
         chatId
@@ -326,8 +326,8 @@ test.describe("URL routing (v0.5.x audit finding #4)", () => {
 
       // Navigate to the chat deep link — the SPA shell should load and
       // React Router should render the chat view.
-      await page.goto(`${backendURL}/chats/${chatId}`);
-      await expect(page).toHaveURL(`${backendURL}/chats/${chatId}`);
+      await page.goto(`${backendURL}/chats/${String(chatId)}`);
+      await expect(page).toHaveURL(`${backendURL}/chats/${String(chatId)}`);
 
       // The root div should render with content (not blank).
       await expect(page.locator("#root")).not.toBeEmpty({ timeout: 5_000 });
@@ -352,10 +352,10 @@ test.describe("URL routing (v0.5.x audit finding #4)", () => {
       const chatId: number = chat.id;
 
       // Direct deep-link navigation.
-      await page.goto(`${backendURL}/chats/${chatId}`);
+      await page.goto(`${backendURL}/chats/${String(chatId)}`);
 
       // The URL should match exactly (no redirect away).
-      await expect(page).toHaveURL(`${backendURL}/chats/${chatId}`);
+      await expect(page).toHaveURL(`${backendURL}/chats/${String(chatId)}`);
       // Page renders without error.
       await expect(page.locator("#root")).not.toBeEmpty({ timeout: 5_000 });
     }
@@ -551,9 +551,10 @@ test(
     // Verify the nonce from the CSP header also appears in the raw HTTP
     // response body (not page.content() which reflects the live DOM
     // after React has executed).
-    const match = cspHeader.match(/nonce-([A-Za-z0-9_\-]+)/);
-    if (match && responseBody) {
-      expect(responseBody).toContain(`nonce="${match[1]}"`);
+    const match = cspHeader.match(/nonce-([A-Za-z0-9_-]+)/);
+    const nonceValue = match?.[1];
+    if (nonceValue !== undefined && responseBody) {
+      expect(responseBody).toContain(`nonce="${nonceValue}"`);
     }
   }
 );

@@ -102,7 +102,10 @@ test(
       "user",
       "assistant",
     ]);
-    const earlierAssistant = before.messages[1]!;
+    const earlierAssistant = before.messages[1];
+    if (!earlierAssistant) {
+      throw new Error("expected before.messages[1] to exist (earlier assistant turn)");
+    }
     expect(earlierAssistant.role).toBe("assistant");
 
     // ACT — click "Fork from here" on the EARLIER assistant message.

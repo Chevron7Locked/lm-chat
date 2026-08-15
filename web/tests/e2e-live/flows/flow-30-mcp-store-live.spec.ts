@@ -109,7 +109,8 @@ test(
     // "fetch" has no required secrets.
     const fetchEntry = catalog.find((e) => e.id === "fetch");
     expect(fetchEntry).toBeDefined();
-    expect(fetchEntry!.secrets.filter((s) => s.required).length).toBe(0);
+    if (!fetchEntry) throw new Error("[flow-30a] 'fetch' entry not found in catalog");
+    expect(fetchEntry.secrets.filter((s) => s.required).length).toBe(0);
 
     assertNoConsoleErrors(collectErrors(), "flow-30a");
   }
@@ -168,8 +169,9 @@ test(
     const servers = await listResp.json() as McpServerResponse[];
     const found = servers.find((s) => s.slug === SLUG);
     expect(found).toBeDefined();
-    expect(found!.name).toBe("Fetch");
-    expect(found!.enabled).toBe(true);
+    if (!found) throw new Error("[flow-30c] installed server not found in list");
+    expect(found.name).toBe("Fetch");
+    expect(found.enabled).toBe(true);
 
     // Step 3: DELETE removes it.
     const deleteResp = await page.request.delete(

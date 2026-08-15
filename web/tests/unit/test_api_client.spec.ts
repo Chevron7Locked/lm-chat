@@ -90,7 +90,7 @@ describe("ApiClient", () => {
     await client.postForm("/api/form", { a: "1", b: "hello world" });
 
     const call = vi.mocked(global.fetch).mock.calls[0];
-    const init = call?.[1] as RequestInit | undefined;
+    const init = call?.[1];
     expect(init?.body).toBe("a=1&b=hello+world");
   });
 
@@ -126,7 +126,7 @@ describe("ApiClient", () => {
     });
 
     const call = vi.mocked(global.fetch).mock.calls[0];
-    const init = call?.[1] as RequestInit | undefined;
+    const init = call?.[1];
     const headers = init?.headers as Record<string, string>;
     expect(headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
     // No duplicate JSON header was injected.
@@ -145,7 +145,7 @@ describe("ApiClient", () => {
     await client.request("/api/documents", { method: "POST", body: form });
 
     const call = vi.mocked(global.fetch).mock.calls[0];
-    const init = call?.[1] as RequestInit | undefined;
+    const init = call?.[1];
     const headers = init?.headers as Record<string, string>;
     expect(
       Object.keys(headers).some((k) => k.toLowerCase() === "content-type")

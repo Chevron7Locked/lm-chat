@@ -102,20 +102,26 @@ describe("MutationCache.onError dedup — real production queryClient", () => {
 
     const cacheConfig = queryClient.getMutationCache()["config"];
     expect(typeof cacheConfig.onError).toBe("function");
+    if (cacheConfig.onError === undefined) {
+      throw new Error("unreachable: expect(typeof ...).toBe(\"function\") checked above");
+    }
 
     const mutationNoMeta = {
       meta: undefined,
-      options: { mutationFn: async () => undefined },
+      options: { mutationFn: () => undefined },
     } as unknown as Parameters<NonNullable<typeof cacheConfig.onError>>[3];
 
-    cacheConfig.onError!(new Error("fail"), undefined, undefined, mutationNoMeta, {
+    cacheConfig.onError(new Error("fail"), undefined, undefined, mutationNoMeta, {
       client: queryClient,
       meta: undefined,
     });
 
     const afterCount = useToastStore.getState().toasts.length;
     expect(afterCount).toBeGreaterThan(initialCount);
-    const last = useToastStore.getState().toasts[afterCount - 1]!;
+    const last = useToastStore.getState().toasts[afterCount - 1];
+    if (last === undefined) {
+      throw new Error("unreachable: afterCount > initialCount checked above");
+    }
     expect(last.variant).toBe("error");
     expect(last.message.toLowerCase()).toContain("couldn't save");
   });
@@ -128,15 +134,18 @@ describe("MutationCache.onError dedup — real production queryClient", () => {
 
     const cacheConfig = queryClient.getMutationCache()["config"];
     expect(typeof cacheConfig.onError).toBe("function");
+    if (cacheConfig.onError === undefined) {
+      throw new Error("unreachable: expect(typeof ...).toBe(\"function\") checked above");
+    }
 
     // Simulate a mutation with meta.errorHandled = true (e.g. useUpdateChat,
     // useCreateChat, useAppendMessage, useRegenerateMessage).
     const mutationWithMeta = {
       meta: { errorHandled: true },
-      options: { mutationFn: async () => undefined },
+      options: { mutationFn: () => undefined },
     } as unknown as Parameters<NonNullable<typeof cacheConfig.onError>>[3];
 
-    cacheConfig.onError!(new Error("fail"), undefined, undefined, mutationWithMeta, {
+    cacheConfig.onError(new Error("fail"), undefined, undefined, mutationWithMeta, {
       client: queryClient,
       meta: undefined,
     });
@@ -156,17 +165,20 @@ describe("MutationCache.onError dedup — real production queryClient", () => {
 
     const cacheConfig = queryClient.getMutationCache()["config"];
     expect(typeof cacheConfig.onError).toBe("function");
+    if (cacheConfig.onError === undefined) {
+      throw new Error("unreachable: expect(typeof ...).toBe(\"function\") checked above");
+    }
 
     const adminMutation = {
       meta: undefined,
       options: {
-        mutationFn: async () => undefined,
+        mutationFn: () => undefined,
         // Hook-level onError — visible on mutation.options (admin pattern).
-        onError: (_err: unknown) => { /* handles its own error toast */ },
+        onError: () => { /* handles its own error toast */ },
       },
     } as unknown as Parameters<NonNullable<typeof cacheConfig.onError>>[3];
 
-    cacheConfig.onError!(new Error("Admin op failed"), undefined, undefined, adminMutation, {
+    cacheConfig.onError(new Error("Admin op failed"), undefined, undefined, adminMutation, {
       client: queryClient,
       meta: undefined,
     });
@@ -193,9 +205,7 @@ describe("MutationCache.onError dedup — real production queryClient", () => {
     const initialCount = useToastStore.getState().toasts.length;
 
     const observer = new TQMutationObserver(queryClient, {
-      mutationFn: async (): Promise<void> => {
-        throw new Error("save failed");
-      },
+      mutationFn: (): Promise<void> => Promise.reject(new Error("save failed")),
       meta: { errorHandled: true },
     });
     // TQ v5 only delivers per-call mutate callbacks when the observer has
@@ -219,7 +229,11 @@ describe("MutationCache.onError dedup — real production queryClient", () => {
     // Exactly ONE new toast: the per-call one.  A second (global
     // "Couldn't save") toast here means the dedup guard regressed.
     expect(after.length).toBe(initialCount + 1);
-    expect(after[after.length - 1]!.message).toBe(
+    const lastToast = after[after.length - 1];
+    if (lastToast === undefined) {
+      throw new Error("unreachable: after.length checked above");
+    }
+    expect(lastToast.message).toBe(
       "Couldn't save the integrations list — try again.",
     );
   });

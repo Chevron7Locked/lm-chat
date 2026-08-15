@@ -20,7 +20,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // jsdom doesn't implement scrollIntoView; Chat's auto-scroll effect crashes
 // without this stub.
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
+if (typeof window !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = function (): void { /* no-op */ };
 }
 
@@ -130,7 +130,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 
@@ -175,8 +175,8 @@ const mockEmbeddingStatus = vi.hoisted(() => ({
         embedding_status: "ok" | "no_embedding_model" | "pinned_model_unavailable";
       }
     | undefined,
-  isLoading: false as false,
-  isError: false as false,
+  isLoading: false as const,
+  isError: false as const,
 }));
 
 vi.mock("@/hooks/useEmbeddingStatus", () => ({
@@ -343,16 +343,16 @@ describe("Chat (smoke render)", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the welcome state when no chat is selected", async () => {
-    await renderChat("/chats");
+  it("renders the welcome state when no chat is selected", () => {
+    renderChat("/chats");
     // Top-bar / sidebar shell render without crashing.
     expect(screen.getByTestId("mock-sidebar")).toBeTruthy();
     // EmptyState surfaces the empty-canvas marker.
     expect(screen.getByTestId("chat-empty-state")).toBeTruthy();
   });
 
-  it("renders the shell with composer when a chat id is selected", async () => {
-    await renderChat("/chats/1");
+  it("renders the shell with composer when a chat id is selected", () => {
+    renderChat("/chats/1");
     expect(screen.getByTestId("mock-sidebar")).toBeTruthy();
     expect(screen.getByTestId("mock-composer")).toBeTruthy();
     // Composer's textarea + send button reach the DOM.
@@ -360,9 +360,9 @@ describe("Chat (smoke render)", () => {
     expect(screen.getByLabelText("Send message")).toBeTruthy();
   });
 
-  it("redirects to /login when no user is authenticated", async () => {
+  it("redirects to /login when no user is authenticated", () => {
     mockAuthState.user = null;
-    await renderChat("/chats/1");
+    renderChat("/chats/1");
     expect(screen.getByTestId("login-page")).toBeTruthy();
   });
 });
@@ -375,9 +375,9 @@ describe("Chat (mtp_suspected dedupe)", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the banner on the first mtp_suspected error and suppresses it on the second for the same chat", async () => {
+  it("renders the banner on the first mtp_suspected error and suppresses it on the second for the same chat", () => {
     // First render: idle — no banner.
-    const { rerender } = await renderChat("/chats/1");
+    const { rerender } = renderChat("/chats/1");
     expect(screen.queryByTestId("chat-stream-error")).toBeNull();
 
     // Flip SSE state to a fresh mtp_suspected error for chat 1.
@@ -420,7 +420,7 @@ describe("Chat (mtp_suspected dedupe)", () => {
     expect(screen.queryByTestId("chat-stream-error")).toBeNull();
   });
 
-  it("renders the banner for a non-mtp error code regardless of prior mtp dedupe state", async () => {
+  it("renders the banner for a non-mtp error code regardless of prior mtp dedupe state", () => {
     // First, fire mtp_suspected to populate the dedupe Set.
     mockSSEState = {
       ..._idleSSEState,
@@ -431,7 +431,7 @@ describe("Chat (mtp_suspected dedupe)", () => {
         cumulative_tool_rounds: 20,
       },
     };
-    const { rerender } = await renderChat("/chats/1");
+    const { rerender } = renderChat("/chats/1");
     expect(screen.queryByTestId("chat-stream-error")).not.toBeNull();
 
     // Now fire a DIFFERENT error code — must NOT be dedupe'd.
@@ -458,8 +458,8 @@ describe("Chat (warning toasts — T0-1)", () => {
     ) as [{ variant: string; message: string }][];
   }
 
-  it("pushes one toast per new SSE warning and never double-toasts", async () => {
-    const { rerender } = await renderChat("/chats/1");
+  it("pushes one toast per new SSE warning and never double-toasts", () => {
+    const { rerender } = renderChat("/chats/1");
     expect(warningCalls()).toHaveLength(0);
 
     // A warning frame arrives (budget gate trimmed integrations).
@@ -505,8 +505,8 @@ describe("Chat (focus mode)", () => {
     vi.clearAllMocks();
   });
 
-  it("toggles the is-focus-mode shell class via the TopBar toggle, then exits via the affordance", async () => {
-    await renderChat("/chats/1");
+  it("toggles the is-focus-mode shell class via the TopBar toggle, then exits via the affordance", () => {
+    renderChat("/chats/1");
     const shell = document.querySelector(".lmchat-chat-shell");
     expect(shell).not.toBeNull();
     // Off = today's layout: no focus class.

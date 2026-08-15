@@ -311,7 +311,7 @@ export async function patchStreamInjectModel(page: Page): Promise<void> {
           ? input
           : input instanceof URL
             ? input.href
-            : (input as Request).url;
+            : input.url;
       if (url.includes("/api/chat/stream")) {
         let body: Record<string, unknown> = {};
         try {

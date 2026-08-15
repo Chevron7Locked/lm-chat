@@ -100,13 +100,17 @@ describe("focus mode CSS — every referenced token is defined", () => {
     for (const src of [css, globalsCss]) {
       for (const m of src.matchAll(/(--[a-z0-9-]+)\s*:/g)) {
         // Group 1 is mandatory in the pattern — always captured on a match.
-        defined.add(m[1]!);
+        const token = m[1];
+        if (token === undefined) throw new Error("regex group 1 unexpectedly undefined");
+        defined.add(token);
       }
     }
 
     const used = new Set<string>();
     for (const m of focusCss.matchAll(/var\((--[a-z0-9-]+)/g)) {
-      used.add(m[1]!);
+      const token = m[1];
+      if (token === undefined) throw new Error("regex group 1 unexpectedly undefined");
+      used.add(token);
     }
 
     const undef = [...used].filter((t) => !defined.has(t)).sort();

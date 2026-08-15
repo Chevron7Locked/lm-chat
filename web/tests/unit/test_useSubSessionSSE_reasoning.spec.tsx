@@ -67,7 +67,7 @@ describe("useSubSessionSSE — reasoning_content (A7)", () => {
     const onComplete = vi.fn();
     const { result } = renderHook(() => useSubSessionSSE());
 
-    await act(async () => {
+    act(() => {
       result.current.stream({ ...baseParams, onComplete });
     });
 
@@ -102,7 +102,7 @@ describe("useSubSessionSSE — reasoning_content (A7)", () => {
 
     const { result } = renderHook(() => useSubSessionSSE());
 
-    await act(async () => {
+    act(() => {
       result.current.stream(baseParams);
     });
 
@@ -131,7 +131,7 @@ describe("useSubSessionSSE — reasoning_content (A7)", () => {
 
     const { result } = renderHook(() => useSubSessionSSE());
 
-    await act(async () => {
+    act(() => {
       result.current.stream(baseParams);
     });
 
@@ -179,17 +179,17 @@ describe("useSubSessionSSE — reasoning_content (A7)", () => {
     const { result } = renderHook(() => useSubSessionSSE());
 
     // First stream.
-    await act(async () => {
+    act(() => {
       result.current.stream(baseParams);
     });
-    await waitFor(() => expect(result.current.state.status).toBe("complete"));
+    await waitFor(() => { expect(result.current.state.status).toBe("complete"); });
     expect(result.current.state.reasoning_content).toBe("old thinking");
 
     // Second stream — reasoning_content must reset to null on start.
-    await act(async () => {
+    act(() => {
       result.current.stream(baseParams);
     });
-    await waitFor(() => expect(result.current.state.status).toBe("complete"));
+    await waitFor(() => { expect(result.current.state.status).toBe("complete"); });
     expect(result.current.state.reasoning_content).toBeNull();
   });
 });

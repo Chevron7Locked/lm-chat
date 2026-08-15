@@ -39,7 +39,7 @@ import type { StreamState } from "@/hooks/useSSE";
 
 // jsdom doesn't implement scrollIntoView; Chat's auto-scroll effect crashes
 // without this stub.
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
+if (typeof window !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = function (): void { /* no-op */ };
 }
 
@@ -152,7 +152,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 
@@ -371,10 +371,14 @@ function renderChat(initialPath: string) {
   );
 }
 
-function navigateTo(path: string): void {
-  act(() => {
+async function navigateTo(path: string): Promise<void> {
+  // react-router's NavigateFunction is typed `void | Promise<void>` (it
+  // awaits route loaders under the data-router APIs), so the call must be
+  // awaited rather than fired-and-forgotten even though this MemoryRouter
+  // setup resolves it synchronously today.
+  await act(async () => {
     if (capturedNavigate === null) throw new Error("navigate not captured");
-    capturedNavigate(path);
+    await capturedNavigate(path);
   });
 }
 
@@ -388,29 +392,29 @@ describe("Chat — chat-switch ephemeral-state wipe (FE-STATE characterization)"
     vi.clearAllMocks();
   });
 
-  it("clears followupSuggestions on chat switch", () => {
+  it("clears followupSuggestions on chat switch", async () => {
     mockSSEState = { ...idleSSEState, followups: ["chip one", "chip two"] };
     renderChat("/chats/1");
 
     const chips = screen.getAllByTestId("followup-chip");
     expect(chips.map((el) => el.textContent)).toEqual(["chip one", "chip two"]);
 
-    navigateTo("/chats/2");
+    await navigateTo("/chats/2");
     expect(screen.queryAllByTestId("followup-chip")).toHaveLength(0);
   });
 
-  it("cancels an open sub-session on chat switch", () => {
+  it("cancels an open sub-session on chat switch", async () => {
     renderChat("/chats/1");
     expect(screen.queryByTestId("mock-subsessionpanel")).toBeNull();
 
     fireEvent.click(screen.getByTestId("start-research-subsession"));
     expect(screen.queryByTestId("mock-subsessionpanel")).not.toBeNull();
 
-    navigateTo("/chats/2");
+    await navigateTo("/chats/2");
     expect(screen.queryByTestId("mock-subsessionpanel")).toBeNull();
   });
 
-  it("wipes a lingering stopped-stream zombie state on chat switch", () => {
+  it("wipes a lingering stopped-stream zombie state on chat switch", async () => {
     mockSSEState = { ...idleSSEState, status: "stopped" };
     renderChat("/chats/1");
 
@@ -420,7 +424,7 @@ describe("Chat — chat-switch ephemeral-state wipe (FE-STATE characterization)"
     // isolates the SWITCH-triggered call specifically.
     resetStreamSpy.mockClear();
 
-    navigateTo("/chats/2");
+    await navigateTo("/chats/2");
     expect(resetStreamSpy).toHaveBeenCalledTimes(1);
   });
 });

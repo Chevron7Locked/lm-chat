@@ -71,8 +71,13 @@ export async function classifyFleet(
   }
   const fast = pickFastestModel(generals, (m) => m.key);
   const slow = pickSlowestModel(generals, (m) => m.key);
-  const fastId = fast!.key;
-  const slowId = slow!.key;
+  if (fast === undefined || slow === undefined) {
+    throw new Error(
+      "[dogfood] pickFastestModel/pickSlowestModel returned undefined for a non-empty list",
+    );
+  }
+  const fastId = fast.key;
+  const slowId = slow.key;
   return { fastId, slowId, slowIsSameAsFast: fastId === slowId };
 }
 
@@ -112,7 +117,7 @@ export async function configureLmStudio(
   );
   expect(
     resp.ok(),
-    `configureLmStudio(default=${defaultModel}) → HTTP ${resp.status()}: ${await resp
+    `configureLmStudio(default=${defaultModel}) → HTTP ${String(resp.status())}: ${await resp
       .text()
       .catch(() => "")}`,
   ).toBe(true);
@@ -130,7 +135,7 @@ export async function pinBackgroundModel(
   );
   expect(
     resp.ok(),
-    `pinBackgroundModel(${modelId}) → HTTP ${resp.status()}`,
+    `pinBackgroundModel(${modelId}) → HTTP ${String(resp.status())}`,
   ).toBe(true);
 }
 
@@ -154,7 +159,7 @@ export async function setWebSearchProvider(
   });
   expect(
     resp.ok(),
-    `setWebSearchProvider(${provider}) → HTTP ${resp.status()}`,
+    `setWebSearchProvider(${provider}) → HTTP ${String(resp.status())}`,
   ).toBe(true);
 }
 
@@ -194,7 +199,7 @@ export async function waitForLogLine(
     /* best-effort */
   }
   throw new Error(
-    `[dogfood] timed out after ${timeoutMs}ms waiting for a log line containing ` +
+    `[dogfood] timed out after ${String(timeoutMs)}ms waiting for a log line containing ` +
       `all of ${JSON.stringify(needles)}. Full backend log dumped to ` +
       `test-results/dogfood-timeout-backend.log\n--- last log tail ---\n` +
       lastLog.split("\n").slice(-40).join("\n"),
@@ -249,7 +254,7 @@ export async function assertAutoMemoryDistilled(
   }
   expect(
     count,
-    `[dogfood] no auto-memory was distilled within ${timeoutMs}ms — the ` +
+    `[dogfood] no auto-memory was distilled within ${String(timeoutMs)}ms — the ` +
       `fact-laden turn should have stored ≥1 durable fact (GET /api/memory/auto ` +
       `stayed empty). Auto-memory silently failed.`,
   ).toBeGreaterThan(0);
@@ -265,8 +270,8 @@ export async function assertAutoMemoryDistilled(
 export function assertAutoTitleFromLlm(logPath: string, chatId: number): void {
   assertNoLogLine(
     logPath,
-    ["chat.generate_title.upstream_error", `chat_id=${chatId}`],
-    `auto-title fell back (LLM title call errored/timed out) for chat ${chatId} — ` +
+    ["chat.generate_title.upstream_error", `chat_id=${String(chatId)}`],
+    `auto-title fell back (LLM title call errored/timed out) for chat ${String(chatId)} — ` +
       `a UI 'title changed' check would false-green here`,
   );
 }

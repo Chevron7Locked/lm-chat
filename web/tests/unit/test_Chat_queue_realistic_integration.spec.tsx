@@ -30,7 +30,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { __resetChatScopedMemoryForTests } from "@/hooks/useChatScopedState";
 import type { StreamState, ChatStreamPayload } from "@/hooks/useSSE";
 
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
+if (
+  typeof window !== "undefined" &&
+  !(Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+) {
   Element.prototype.scrollIntoView = function (): void { /* no-op */ };
 }
 
@@ -139,7 +142,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [{ id: "model-x" }],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 

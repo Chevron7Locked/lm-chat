@@ -87,16 +87,25 @@ test(
         const t = s.toLowerCase();
         // Group 1 is mandatory in each pattern — always captured on a match.
         const a = /a(\d+(?:\.\d+)?)b(?![a-z0-9])/.exec(t);
-        if (a) return Number.parseFloat(a[1]!);
+        if (a) {
+          const digits = a[1];
+          if (digits === undefined) throw new Error("unreachable: regex group 1 is mandatory");
+          return Number.parseFloat(digits);
+        }
         const n = /(\d+(?:\.\d+)?)b(?![a-z0-9])/.exec(t);
-        if (n) return Number.parseFloat(n[1]!);
+        if (n) {
+          const digits = n[1];
+          if (digits === undefined) throw new Error("unreachable: regex group 1 is mandatory");
+          return Number.parseFloat(digits);
+        }
         return Number.POSITIVE_INFINITY;
       };
       let best = 1;
       let bestRank = Number.POSITIVE_INFINITY;
       for (let i = 0; i < sel.options.length; i++) {
+        const o = sel.options[i];
         // Guaranteed defined: i is always a valid index (loop bound above).
-        const o = sel.options[i]!;
+        if (o === undefined) throw new Error("unreachable: i < sel.options.length");
         if (o.disabled || o.value === "") continue;
         if (o.text.toLowerCase().includes("unloaded")) continue;
         const r = rank(o.text);

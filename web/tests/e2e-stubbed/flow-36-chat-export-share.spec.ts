@@ -127,10 +127,10 @@ test.describe("Flow 36 — P13j chat export + share", () => {
     // Replace URL.createObjectURL so download trigger can be observed.
     await page.addInitScript(() => {
       (window as unknown as { __exportCalled?: number }).__exportCalled = 0;
-      const orig = URL.createObjectURL;
+      const orig = URL.createObjectURL.bind(URL);
       URL.createObjectURL = function (blob: Blob): string {
         (window as unknown as { __exportCalled: number }).__exportCalled += 1;
-        return orig.call(URL, blob);
+        return orig(blob);
       };
     });
 

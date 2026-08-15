@@ -62,11 +62,11 @@ test.describe("Flow 28 — global keyboard shortcuts", () => {
     });
 
     // GET /api/chats/:id detail (Existing Chat + any newly created).
-    await page.route(/.*\/api\/chats\/\d+$/, (route) => {
+    await page.route(/.*\/api\/chats\/\d+$/, async (route) => {
       const url = new URL(route.request().url());
       const idStr = url.pathname.split("/").pop() ?? "1";
       const id = Number(idStr);
-      route.fulfill({
+      await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({

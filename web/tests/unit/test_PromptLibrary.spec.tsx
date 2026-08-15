@@ -47,7 +47,13 @@ vi.mock("@/stores/authStore", () => ({
 
 // ─── Mock usePrompts hooks ────────────────────────────────────────────────────
 
-const mockUsePrompts = vi.fn();
+interface MockPromptsQueryResult {
+  data: Prompt[];
+  isLoading: boolean;
+  isError: boolean;
+}
+
+const mockUsePrompts = vi.fn<() => MockPromptsQueryResult>();
 const mockCreateMutate = vi.fn();
 const mockUpdateMutate = vi.fn();
 const mockDeleteMutate = vi.fn();
@@ -55,7 +61,7 @@ const mockDeleteMutate = vi.fn();
 vi.mock("@/hooks/usePrompts", () => ({
   usePrompts: () => mockUsePrompts(),
   useCreatePrompt: () => ({ mutateAsync: mockCreateMutate, isPending: false }),
-  useUpdatePrompt: (_id: number) => ({
+  useUpdatePrompt: () => ({
     mutateAsync: mockUpdateMutate,
     isPending: false,
   }),

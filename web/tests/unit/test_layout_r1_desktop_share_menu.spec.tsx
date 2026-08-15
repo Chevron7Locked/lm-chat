@@ -26,8 +26,9 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // jsdom doesn't implement scrollIntoView.
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
-  Element.prototype.scrollIntoView = function (): void {
+const elementProto = Element.prototype as { scrollIntoView?: () => void };
+if (typeof window !== "undefined" && !elementProto.scrollIntoView) {
+  elementProto.scrollIntoView = function (): void {
     /* no-op */
   };
 }
@@ -75,8 +76,8 @@ vi.mock("@/hooks/useMouseParallax", () => ({
 // Capture the shortcut handlers Chat.tsx wires up so the test can invoke
 // the Cmd/Ctrl+Shift+E handler (onExportChat) directly — same code path
 // as the real keydown, minus the key-event plumbing the hook owns.
-const captured = vi.hoisted(() => ({
-  handlers: {} as { onExportChat?: () => void },
+const captured: { handlers: { onExportChat?: () => void } } = vi.hoisted(() => ({
+  handlers: {},
 }));
 
 vi.mock("@/hooks/useKeyboardShortcuts", () => ({
@@ -133,7 +134,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 
@@ -213,7 +214,7 @@ vi.mock("@/stores/chatSettingsStore", () => ({
 // The real ChatHeaderMenu hydrates an existing share token on open — keep
 // the network out of the test.
 vi.mock("@/lib/api", () => ({
-  api: { request: vi.fn(async () => null) },
+  api: { request: vi.fn(() => null) },
 }));
 
 // Export side effects — asserted as the "panel is clickable" proof.

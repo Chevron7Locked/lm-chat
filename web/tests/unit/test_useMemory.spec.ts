@@ -15,7 +15,7 @@ import type { ReactNode } from "react";
 const mockRequest = vi.fn();
 
 vi.mock("@/lib/api", () => ({
-  api: { request: (...args: unknown[]) => mockRequest(...args), postForm: vi.fn() },
+  api: { request: (...args: unknown[]) => mockRequest(...args) as Promise<unknown>, postForm: vi.fn() },
   ApiClient: vi.fn(),
 }));
 
@@ -72,7 +72,7 @@ describe("useMemoryPins", () => {
 
     const { result } = renderHook(() => useMemoryPins(), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(mockRequest).toHaveBeenCalledWith("/api/memory/pins");
   });
 
@@ -85,7 +85,7 @@ describe("useMemoryPins", () => {
 
     const { result } = renderHook(() => useMemoryPins(), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     // data is MemoryInsight[] directly (no .pins wrapper).
     expect(Array.isArray(result.current.data)).toBe(true);
     expect(result.current.data?.[0]?.text).toBe("test insight");
@@ -98,7 +98,7 @@ describe("useMemoryPins", () => {
 
     const { result } = renderHook(() => useMemoryPins(), { wrapper });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
   });
 });
 
@@ -141,7 +141,7 @@ describe("usePinInsight", () => {
     });
 
     const callArgs = mockRequest.mock.calls[0];
-    const bodyStr = (callArgs?.[1] as { body?: string })?.body ?? "";
+    const bodyStr = (callArgs?.[1] as { body?: string } | undefined)?.body ?? "";
     const params = new URLSearchParams(bodyStr);
     expect(params.get("text")).toBe("hello world");
   });
@@ -205,7 +205,7 @@ describe("useMemoryReindex", () => {
     });
 
     const callArgs = mockRequest.mock.calls[0];
-    const bodyStr = (callArgs?.[1] as { body?: string })?.body ?? "";
+    const bodyStr = (callArgs?.[1] as { body?: string } | undefined)?.body ?? "";
     const params = new URLSearchParams(bodyStr);
     expect(params.get("embedding_model_id")).toBe("nomic-embed-text-v1.5");
   });
@@ -224,11 +224,13 @@ describe("usePinInsight — error path", () => {
 
     const { result } = renderHook(() => usePinInsight(), { wrapper });
 
-    await act(async () => {
-      await result.current.mutate({ text: "fail pin" });
-    });
+    await expect(
+      act(async () => {
+        await result.current.mutateAsync({ text: "fail pin" });
+      })
+    ).rejects.toThrow();
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(500);
   });
 });
@@ -244,11 +246,13 @@ describe("useMemoryReindex — error path", () => {
 
     const { result } = renderHook(() => useMemoryReindex(), { wrapper });
 
-    await act(async () => {
-      await result.current.mutate({ embedding_model_id: "nomic-embed" });
-    });
+    await expect(
+      act(async () => {
+        await result.current.mutateAsync({ embedding_model_id: "nomic-embed" });
+      })
+    ).rejects.toThrow();
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(403);
   });
 });

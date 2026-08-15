@@ -191,7 +191,7 @@ test(
       `${backendURL}/api/settings/lmstudio/endpoint-mode`,
       { data: { endpoint_mode: "native" } },
     );
-    expect(modeResp.ok(), `endpoint-mode=native → HTTP ${modeResp.status()}`).toBe(
+    expect(modeResp.ok(), `endpoint-mode=native → HTTP ${String(modeResp.status())}`).toBe(
       true,
     );
 
@@ -200,7 +200,7 @@ test(
     );
     expect(
       integrationsResp.ok(),
-      `GET /api/integrations/available → HTTP ${integrationsResp.status()}`,
+      `GET /api/integrations/available → HTTP ${String(integrationsResp.status())}`,
     ).toBe(true);
     const availableIntegrations = (await integrationsResp.json()) as {
       value: string;
@@ -212,7 +212,7 @@ test(
     ).toBeGreaterThan(0);
 
     const modelsResp = await page.request.get(`${backendURL}/api/models`);
-    expect(modelsResp.ok(), `GET /api/models → HTTP ${modelsResp.status()}`).toBe(
+    expect(modelsResp.ok(), `GET /api/models → HTTP ${String(modelsResp.status())}`).toBe(
       true,
     );
     const allModels = (await modelsResp.json()) as LiveModel[];
@@ -320,8 +320,8 @@ test(
         ? `FAKE TOOL CALL DETECTED in the final answer: ${fakeCallMatch[0].slice(0, 200)}`
         : "no fake-tool-call shape detected in the final answer",
     });
-    // eslint-disable-next-line no-console -- surfaced in the operator's own run
-    // output; test.info().annotations alone can be easy to miss in a terminal.
+    // Surfaced in the operator's own run output; test.info().annotations
+    // alone can be easy to miss in a terminal.
     console.log(
       `[j12] model behaviour verdict: ${
         fakeCallMatch ? "FAKE TOOL CALL DETECTED" : "no fake tool call detected"

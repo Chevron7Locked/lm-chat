@@ -62,12 +62,15 @@ describe("useSidebarCollapsed — desktop", () => {
   });
 
   it("does NOT write the old combined key", async () => {
-    const { useSidebarCollapsed, __SIDEBAR_COLLAPSED_KEY } = await freshHook();
+    const { useSidebarCollapsed } = await freshHook();
     const { result } = renderHook(() => useSidebarCollapsed(false));
     act(() => {
       result.current[1](true);
     });
-    expect(localStorage.getItem(__SIDEBAR_COLLAPSED_KEY)).toBeNull();
+    // Literal mirrors the deprecated `__SIDEBAR_COLLAPSED_KEY` in
+    // useSidebarCollapsed.ts — deprecated for production use, but this is
+    // exactly the legacy-key regression the export exists for tests to check.
+    expect(localStorage.getItem("lmchat:sidebar:collapsed")).toBeNull();
   });
 });
 

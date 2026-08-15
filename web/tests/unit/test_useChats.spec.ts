@@ -12,13 +12,13 @@ import type { ReactNode } from "react";
 
 // ─── Mock api module ─────────────────────────────────────────────────────────
 
-const mockRequest = vi.fn();
-const mockPostForm = vi.fn();
+const mockRequest = vi.fn<(path: string, init?: RequestInit) => Promise<unknown>>();
+const mockPostForm = vi.fn<(path: string, fields: Record<string, string>) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: {
-    request: (...args: unknown[]) => mockRequest(...args),
-    postForm: (...args: unknown[]) => mockPostForm(...args),
+    request: (...args: [path: string, init?: RequestInit]) => mockRequest(...args),
+    postForm: (...args: [path: string, fields: Record<string, string>]) => mockPostForm(...args),
   },
   ApiClient: vi.fn(),
 }));
@@ -91,7 +91,7 @@ describe("useChats", () => {
 
     const { result } = renderHook(() => useChats(), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(mockRequest).toHaveBeenCalledWith("/api/chats");
   });
 
@@ -104,7 +104,7 @@ describe("useChats", () => {
 
     const { result } = renderHook(() => useChats(), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(result.current.data?.chats).toHaveLength(1);
     expect(result.current.data?.chats[0]?.title).toBe("Hello");
     expect(result.current.data?.total).toBe(1);
@@ -127,7 +127,7 @@ describe("useChats", () => {
 
     const { result } = renderHook(() => useChats(), { wrapper });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
   });
 });
 
@@ -167,7 +167,7 @@ describe("useMessages", () => {
 
     const { result } = renderHook(() => useMessages(7), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(mockRequest).toHaveBeenCalledWith("/api/chats/7");
     expect(result.current.data?.messages).toHaveLength(0);
     expect(result.current.data?.has_more).toBe(false);
@@ -187,7 +187,7 @@ describe("useMessages", () => {
 
     const { result } = renderHook(() => useMessages(7), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(result.current.data?.has_more).toBe(true);
     expect(result.current.data?.oldest_id).toBe(5);
   });
@@ -204,7 +204,7 @@ describe("useMessages", () => {
 
     const { result } = renderHook(() => useMessages(7), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(result.current.data?.oldest_id).toBeNull();
   });
 
@@ -220,7 +220,7 @@ describe("useMessages", () => {
 
     const { result } = renderHook(() => useMessages(7), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(result.current.data?.has_more).toBe(false);
   });
 });
@@ -334,7 +334,8 @@ describe("useUpdateChat", () => {
     });
 
     const callArgs = mockRequest.mock.calls[0];
-    const bodyStr = (callArgs?.[1] as { body?: string })?.body ?? "";
+    if (!callArgs) throw new Error("expected mockRequest to have been called");
+    const bodyStr = (callArgs[1] as { body?: string }).body ?? "";
     const params = new URLSearchParams(bodyStr);
     expect(params.get("title")).toBe("T");
     expect(params.get("folder")).toBe("f");
@@ -354,7 +355,8 @@ describe("useUpdateChat", () => {
     });
 
     const callArgs = mockRequest.mock.calls[0];
-    const bodyStr = (callArgs?.[1] as { body?: string })?.body ?? "";
+    if (!callArgs) throw new Error("expected mockRequest to have been called");
+    const bodyStr = (callArgs[1] as { body?: string }).body ?? "";
     const params = new URLSearchParams(bodyStr);
     expect(params.get("tags")).toBe(JSON.stringify(["work", "urgent"]));
   });
@@ -372,7 +374,7 @@ describe("useArchivedChats", () => {
 
     const { result } = renderHook(() => useArchivedChats(), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(mockRequest).toHaveBeenCalledWith(
       "/api/chats?unscoped=true&include_archived=true",
     );
@@ -387,7 +389,7 @@ describe("useArchivedChats", () => {
 
     const { result } = renderHook(() => useArchivedChats(), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(result.current.data).toHaveLength(1);
     expect(result.current.data?.[0]?.id).toBe(2);
   });
@@ -470,7 +472,8 @@ describe("useForkChat", () => {
     });
 
     const callArgs = mockRequest.mock.calls[0];
-    const bodyStr = (callArgs?.[1] as { body?: string })?.body ?? "";
+    if (!callArgs) throw new Error("expected mockRequest to have been called");
+    const bodyStr = (callArgs[1] as { body?: string }).body ?? "";
     const params = new URLSearchParams(bodyStr);
     expect(params.get("at_message_id")).toBe("42");
   });
@@ -515,7 +518,8 @@ describe("useCompactChat", () => {
     });
 
     const callArgs = mockRequest.mock.calls[0];
-    const bodyStr = (callArgs?.[1] as { body?: string })?.body ?? "";
+    if (!callArgs) throw new Error("expected mockRequest to have been called");
+    const bodyStr = (callArgs[1] as { body?: string }).body ?? "";
     const params = new URLSearchParams(bodyStr);
     expect(params.get("target_tokens")).toBe("2048");
   });
@@ -534,11 +538,15 @@ describe("useCreateChat — error path", () => {
 
     const { result } = renderHook(() => useCreateChat(), { wrapper });
 
-    await act(async () => {
-      await result.current.mutate({ title: "Fail" });
+    // .mutate() (not .mutateAsync()) is deliberate: it fires-and-forgets so
+    // the rejection surfaces as isError state rather than an unhandled
+    // rejection here. `await`ing it was a no-op (mutate() returns void, not
+    // a Promise) — the waitFor below is what actually waits for the error.
+    act(() => {
+      result.current.mutate({ title: "Fail" });
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(500);
   });
 });
@@ -554,11 +562,14 @@ describe("useUpdateChat — error path", () => {
 
     const { result } = renderHook(() => useUpdateChat(1), { wrapper });
 
-    await act(async () => {
-      await result.current.mutate({ title: "Bad" });
+    // See the useCreateChat error-path test above: .mutate() is deliberate
+    // (fire-and-forget), and `await`ing it was a no-op — waitFor below does
+    // the actual waiting.
+    act(() => {
+      result.current.mutate({ title: "Bad" });
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(403);
   });
 });
@@ -574,11 +585,14 @@ describe("useDeleteChat — error path", () => {
 
     const { result } = renderHook(() => useDeleteChat(), { wrapper });
 
-    await act(async () => {
-      await result.current.mutate(999);
+    // See the useCreateChat error-path test above: .mutate() is deliberate
+    // (fire-and-forget), and `await`ing it was a no-op — waitFor below does
+    // the actual waiting.
+    act(() => {
+      result.current.mutate(999);
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(404);
   });
 });
@@ -594,11 +608,14 @@ describe("useForkChat — error path", () => {
 
     const { result } = renderHook(() => useForkChat(7), { wrapper });
 
-    await act(async () => {
-      await result.current.mutate({ at_message_id: 0 });
+    // See the useCreateChat error-path test above: .mutate() is deliberate
+    // (fire-and-forget), and `await`ing it was a no-op — waitFor below does
+    // the actual waiting.
+    act(() => {
+      result.current.mutate({ at_message_id: 0 });
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(500);
   });
 });
@@ -614,11 +631,14 @@ describe("useCompactChat — error path", () => {
 
     const { result } = renderHook(() => useCompactChat(8), { wrapper });
 
-    await act(async () => {
-      await result.current.mutate({ target_tokens: -1 });
+    // See the useCreateChat error-path test above: .mutate() is deliberate
+    // (fire-and-forget), and `await`ing it was a no-op — waitFor below does
+    // the actual waiting.
+    act(() => {
+      result.current.mutate({ target_tokens: -1 });
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(422);
   });
 });

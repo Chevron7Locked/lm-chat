@@ -51,10 +51,7 @@ test.describe("Flow 31 — Sidebar search mode toggle", () => {
     );
 
     // Semantic search stub — returns chat id 2 only.
-    let semanticCalled = 0;
     await page.route("**/api/search**", (route) => {
-      semanticCalled += 1;
-      // Tag the response so test can validate the request reached this stub.
       return route.fulfill({
         status: 200,
         contentType: "application/json",

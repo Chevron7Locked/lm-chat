@@ -32,7 +32,10 @@ import type { ChatSummary } from "@/hooks/useChats";
 
 // jsdom doesn't implement scrollIntoView; Chat's auto-scroll effect crashes
 // without this stub.
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
+if (
+  typeof window !== "undefined" &&
+  !(Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+) {
   Element.prototype.scrollIntoView = function (): void {
     /* no-op */
   };
@@ -112,7 +115,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 
@@ -364,7 +367,7 @@ function renderChat(initialPath: string) {
 }
 
 function shownModel(): string {
-  return screen.getByTestId("model-select-value").textContent ?? "";
+  return screen.getByTestId("model-select-value").textContent;
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

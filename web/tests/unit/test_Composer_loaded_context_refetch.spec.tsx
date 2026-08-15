@@ -132,7 +132,7 @@ function makeModel(opts: {
     capabilities: {
       vision: false,
       trained_for_tool_use: false,
-      reasoning: null as null,
+      reasoning: null,
       embedding: false,
     },
     size_bytes: 0,

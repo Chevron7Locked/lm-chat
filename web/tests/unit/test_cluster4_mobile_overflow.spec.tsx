@@ -22,7 +22,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // jsdom doesn't implement scrollIntoView.
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
+if (typeof window !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = function (): void { /* no-op */ };
 }
 
@@ -113,7 +113,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 

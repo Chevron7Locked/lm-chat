@@ -113,10 +113,10 @@ function renderTopBar(props: {
 }
 
 function placeholder(): string {
-  return screen.getByTestId("ms-placeholder").textContent ?? "";
+  return screen.getByTestId("ms-placeholder").textContent;
 }
 function autoLabel(): string {
-  return screen.getByTestId("ms-auto").textContent ?? "";
+  return screen.getByTestId("ms-auto").textContent;
 }
 
 describe("TopBar — Auto entry + placeholder gating", () => {

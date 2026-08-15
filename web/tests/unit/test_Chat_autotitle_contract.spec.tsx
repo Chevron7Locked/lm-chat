@@ -53,11 +53,11 @@ function makeArgs(overrides: {
     // chatId mirrors the destructured `chatId` above by default so the
     // ordinary (same-chat) case matches out of the box — see
     // AutotitleSSEState.chatId / StreamState.chatId.
-    sseState: { status, chatId } as AutotitleSSEState,
+    sseState: { status, chatId },
     currentChat,
     messagesData,
-    mutation: { mutateAsync } as AutotitleMutation,
-    store: { beginGenerating, endGenerating } as AutotitleStoreCallbacks,
+    mutation: { mutateAsync },
+    store: { beginGenerating, endGenerating },
     // We can't call useRef inside a plain function, so we pass the Set
     // separately and the hook wrapper below creates the ref from it.
     _titleAttemptedSet: titleAttemptedSet,

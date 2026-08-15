@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
+import type { Theme } from "@/stores/themeStore";
 
 // ─── Mock useViewport (always desktop) ───────────────────────────────────────
 
@@ -90,17 +91,22 @@ vi.mock("@/stores/authStore", () => {
 
 // ─── Mock themeStore so AppearanceSection's theme buttons can be exercised ──
 
-const mockSetTheme = vi.fn();
+const mockSetTheme = vi.fn<(t: Theme, origin?: { x: number; y: number }) => void>();
 vi.mock("@/stores/themeStore", () => ({
   useThemeStore: () => ({
     theme: "dark",
-    setTheme: (t: string, anchor?: { x: number; y: number }) => mockSetTheme(t, anchor),
+    setTheme: (t: Theme, anchor?: { x: number; y: number }) => { mockSetTheme(t, anchor); },
   }),
 }));
 
 // ─── Mock useModels for the default-model dropdown ──────────────────────────
 
-const mockUseModels = vi.fn();
+interface MockUseModelsResult {
+  data: { models: { id: string; name: string; loaded: boolean }[] } | undefined;
+  isLoading: boolean;
+}
+
+const mockUseModels = vi.fn<() => MockUseModelsResult>();
 vi.mock("@/hooks/useModels", () => ({
   useModels: () => mockUseModels(),
 }));

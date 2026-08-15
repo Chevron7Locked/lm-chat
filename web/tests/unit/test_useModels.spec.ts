@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 
 // ─── Mock api ──────────────────────────────────────────────────────────────
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: { request: (...args: unknown[]) => mockRequest(...args), postForm: vi.fn() },
@@ -52,7 +52,7 @@ describe("useModels", () => {
 
     const { result } = renderHook(() => useModels(), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(mockRequest).toHaveBeenCalledWith("/api/models");
   });
 
@@ -71,7 +71,7 @@ describe("useModels", () => {
 
     const { result } = renderHook(() => useModels(), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(result.current.data?.models[0]?.id).toBe("qwen3");
     expect(result.current.data?.models[0]?.name).toBe("Qwen 3.6B");
     expect(result.current.data?.models[0]?.loaded).toBe(true);
@@ -85,11 +85,11 @@ describe("useModels", () => {
     mockRequest.mockResolvedValue([]);
 
     const { result: r1 } = renderHook(() => useModels(), { wrapper });
-    await waitFor(() => expect(r1.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(r1.current.isSuccess).toBe(true); });
 
     // Second hook instance — should hit cache, not re-fetch.
     const { result: r2 } = renderHook(() => useModels(), { wrapper });
-    await waitFor(() => expect(r2.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(r2.current.isSuccess).toBe(true); });
 
     // mockRequest called once (cache hit on second).
     expect(mockRequest).toHaveBeenCalledTimes(1);
@@ -102,7 +102,7 @@ describe("useModels", () => {
 
     const { result } = renderHook(() => useModels(), { wrapper });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
   });
 
   it("modelKeys.list() is stable", async () => {
@@ -129,7 +129,7 @@ describe("useModels", () => {
       params_string: "122B-A10B",
     }]);
     const { result } = renderHook(() => useModels(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(result.current.data?.models[0]?.max_context_length).toBe(131072);
   });
 
@@ -165,7 +165,7 @@ describe("useModels", () => {
       },
     ]);
     const { result } = renderHook(() => useModels(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
 
     const vision = result.current.data?.models[0];
     expect(vision?.capabilities.vision).toBe(true);

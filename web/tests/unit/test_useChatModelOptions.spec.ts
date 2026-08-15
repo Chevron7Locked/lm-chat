@@ -20,7 +20,7 @@ import type { ReactNode } from "react";
 
 // ─── Mock api ──────────────────────────────────────────────────────────────
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: { request: (...args: unknown[]) => mockRequest(...args), postForm: vi.fn() },
@@ -75,7 +75,7 @@ describe("useChatModelOptions", () => {
       },
     ]);
     const { result } = renderHook(() => useChatModelOptions(), { wrapper });
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() => { expect(result.current.isLoading).toBe(false); });
     // Only the chat model — embedding is excluded.
     expect(result.current.options.length).toBe(1);
     expect(result.current.options[0]?.id).toBe("qwen3-8b");
@@ -115,7 +115,7 @@ describe("useChatModelOptions", () => {
       },
     ]);
     const { result } = renderHook(() => useChatModelOptions(), { wrapper });
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() => { expect(result.current.isLoading).toBe(false); });
 
     const options = result.current.options;
     // Multi-instance model should produce 2 options (one per instance id).
@@ -158,7 +158,7 @@ describe("useChatModelOptions", () => {
       },
     ]);
     const { result } = renderHook(() => useChatModelOptions(), { wrapper });
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() => { expect(result.current.isLoading).toBe(false); });
 
     const matches = result.current.options.filter(
       (o) => o.id === "qwen3.6-35b-a3b-mtp",
@@ -188,7 +188,7 @@ describe("useChatModelOptions", () => {
       },
     ]);
     const { result } = renderHook(() => useChatModelOptions(), { wrapper });
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() => { expect(result.current.isLoading).toBe(false); });
     const opt = result.current.options[0];
     expect(opt?.capabilities.vision).toBe(true);
     expect(opt?.capabilities.trained_for_tool_use).toBe(true);
@@ -223,7 +223,7 @@ describe("useChatModelOptions", () => {
         },
       ]);
       const { result } = renderHook(() => useChatModelOptions(), { wrapper });
-      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await waitFor(() => { expect(result.current.isLoading).toBe(false); });
 
       // Absent from the flat options list.
       expect(result.current.options.find((o) => o.id === "unloaded-local-7b")).toBeUndefined();
@@ -255,7 +255,7 @@ describe("useChatModelOptions", () => {
         },
       ]);
       const { result } = renderHook(() => useChatModelOptions(), { wrapper });
-      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await waitFor(() => { expect(result.current.isLoading).toBe(false); });
 
       const cloudOpt = result.current.options.find(
         (o) => o.id === "meta-llama/llama-3.3-70b-instruct",
@@ -312,7 +312,7 @@ describe("useChatModelOptions", () => {
         },
       ]);
       const { result } = renderHook(() => useChatModelOptions(), { wrapper });
-      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await waitFor(() => { expect(result.current.isLoading).toBe(false); });
 
       const ids = result.current.options.map((o) => o.id).sort();
       expect(ids).toEqual(["cloud-loaded", "cloud-unloaded", "loaded-local"].sort());

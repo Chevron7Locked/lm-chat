@@ -25,7 +25,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 
 // ─── Mock api.request — the only network surface SharePublic uses ────────────
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 vi.mock("@/lib/api", () => ({
   api: { request: (...args: unknown[]) => mockRequest(...args) },
   ApiClient: vi.fn(),

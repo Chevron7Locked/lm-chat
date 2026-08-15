@@ -138,7 +138,7 @@ describe("useLmStudioStatus — reachability fix (false-green bug)", () => {
     const { result } = renderHook(() => useLmStudioStatus(), { wrapper: makeWrapper() });
 
     // Must be error, NOT ok — even though useModels reports 2 models loaded.
-    await waitFor(() => expect(result.current.status).toBe("error"));
+    await waitFor(() => { expect(result.current.status).toBe("error"); });
     expect(result.current.tooltip.toLowerCase()).toContain("not reachable");
   });
 
@@ -161,7 +161,7 @@ describe("useLmStudioStatus — reachability fix (false-green bug)", () => {
     const { useLmStudioStatus } = await import("@/hooks/useLmStudioStatus");
     const { result } = renderHook(() => useLmStudioStatus(), { wrapper: makeWrapper() });
 
-    await waitFor(() => expect(result.current.status).toBe("ok"));
+    await waitFor(() => { expect(result.current.status).toBe("ok"); });
     expect(result.current.tooltip.toLowerCase()).toContain("connected");
   });
 
@@ -185,7 +185,7 @@ describe("useLmStudioStatus — reachability fix (false-green bug)", () => {
     const { useLmStudioStatus } = await import("@/hooks/useLmStudioStatus");
     const { result } = renderHook(() => useLmStudioStatus(), { wrapper: makeWrapper() });
 
-    await waitFor(() => expect(result.current.status).toBe("error"));
+    await waitFor(() => { expect(result.current.status).toBe("error"); });
     expect(result.current.tooltip.toLowerCase()).toContain("api key");
   });
 
@@ -208,7 +208,7 @@ describe("useLmStudioStatus — reachability fix (false-green bug)", () => {
     const { useLmStudioStatus } = await import("@/hooks/useLmStudioStatus");
     const { result } = renderHook(() => useLmStudioStatus(), { wrapper: makeWrapper() });
 
-    await waitFor(() => expect(result.current.status).toBe("error"));
+    await waitFor(() => { expect(result.current.status).toBe("error"); });
     expect(result.current.tooltip.toLowerCase()).toContain("no models loaded");
   });
 
@@ -235,7 +235,7 @@ describe("useLmStudioStatus — reachability fix (false-green bug)", () => {
     const { useLmStudioStatus } = await import("@/hooks/useLmStudioStatus");
     const { result } = renderHook(() => useLmStudioStatus(), { wrapper: makeWrapper() });
 
-    await waitFor(() => expect(result.current.status).toBe("error"));
+    await waitFor(() => { expect(result.current.status).toBe("error"); });
     expect(result.current.tooltip.toLowerCase()).toContain("probe");
   });
 
@@ -271,7 +271,7 @@ describe("useLmStudioStatus — reachability fix (false-green bug)", () => {
     // Must NOT be "error" — health.loaded_count is the authoritative signal.
     // The tooltip may say "Re-probing" (catalog still fetching) or "connected"
     // — either is fine; the key invariant is the badge is NOT red.
-    await waitFor(() => expect(result.current.status).toBe("ok"));
+    await waitFor(() => { expect(result.current.status).toBe("ok"); });
     expect(result.current.status).not.toBe("error");
   });
 
@@ -299,7 +299,7 @@ describe("useLmStudioStatus — reachability fix (false-green bug)", () => {
     const { result } = renderHook(() => useLmStudioStatus(), { wrapper: makeWrapper() });
 
     // Badge must NOT be red — health.loaded_count wins over stale catalog.
-    await waitFor(() => expect(result.current.status).toBe("ok"));
+    await waitFor(() => { expect(result.current.status).toBe("ok"); });
     expect(result.current.tooltip.toLowerCase()).toContain("connected");
   });
 });

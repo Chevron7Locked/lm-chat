@@ -47,8 +47,8 @@ test.describe("Flow 14 — Settings TOTP enable + login challenge", () => {
     // ─── Step 1: stub the TOTP endpoints. ───────────────────────────────────
     let totpEnabled = false;
 
-    await page.route("**/api/auth/totp/setup", (route) => {
-      route.fulfill({
+    await page.route("**/api/auth/totp/setup", async (route) => {
+      return route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({

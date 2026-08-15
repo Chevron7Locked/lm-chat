@@ -15,13 +15,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
 
-const mockRequest = vi.fn();
-const mockPostForm = vi.fn();
+const mockRequest = vi.fn<(path: string, init?: RequestInit) => Promise<unknown>>();
+const mockPostForm = vi.fn<(path: string, fields: Record<string, string>) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: {
-    request: (...args: unknown[]) => mockRequest(...args),
-    postForm: (...args: unknown[]) => mockPostForm(...args),
+    request: (...args: [path: string, init?: RequestInit]) => mockRequest(...args),
+    postForm: (...args: [path: string, fields: Record<string, string>]) => mockPostForm(...args),
   },
   ApiClient: vi.fn(),
 }));

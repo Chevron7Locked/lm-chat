@@ -14,7 +14,7 @@ import type { ReactNode } from "react";
 
 // ─── Mock api module ─────────────────────────────────────────────────────────
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: { request: (...args: unknown[]) => mockRequest(...args), postForm: vi.fn() },
@@ -80,7 +80,7 @@ describe("useDocuments", () => {
 
     const { result } = renderHook(() => useDocuments(), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(mockRequest).toHaveBeenCalledWith("/api/documents");
   });
 
@@ -96,7 +96,7 @@ describe("useDocuments", () => {
 
     const { result } = renderHook(() => useDocuments(), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(Array.isArray(result.current.data)).toBe(true);
     expect(result.current.data?.[0]?.title).toBe("test.txt");
   });
@@ -108,7 +108,7 @@ describe("useDocuments", () => {
 
     const { result } = renderHook(() => useDocuments(), { wrapper });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
   });
 });
 
@@ -185,11 +185,11 @@ describe("useUploadDocument", () => {
     const { result } = renderHook(() => useUploadDocument(), { wrapper });
     const file = new File(["x"], "big.txt", { type: "text/plain" });
 
-    await act(async () => {
+    act(() => {
       result.current.mutate(file);
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(413);
   });
 
@@ -203,11 +203,11 @@ describe("useUploadDocument", () => {
     const { result } = renderHook(() => useUploadDocument(), { wrapper });
     const file = new File(["\x00"], "binary.bin", { type: "application/octet-stream" });
 
-    await act(async () => {
+    act(() => {
       result.current.mutate(file);
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(415);
   });
 });
@@ -243,11 +243,11 @@ describe("useDeleteDocument", () => {
 
     const { result } = renderHook(() => useDeleteDocument(), { wrapper });
 
-    await act(async () => {
+    act(() => {
       result.current.mutate(999);
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(404);
   });
 });
@@ -266,7 +266,7 @@ describe("useDocumentChunks", () => {
 
     const { result } = renderHook(() => useDocumentChunks(7), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(mockRequest).toHaveBeenCalledWith("/api/documents/7/chunks");
   });
 

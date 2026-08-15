@@ -114,7 +114,7 @@ describe("useSubSessionSSE — integrations FormData forwarding", () => {
 
     const { result } = renderHook(() => useSubSessionSSE());
 
-    await act(async () => {
+    act(() => {
       result.current.stream({
         ...BASE_PARAMS,
         integrations: ["mcp/context7", "mcp/deepwiki"],
@@ -126,7 +126,8 @@ describe("useSubSessionSSE — integrations FormData forwarding", () => {
     });
 
     expect(capturedFormData).toBeDefined();
-    const rawField = capturedFormData!.get("integrations");
+    if (!capturedFormData) throw new Error("expected the FormData body to have been captured");
+    const rawField = capturedFormData.get("integrations");
     expect(rawField).not.toBeNull();
     const parsed = JSON.parse(rawField as string) as string[];
     expect(parsed).toContain("mcp/context7");
@@ -144,7 +145,7 @@ describe("useSubSessionSSE — integrations FormData forwarding", () => {
 
     const { result } = renderHook(() => useSubSessionSSE());
 
-    await act(async () => {
+    act(() => {
       result.current.stream({
         ...BASE_PARAMS,
         integrations: [], // explicit all-off
@@ -156,8 +157,9 @@ describe("useSubSessionSSE — integrations FormData forwarding", () => {
     });
 
     expect(capturedFormData).toBeDefined();
+    if (!capturedFormData) throw new Error("expected the FormData body to have been captured");
     // The field MUST be present — absence would let the BE apply admin defaults.
-    const rawField = capturedFormData!.get("integrations");
+    const rawField = capturedFormData.get("integrations");
     expect(rawField).not.toBeNull();
     const parsed = JSON.parse(rawField as string) as string[];
     expect(Array.isArray(parsed)).toBe(true);
@@ -177,7 +179,7 @@ describe("useSubSessionSSE — integrations FormData forwarding", () => {
 
     const { result } = renderHook(() => useSubSessionSSE());
 
-    await act(async () => {
+    act(() => {
       // integrations: undefined → no per-chat selection
       result.current.stream({ ...BASE_PARAMS });
     });
@@ -187,8 +189,9 @@ describe("useSubSessionSSE — integrations FormData forwarding", () => {
     });
 
     expect(capturedFormData).toBeDefined();
+    if (!capturedFormData) throw new Error("expected the FormData body to have been captured");
     // Field must be absent so the BE applies admin defaults.
-    expect(capturedFormData!.get("integrations")).toBeNull();
+    expect(capturedFormData.get("integrations")).toBeNull();
   });
 
   it("(c) sub-session stream: sends per-chat selection (from resolveChatIntegrationsField) including explicit []", async () => {
@@ -215,7 +218,7 @@ describe("useSubSessionSSE — integrations FormData forwarding", () => {
     const { result } = renderHook(() => useSubSessionSSE());
 
     // Mimic what the fixed Chat.tsx does: spread resolved only when defined.
-    await act(async () => {
+    act(() => {
       result.current.stream({
         ...BASE_PARAMS,
         ...(resolved !== undefined && { integrations: resolved }),
@@ -227,7 +230,8 @@ describe("useSubSessionSSE — integrations FormData forwarding", () => {
     });
 
     expect(capturedFormData).toBeDefined();
-    const rawField = capturedFormData!.get("integrations");
+    if (!capturedFormData) throw new Error("expected the FormData body to have been captured");
+    const rawField = capturedFormData.get("integrations");
     // Must be present and parse to [].
     expect(rawField).not.toBeNull();
     const parsed = JSON.parse(rawField as string) as string[];

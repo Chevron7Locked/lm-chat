@@ -12,13 +12,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { createElement, type ReactNode } from "react";
 
-const mockRequest = vi.fn();
-const mockPostForm = vi.fn();
+const mockRequest = vi.fn<(path: string, init?: RequestInit) => Promise<unknown>>();
+const mockPostForm = vi.fn<(path: string, fields: Record<string, string>) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: {
-    request: (...args: unknown[]) => mockRequest(...args),
-    postForm: (...args: unknown[]) => mockPostForm(...args),
+    request: (...args: [path: string, init?: RequestInit]) => mockRequest(...args),
+    postForm: (...args: [path: string, fields: Record<string, string>]) => mockPostForm(...args),
   },
   ApiClient: vi.fn(),
 }));
@@ -514,7 +514,15 @@ describe("Project page", () => {
     });
 
     const clickSpy = vi.fn();
-    const realCreateElement = document.createElement.bind(document);
+    // Snapshot the REAL implementation before spyOn replaces document.createElement
+    // below — calling `document.createElement` from inside realCreateElement would
+    // recurse into the spy. Reflect.get (rather than a bare `document.createElement`
+    // reference) also sidesteps the deprecated-overload flag on the merged
+    // createElement declaration (only the DeprecatedTagNameMap overload is actually
+    // deprecated; a bare reference can't select a specific overload, a call can).
+    const nativeCreateElement = Reflect.get(document, "createElement");
+    const realCreateElement = (tag: string): HTMLElement =>
+      nativeCreateElement.call(document, tag) as HTMLElement;
     const createElSpy = vi
       .spyOn(document, "createElement")
       .mockImplementation((tag: string) => {

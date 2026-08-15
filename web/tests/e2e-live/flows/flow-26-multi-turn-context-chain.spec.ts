@@ -114,11 +114,11 @@ test(
               ? input
               : input instanceof URL
                 ? input.href
-                : (input as Request).url;
+                : input.url;
           if (url.includes("/api/chat/stream")) {
             resolve((init?.body as string | undefined) ?? "");
             const stream = new ReadableStream<Uint8Array>({
-              start(_controller) { /* hang — avoids FE fetch rejection */ },
+              start() { /* hang — avoids FE fetch rejection */ },
             });
             return new Response(stream, {
               status: 200,
@@ -130,7 +130,7 @@ test(
           }
           return originalFetch(input, init);
         };
-        setTimeout(() => reject(new Error("fetch patch timed out after 20s")), 20_000);
+        setTimeout(() => { reject(new Error("fetch patch timed out after 20s")); }, 20_000);
       });
     });
 
@@ -219,11 +219,11 @@ test(
               ? input
               : input instanceof URL
                 ? input.href
-                : (input as Request).url;
+                : input.url;
           if (url.includes("/api/chat/stream")) {
             resolve((init?.body as string | undefined) ?? "");
             const stream = new ReadableStream<Uint8Array>({
-              start(_controller) { /* hang */ },
+              start() { /* hang */ },
             });
             return new Response(stream, {
               status: 200,
@@ -235,7 +235,7 @@ test(
           }
           return originalFetch(input, init);
         };
-        setTimeout(() => reject(new Error("fetch patch timed out")), 20_000);
+        setTimeout(() => { reject(new Error("fetch patch timed out")); }, 20_000);
       });
     });
 
@@ -305,7 +305,7 @@ test(
             ? input
             : input instanceof URL
               ? input.href
-              : (input as Request).url;
+              : input.url;
         if (url.includes("/api/chat/stream")) {
           let body: Record<string, unknown> = {};
           try {

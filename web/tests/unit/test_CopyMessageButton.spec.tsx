@@ -29,7 +29,9 @@ function clearToasts(): void {
 }
 
 describe("CopyMessageButton — render gating (AC 1, 6, 7, 9)", () => {
-  beforeEach(() => clearToasts());
+  beforeEach(() => {
+    clearToasts();
+  });
 
   it("renders on user-role persisted messages", () => {
     render(
@@ -103,7 +105,9 @@ describe("CopyMessageButton — render gating (AC 1, 6, 7, 9)", () => {
 });
 
 describe("CopyMessageButton — order in action row (AC 2)", () => {
-  beforeEach(() => clearToasts());
+  beforeEach(() => {
+    clearToasts();
+  });
 
   it("renders Copy as the LAST child of the action row on assistant turns", () => {
     render(
@@ -115,7 +119,10 @@ describe("CopyMessageButton — order in action row (AC 2)", () => {
     );
     const row = screen.getByTestId("chat-message-copy-btn-9").parentElement;
     expect(row).toBeTruthy();
-    const buttons = Array.from(row!.querySelectorAll("button"));
+    if (row === null) {
+      throw new Error("unreachable: expect(row).toBeTruthy() above already failed the test");
+    }
+    const buttons = Array.from(row.querySelectorAll("button"));
     const last = buttons[buttons.length - 1];
     expect(last?.getAttribute("data-testid")).toBe("chat-message-copy-btn-9");
   });
@@ -136,7 +143,7 @@ describe("CopyMessageButton — click behavior (AC 3, 4, 5, 8)", () => {
   });
 
   it("writes message.content raw on success + success toast", async () => {
-    const writeText = vi.fn(async () => undefined);
+    const writeText = vi.fn(() => Promise.resolve(undefined));
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText },
@@ -149,7 +156,9 @@ describe("CopyMessageButton — click behavior (AC 3, 4, 5, 8)", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("chat-message-copy-btn-7"));
-    await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledOnce();
+    });
     expect(writeText).toHaveBeenCalledWith("## Heading\n\n- Item 1\n- Item 2");
     await waitFor(() => {
       expect(lastToast()?.variant).toBe("success");
@@ -158,7 +167,7 @@ describe("CopyMessageButton — click behavior (AC 3, 4, 5, 8)", () => {
   });
 
   it("flips aria-label to 'Copied!' after success", async () => {
-    const writeText = vi.fn(async () => undefined);
+    const writeText = vi.fn(() => Promise.resolve(undefined));
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText },
@@ -178,7 +187,7 @@ describe("CopyMessageButton — click behavior (AC 3, 4, 5, 8)", () => {
   });
 
   it("copies whitespace-only content as-is (no trim)", async () => {
-    const writeText = vi.fn(async () => undefined);
+    const writeText = vi.fn(() => Promise.resolve(undefined));
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText },
@@ -190,7 +199,9 @@ describe("CopyMessageButton — click behavior (AC 3, 4, 5, 8)", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("chat-message-copy-btn-10"));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("   "));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("   ");
+    });
   });
 
   it("undefined clipboard → error toast, no writeText invocation", async () => {
@@ -212,9 +223,7 @@ describe("CopyMessageButton — click behavior (AC 3, 4, 5, 8)", () => {
   });
 
   it("writeText rejection (NotAllowedError) → error toast, no icon swap", async () => {
-    const writeText = vi.fn(async () => {
-      throw new DOMException("denied", "NotAllowedError");
-    });
+    const writeText = vi.fn(() => Promise.reject(new DOMException("denied", "NotAllowedError")));
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText },

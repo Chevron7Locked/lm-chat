@@ -93,14 +93,14 @@ test.describe("Flow 32 — P13i incognito mode", () => {
           body: JSON.stringify({
             id,
             user_id: 1,
-            title: (summary?.title as string) ?? "Chat",
+            title: (summary?.title as string | undefined) ?? "Chat",
             folder: null,
             pinned: false,
             created_at: "2026-05-22T00:00:00Z",
             updated_at: "2026-05-22T00:00:00Z",
             messages: [],
             has_more: false,
-            incognito: (summary?.incognito as boolean) ?? false,
+            incognito: (summary?.incognito as boolean | undefined) ?? false,
             incognito_expires_at: (summary?.incognito_expires_at as number | null) ?? null,
           }),
         });

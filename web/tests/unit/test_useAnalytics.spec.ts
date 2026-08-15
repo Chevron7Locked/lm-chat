@@ -11,7 +11,7 @@ import type { ReactNode } from "react";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: { request: (...args: unknown[]) => mockRequest(...args) },
@@ -64,7 +64,7 @@ describe("useMyAnalytics", () => {
     mockRequest.mockResolvedValue(payload);
 
     const { result } = renderHook(() => useMyAnalytics(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true), {
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); }, {
       timeout: 2500,
     });
 
@@ -79,7 +79,7 @@ describe("useMyAnalytics", () => {
     mockRequest.mockRejectedValue(err);
 
     const { result } = renderHook(() => useMyAnalytics(), { wrapper });
-    await waitFor(() => expect(result.current.isError).toBe(true), {
+    await waitFor(() => { expect(result.current.isError).toBe(true); }, {
       timeout: 2500,
     });
     expect((result.current.error as { status?: number } | null)?.status).toBe(401);
@@ -102,7 +102,7 @@ describe("useSystemAnalytics", () => {
     mockRequest.mockResolvedValue(payload);
 
     const { result } = renderHook(() => useSystemAnalytics(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true), {
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); }, {
       timeout: 2500,
     });
 
@@ -117,7 +117,7 @@ describe("useSystemAnalytics", () => {
     mockRequest.mockRejectedValue(err);
 
     const { result } = renderHook(() => useSystemAnalytics(), { wrapper });
-    await waitFor(() => expect(result.current.isError).toBe(true), {
+    await waitFor(() => { expect(result.current.isError).toBe(true); }, {
       timeout: 2500,
     });
   });

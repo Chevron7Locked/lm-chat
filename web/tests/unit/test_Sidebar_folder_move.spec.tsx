@@ -20,7 +20,7 @@ import type { DropTargetContext } from "@/components/Sidebar";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-const mockUseFolders = vi.fn();
+const mockUseFolders = vi.fn<(...args: unknown[]) => { data: string[] }>();
 vi.mock("@/hooks/useFolders", () => ({
   useFolders: (...args: unknown[]) => mockUseFolders(...args),
 }));

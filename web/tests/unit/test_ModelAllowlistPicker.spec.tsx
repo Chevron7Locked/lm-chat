@@ -61,9 +61,9 @@ const mockProvidersState = vi.hoisted(() => ({
     allowed_models?: string[] | null;
   }[],
   status: [] as { provider: string; reachable: boolean; error: string | null }[],
-  upsertPending: false as boolean,
-  deletePending: false as boolean,
-  testPending: false as boolean,
+  upsertPending: false,
+  deletePending: false,
+  testPending: false,
 }));
 
 vi.mock("@/hooks/useProviders", () => ({
@@ -134,7 +134,7 @@ async function openEditForm(Section: React.ComponentType, providerTestId = "prov
 /** Simulates a successful test probe returning model_ids. */
 function mockTestSuccess(modelIds: string[] = SAMPLE_MODEL_IDS) {
   mockTestMutate.mockImplementation((_vars: unknown, opts: { onSuccess?: (r: unknown) => void }) => {
-    opts?.onSuccess?.({
+    opts.onSuccess?.({
       ok: true,
       model_count: modelIds.length,
       model_ids: modelIds,
@@ -187,7 +187,7 @@ describe("ModelAllowlistPicker", () => {
   it("picker does NOT appear when probe fails (ok=false)", async () => {
     mockProvidersState.providers = [OPENROUTER_CONFIG];
     mockTestMutate.mockImplementation((_vars: unknown, opts: { onSuccess?: (r: unknown) => void }) => {
-      opts?.onSuccess?.({ ok: false, model_count: null, model_ids: null, error: "unauthorized" });
+      opts.onSuccess?.({ ok: false, model_count: null, model_ids: null, error: "unauthorized" });
     });
 
     const Section = await freshSection();
@@ -432,7 +432,7 @@ describe("ModelAllowlistPicker", () => {
     mockProvidersState.providers = [OPENROUTER_CONFIG];
     mockTestSuccess();
     mockUpsertMutate.mockImplementation((_vars: unknown, opts: { onSuccess?: () => void }) => {
-      opts?.onSuccess?.();
+      opts.onSuccess?.();
     });
 
     const Section = await freshSection();
@@ -462,7 +462,7 @@ describe("ModelAllowlistPicker", () => {
     mockProvidersState.providers = [OPENROUTER_CONFIG];
     mockTestSuccess();
     mockUpsertMutate.mockImplementation((_vars: unknown, opts: { onSuccess?: () => void }) => {
-      opts?.onSuccess?.();
+      opts.onSuccess?.();
     });
 
     const Section = await freshSection();
@@ -498,7 +498,7 @@ describe("ModelAllowlistPicker", () => {
   it("save without running test still sends allowed_models: [] (no picker shown)", async () => {
     mockProvidersState.providers = [OPENROUTER_CONFIG];
     mockUpsertMutate.mockImplementation((_vars: unknown, opts: { onSuccess?: () => void }) => {
-      opts?.onSuccess?.();
+      opts.onSuccess?.();
     });
 
     const Section = await freshSection();

@@ -19,14 +19,21 @@ import { createElement } from "react";
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-const mockUseAuditLog = vi.fn();
+import type { AuditLogRow, AuditLogPage } from "@/hooks/useAuditLog";
+
+interface MockAuditLogResult {
+  data: AuditLogPage | undefined;
+  isLoading: boolean;
+  error: unknown;
+}
+
+const mockUseAuditLog = vi.fn<(params: unknown) => MockAuditLogResult>();
 
 vi.mock("@/hooks/useAuditLog", () => ({
   useAuditLog: (params: unknown) => mockUseAuditLog(params),
 }));
 
 import AdminAuditLog from "@/pages/AdminAuditLog";
-import type { AuditLogRow } from "@/hooks/useAuditLog";
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -138,7 +145,9 @@ describe("AdminAuditLog", () => {
     fireEvent.change(input, {
       target: { value: "  auth.login.success  " },
     });
-    fireEvent.submit(screen.getByTestId("audit-log-filter-btn").closest("form")!);
+    const filterForm1 = screen.getByTestId("audit-log-filter-btn").closest("form");
+    if (filterForm1 === null) throw new Error("expected filter button to be inside a <form>");
+    fireEvent.submit(filterForm1);
     const lastCall = mockUseAuditLog.mock.calls[
       mockUseAuditLog.mock.calls.length - 1
     ]?.[0] as { limit: number; offset: number; event: string | undefined };
@@ -156,7 +165,9 @@ describe("AdminAuditLog", () => {
       "audit-log-event-filter",
     ) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "auth.login.success" } });
-    fireEvent.submit(screen.getByTestId("audit-log-filter-btn").closest("form")!);
+    const filterForm2 = screen.getByTestId("audit-log-filter-btn").closest("form");
+    if (filterForm2 === null) throw new Error("expected filter button to be inside a <form>");
+    fireEvent.submit(filterForm2);
     fireEvent.click(screen.getByTestId("audit-log-clear-btn"));
     expect(input.value).toBe("");
     const lastCall = mockUseAuditLog.mock.calls[

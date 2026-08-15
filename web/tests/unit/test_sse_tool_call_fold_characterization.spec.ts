@@ -62,7 +62,7 @@ function frame(type: string, data: Record<string, unknown>): string {
 
 class StubChannel {
   onmessage: ((ev: { data: unknown }) => void) | null = null;
-  postMessage(_msg: unknown) {
+  postMessage() {
     /* no-op */
   }
   close() {
@@ -78,8 +78,9 @@ function chunkedSseResponse(chunks: string[]): Response {
   let idx = 0;
   const stream = new ReadableStream<Uint8Array>({
     pull(controller) {
-      if (idx < chunks.length) {
-        controller.enqueue(encoder.encode(chunks[idx++]!));
+      const chunk = chunks[idx++];
+      if (chunk !== undefined) {
+        controller.enqueue(encoder.encode(chunk));
       } else {
         controller.close();
       }

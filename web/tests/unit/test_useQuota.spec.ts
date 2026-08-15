@@ -13,8 +13,8 @@ import type { ReactNode } from "react";
 
 // ─── Mock api module ─────────────────────────────────────────────────────────
 
-const mockRequest = vi.fn();
-const mockPostForm = vi.fn();
+const mockRequest = vi.fn<(...args: unknown[]) => Promise<unknown>>();
+const mockPostForm = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -103,7 +103,7 @@ describe("useQuotaMe", () => {
 
     const { useQuotaMe } = await import("@/hooks/useQuota");
     const { result } = renderHook(() => useQuotaMe(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
 
     expect(mockRequest).toHaveBeenCalledWith("/api/quotas/me");
     expect(result.current.data?.tokens_per_day).toBe(100_000);
@@ -142,7 +142,7 @@ describe("useQuotaMe", () => {
     const { useQuotaMe } = await import("@/hooks/useQuota");
     const { result } = renderHook(() => useQuotaMe(), { wrapper });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect(result.current.error?.status).toBe(429);
   });
 });
@@ -169,7 +169,7 @@ describe("useAdminQuotaList", () => {
     const { wrapper } = makeWrapper();
     const { useAdminQuotaList } = await import("@/hooks/useQuota");
     const { result } = renderHook(() => useAdminQuotaList(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
 
     expect(mockRequest).toHaveBeenCalledWith("/api/admin/quotas");
     expect(Array.isArray(result.current.data)).toBe(true);
@@ -191,11 +191,11 @@ describe("useUpdateQuota", () => {
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     const { result } = renderHook(() => useUpdateQuota(), { wrapper });
 
-    await act(async () => {
+    act(() => {
       result.current.mutate({ userId: 7, tokensPerDay: 50_000, requestsPerDay: 500 });
     });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(mockPostForm).toHaveBeenCalledWith("/api/admin/quotas/7", {
       tokens_per_day: "50000",
       requests_per_day: "500",
@@ -217,11 +217,11 @@ describe("useUpdateQuota", () => {
     const { useUpdateQuota } = await import("@/hooks/useQuota");
     const { result } = renderHook(() => useUpdateQuota(), { wrapper });
 
-    await act(async () => {
+    act(() => {
       result.current.mutate({ userId: 7, tokensPerDay: 1000, requestsPerDay: 10 });
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect(mockPush).toHaveBeenCalledWith(
       expect.objectContaining({ variant: "error" }),
     );
@@ -237,11 +237,11 @@ describe("useUpdateQuota", () => {
     const { useUpdateQuota } = await import("@/hooks/useQuota");
     const { result } = renderHook(() => useUpdateQuota(), { wrapper });
 
-    await act(async () => {
+    act(() => {
       result.current.mutate({ userId: 3, tokensPerDay: -1, requestsPerDay: 0 });
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect(mockPush).toHaveBeenCalledWith(
       expect.objectContaining({ variant: "error" }),
     );

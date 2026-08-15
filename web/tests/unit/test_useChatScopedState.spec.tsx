@@ -41,7 +41,7 @@ describe("useChatScopedState — memory tier", () => {
           "memory",
           undefined,
         ),
-      { initialProps: { chatId: 1 as number | null } },
+      { initialProps: { chatId: 1 } },
     );
 
     expect(result.current[0]).toBeUndefined();
@@ -99,7 +99,7 @@ describe("useChatScopedState — memory tier", () => {
     const { result, rerender } = renderHook(
       ({ chatId }: { chatId: number | null }) =>
         useChatScopedState<string>(chatId, "badkey", "memory", "safe", isString),
-      { initialProps: { chatId: 9 as number | null } },
+      { initialProps: { chatId: 9 } },
     );
     expect(result.current[0]).toBe("safe");
 
@@ -168,7 +168,7 @@ describe("useChatScopedState — local tier", () => {
     const { result, rerender } = renderHook(
       ({ chatId }: { chatId: number | null }) =>
         useChatScopedState<string[]>(chatId, "tools", "local", [], isStringArray),
-      { initialProps: { chatId: 1 as number | null } },
+      { initialProps: { chatId: 1 } },
     );
     act(() => {
       result.current[1](["a"]);

@@ -59,7 +59,7 @@ test.describe("§1.6 — fresh-install wizard", () => {
     await expect(page.getByText(/becomes the admin/i)).toBeVisible();
 
     // Step 3 — register the first admin.
-    const username = `wizard_${Date.now()}`;
+    const username = `wizard_${String(Date.now())}`;
     await page.getByLabel("Username").fill(username);
     await page.locator("#lmchat-register-password").fill("wizard-pw-12345");
     await page

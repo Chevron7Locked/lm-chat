@@ -271,7 +271,9 @@ describe("Composer integrations chip-row (P13h)", () => {
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, payload] = onSubmit.mock.calls[0]!;
+    const onSubmitCall = onSubmit.mock.calls[0];
+    if (onSubmitCall === undefined) throw new Error("expected onSubmit to have been called");
+    const [, payload] = onSubmitCall;
     expect(payload.integrations).toEqual(["mcp/searxng", "mcp/filesystem"]);
   });
 
@@ -308,7 +310,9 @@ describe("Composer integrations chip-row (P13h)", () => {
     fireEvent.change(textarea, { target: { value: "ping" } });
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, payload] = onSubmit.mock.calls[0]!;
+    const onSubmitCall = onSubmit.mock.calls[0];
+    if (onSubmitCall === undefined) throw new Error("expected onSubmit to have been called");
+    const [, payload] = onSubmitCall;
     // The hydrated value MUST win over the (would-have-been-empty) seed.
     expect(payload.integrations).toEqual(["mcp/firecrawl"]);
   });
@@ -393,7 +397,9 @@ describe("Composer integrations chip-row (P13h)", () => {
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, payload] = onSubmit.mock.calls[0]!;
+    const onSubmitCall = onSubmit.mock.calls[0];
+    if (onSubmitCall === undefined) throw new Error("expected onSubmit to have been called");
+    const [, payload] = onSubmitCall;
     // No stored entry + no selection (seed didn't fire — no defaults) → omit.
     // BE treats omission as "apply admin defaults server-side".
     expect(payload.integrations).toBeUndefined();
@@ -421,7 +427,9 @@ describe("Composer integrations chip-row (P13h)", () => {
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, payload] = onSubmit.mock.calls[0]!;
+    const onSubmitCall = onSubmit.mock.calls[0];
+    if (onSubmitCall === undefined) throw new Error("expected onSubmit to have been called");
+    const [, payload] = onSubmitCall;
     // Stored [] entry → field is present as [] (BE will honour it, not apply defaults).
     expect(payload.integrations).toEqual([]);
   });
@@ -465,7 +473,9 @@ describe("Composer integrations chip-row (P13h)", () => {
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, payload] = onSubmit.mock.calls[0]!;
+    const onSubmitCall = onSubmit.mock.calls[0];
+    if (onSubmitCall === undefined) throw new Error("expected onSubmit to have been called");
+    const [, payload] = onSubmitCall;
     expect(payload.integrations).toBeUndefined();
   });
 
@@ -564,7 +574,9 @@ describe("Composer integrations chip-row (P13h)", () => {
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, payload] = onSubmit.mock.calls[0]!;
+    const onSubmitCall = onSubmit.mock.calls[0];
+    if (onSubmitCall === undefined) throw new Error("expected onSubmit to have been called");
+    const [, payload] = onSubmitCall;
     // Only the same-system (lmstudio) tool ships; the Store tool is filtered out.
     expect(payload.integrations).toEqual(["mcp/searxng"]);
   });

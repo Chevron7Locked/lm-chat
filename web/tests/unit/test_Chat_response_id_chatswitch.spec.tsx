@@ -37,7 +37,10 @@ import { __resetChatScopedMemoryForTests } from "@/hooks/useChatScopedState";
 import { loadResponseId } from "@/lib/responseId";
 import type { StreamState } from "@/hooks/useSSE";
 
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
+if (
+  typeof window !== "undefined" &&
+  !(Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+) {
   Element.prototype.scrollIntoView = function (): void { /* no-op */ };
 }
 
@@ -141,7 +144,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 
@@ -344,7 +347,7 @@ function renderChat(initialPath: string) {
 function navigateTo(path: string): void {
   act(() => {
     if (capturedNavigate === null) throw new Error("navigate not captured");
-    capturedNavigate(path);
+    void capturedNavigate(path);
   });
 }
 

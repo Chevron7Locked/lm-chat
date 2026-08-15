@@ -13,8 +13,8 @@ import type { ReactNode } from "react";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-const mockRequest = vi.fn();
-const mockPostForm = vi.fn();
+const mockRequest = vi.fn<(...args: unknown[]) => Promise<unknown>>();
+const mockPostForm = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -79,7 +79,7 @@ describe("useReorderChat", () => {
     );
 
     const callArgs = mockRequest.mock.calls[0];
-    const rawBody = (callArgs?.[1] as { body?: string })?.body ?? "";
+    const rawBody = (callArgs?.[1] as { body?: string } | undefined)?.body ?? "";
     const params = new URLSearchParams(rawBody);
     expect(params.get("chat_id")).toBe("5");
     expect(params.get("folder")).toBe("work");
@@ -102,7 +102,7 @@ describe("useReorderChat", () => {
     });
 
     const callArgs = mockRequest.mock.calls[0];
-    const rawBody = (callArgs?.[1] as { body?: string })?.body ?? "";
+    const rawBody = (callArgs?.[1] as { body?: string } | undefined)?.body ?? "";
     const params = new URLSearchParams(rawBody);
     // null folder must not be sent as the string "null" — it must be absent.
     expect(params.has("folder")).toBe(false);
@@ -118,11 +118,16 @@ describe("useReorderChat", () => {
 
     const { result } = renderHook(() => useReorderChat(), { wrapper });
 
-    await act(async () => {
-      await result.current.mutate({ chat_id: 999, folder: null, display_order: 0 });
+    // .mutate() (not .mutateAsync()) is fire-and-forget by design here — this
+    // test asserts the ERROR PATH via state (isError), not by catching a
+    // rejected promise, so waitFor below does the actual synchronization.
+    act(() => {
+      result.current.mutate({ chat_id: 999, folder: null, display_order: 0 });
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
     expect((result.current.error as { status?: number } | null)?.status).toBe(404);
   });
 });
@@ -145,7 +150,9 @@ describe("useChatsDirect (DEFERRED §3 ChatSummary[] direct)", () => {
     mockRequest.mockResolvedValue([chat]);
 
     const { result } = renderHook(() => useChatsDirect(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
 
     // data is ChatSummary[] directly (not wrapped in envelope).
     expect(Array.isArray(result.current.data)).toBe(true);

@@ -33,7 +33,8 @@ describe("ModelSelectControl", () => {
         options={[]}
       />,
     );
-    const select = container.querySelector("select")!;
+    const select = container.querySelector("select");
+    if (!select) throw new Error("expected a <select> element to render");
     expect(select.className).toContain("lmchat-model-select");
   });
 
@@ -47,7 +48,8 @@ describe("ModelSelectControl", () => {
         options={[]}
       />,
     );
-    const select = container.querySelector("select")!;
+    const select = container.querySelector("select");
+    if (!select) throw new Error("expected a <select> element to render");
     expect(select.className).toContain("lmchat-model-select");
     expect(select.className).toContain("lmchat-model-select--mobile-wide");
   });
@@ -421,7 +423,7 @@ describe("ModelSelectControl", () => {
       />,
     );
     const options = Array.from(container.querySelectorAll("option"));
-    const texts = options.map((o) => o.textContent ?? "");
+    const texts = options.map((o) => o.textContent);
     expect(texts.find((t) => t.includes("Vision LLM"))).toBe("Vision LLM [V]");
     expect(texts.find((t) => t.includes("Tool LLM"))).toBe("Tool LLM [T]");
     expect(texts.find((t) => t.includes("Reasoning LLM"))).toBe("Reasoning LLM [R]");

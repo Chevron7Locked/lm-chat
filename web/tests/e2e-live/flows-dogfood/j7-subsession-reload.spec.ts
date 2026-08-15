@@ -113,7 +113,11 @@ test(
       sessions.length,
       "sub-session was NOT persisted — reload lost it (the bug)",
     ).toBeGreaterThan(0);
-    const sid = sessions[0]!.id;
+    const firstSession = sessions[0];
+    if (firstSession === undefined) {
+      throw new Error("unreachable: sessions.length > 0 checked above");
+    }
+    const sid = firstSession.id;
 
     const detailResp = await page.request.get(
       `${backendURL}/api/chats/${String(chatId)}/sub-sessions/${String(sid)}`,
@@ -158,7 +162,7 @@ test(
       .catch(() => false);
     console.log(
       `J7 RESULT: persisted=${String(sessions.length)} session(s); ` +
-        `first status=${detail.status}; assistant state=${assistant?.state}; ` +
+        `first status=${detail.status}; assistant state=${String(assistant?.state)}; ` +
         `assistant content chars=${String((assistant?.content ?? "").length)}; ` +
         `FE auto-restored panel on reload=${String(panelRestored)}`,
     );
@@ -226,8 +230,14 @@ test(
       "continuing a reopened session must APPEND onto the same row, not " +
         "create a second disconnected sub_sessions row",
     ).toBe(sessions.length);
-    expect(sessionsAfterContinue[0]!.id).toBe(sid);
-    expect(sessionsAfterContinue[0]!.status).toBe("final");
+    const firstAfterContinue = sessionsAfterContinue[0];
+    if (firstAfterContinue === undefined) {
+      throw new Error(
+        "unreachable: sessionsAfterContinue.length === sessions.length > 0",
+      );
+    }
+    expect(firstAfterContinue.id).toBe(sid);
+    expect(firstAfterContinue.status).toBe("final");
 
     const detailAfterContinueResp = await page.request.get(
       `${backendURL}/api/chats/${String(chatId)}/sub-sessions/${String(sid)}`,

@@ -154,7 +154,6 @@ async function freshSection() {
  * LmStudioSection uses useBlocker which requires a data router
  * (createBrowserRouter / createMemoryRouter).
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function renderInDataRouter(Component: () => any) {
   const router = createMemoryRouter(
     [{ path: "/", element: createElement(Component) }],
@@ -260,7 +259,7 @@ describe("EndpointModeCard (LmStudioSection)", () => {
       ([url]) => url === "/api/settings/lmstudio/endpoint-mode",
     );
     expect(patchCall).toBeTruthy();
-    const init = patchCall?.[1] as RequestInit | undefined;
+    const init = patchCall?.[1];
     expect(init?.method).toBe("PATCH");
     const body = JSON.parse(init?.body as string);
     expect(body).toEqual({ endpoint_mode: "openai_compat" });

@@ -36,7 +36,7 @@ test.describe("Flow 35 — LM Studio config UI (P13g)", () => {
 
     const lastProbeBody: { value: Record<string, unknown> | null } = { value: null };
     let lastModelPutBody: Record<string, unknown> | null = null;
-    let lastAdminPatchBody: Record<string, unknown> | null = null;
+    const lastAdminPatchBody: { value: Record<string, unknown> | null } = { value: null };
     let resolved = {
       base_url: "http://localhost:1234",
       default_model: "qwen3-8b",
@@ -79,13 +79,13 @@ test.describe("Flow 35 — LM Studio config UI (P13g)", () => {
     // singleton rewire, PATCH-only.
     await page.route("**/api/admin/lmstudio/default", (route) => {
       if (route.request().method() !== "PATCH") return route.fallback();
-      lastAdminPatchBody = JSON.parse(
+      lastAdminPatchBody.value = JSON.parse(
         route.request().postData() ?? "{}",
       ) as Record<string, unknown>;
-      if (typeof lastAdminPatchBody.base_url === "string") {
+      if (typeof lastAdminPatchBody.value.base_url === "string") {
         resolved = {
           ...resolved,
-          base_url: lastAdminPatchBody.base_url,
+          base_url: lastAdminPatchBody.value.base_url,
           source_base_url: "user",
         };
       }
@@ -138,12 +138,12 @@ test.describe("Flow 35 — LM Studio config UI (P13g)", () => {
     await page.getByTestId("lmstudio-save").click();
 
     // Wait for the save to land + the toast / state to update.
-    await expect.poll(() => lastAdminPatchBody).not.toBeNull();
-    expect(lastAdminPatchBody).toEqual({
+    await expect.poll(() => lastAdminPatchBody.value).not.toBeNull();
+    expect(lastAdminPatchBody.value).toEqual({
       base_url: "http://probe-target.example:1234",
     });
     // api_key NOT in the body (user did not type one).
-    expect("api_key" in (lastAdminPatchBody ?? {})).toBe(false);
+    expect("api_key" in (lastAdminPatchBody.value ?? {})).toBe(false);
 
     // default_model is always written through the separate user-tier PUT,
     // unchanged in this scenario (the admin never edited the model field).

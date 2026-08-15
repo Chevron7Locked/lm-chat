@@ -68,7 +68,7 @@ const mockState = vi.hoisted(() => ({
     tools: { name: string; description: string; denied: boolean }[];
     error?: string | null;
   } | null,
-  toolsLoading: false as boolean,
+  toolsLoading: false,
 }));
 
 vi.mock("@/hooks/useMcpStore", () => ({

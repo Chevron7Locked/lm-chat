@@ -68,12 +68,23 @@ function hotp(secretBytes: Buffer, counter: bigint): string {
   counterBuf.writeUInt32BE(lo, 4);
 
   const hmac = createHmac("sha1", secretBytes).update(counterBuf).digest();
-  const offset = hmac[hmac.length - 1]! & 0x0f;
+  const lastByte = hmac[hmac.length - 1];
+  if (lastByte === undefined) {
+    throw new Error("hotp: HMAC digest unexpectedly empty");
+  }
+  const offset = lastByte & 0x0f;
+  const b0 = hmac[offset];
+  const b1 = hmac[offset + 1];
+  const b2 = hmac[offset + 2];
+  const b3 = hmac[offset + 3];
+  if (b0 === undefined || b1 === undefined || b2 === undefined || b3 === undefined) {
+    throw new Error("hotp: HMAC digest too short for dynamic truncation offset");
+  }
   const code =
-    ((hmac[offset]! & 0x7f) << 24) |
-    ((hmac[offset + 1]! & 0xff) << 16) |
-    ((hmac[offset + 2]! & 0xff) << 8) |
-    (hmac[offset + 3]! & 0xff);
+    ((b0 & 0x7f) << 24) |
+    ((b1 & 0xff) << 16) |
+    ((b2 & 0xff) << 8) |
+    (b3 & 0xff);
   return String(code % 1_000_000).padStart(6, "0");
 }
 

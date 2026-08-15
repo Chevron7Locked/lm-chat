@@ -191,7 +191,9 @@ describe("Composer message queue (streaming submit)", () => {
     rerender(<Composer {...baseProps} streaming={false} onSubmit={onSubmit} />);
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [sentChatId, sentPayload, sentUserText] = onSubmit.mock.calls[0]!;
+    const onSubmitCall1 = onSubmit.mock.calls[0];
+    if (onSubmitCall1 === undefined) throw new Error("expected onSubmit to have been called");
+    const [sentChatId, sentPayload, sentUserText] = onSubmitCall1;
     expect(sentChatId).toBe(1);
     expect(sentUserText).toBe("queued message");
     expect(sentPayload.input).toEqual([{ type: "text", content: "queued message" }]);
@@ -248,7 +250,9 @@ describe("Composer message queue (streaming submit)", () => {
     fireEvent.click(screen.getByTestId("composer-queue-send-now"));
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, , sentUserText] = onSubmit.mock.calls[0]!;
+    const onSubmitCall2 = onSubmit.mock.calls[0];
+    if (onSubmitCall2 === undefined) throw new Error("expected onSubmit to have been called");
+    const [, , sentUserText] = onSubmitCall2;
     expect(sentUserText).toBe("stranded message");
     expect(screen.queryByTestId("composer-queue")).toBeNull();
   });
@@ -284,7 +288,9 @@ describe("Composer message queue (streaming submit)", () => {
     rerender(<Composer {...baseProps} chatId={1} streaming={false} onSubmit={onSubmit} />);
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [sentChatId, , sentUserText] = onSubmit.mock.calls[0]!;
+    const onSubmitCall3 = onSubmit.mock.calls[0];
+    if (onSubmitCall3 === undefined) throw new Error("expected onSubmit to have been called");
+    const [sentChatId, , sentUserText] = onSubmitCall3;
     expect(sentChatId).toBe(1);
     expect(sentUserText).toBe("queued in chat 1");
   });

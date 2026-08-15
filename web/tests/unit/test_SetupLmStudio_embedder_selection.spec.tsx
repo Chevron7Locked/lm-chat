@@ -26,7 +26,7 @@ import {
 const mockRequest = vi.fn();
 
 vi.mock("@/lib/api", () => ({
-  api: { request: (...args: unknown[]) => mockRequest(...args), postForm: vi.fn() },
+  api: { request: (...args: unknown[]) => mockRequest(...args) as Promise<unknown>, postForm: vi.fn() },
   ApiClient: vi.fn(),
 }));
 

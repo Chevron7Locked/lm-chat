@@ -50,7 +50,7 @@ async function createChat(
         body: new URLSearchParams({ title: chatTitle }).toString(),
         credentials: "include",
       });
-      if (!resp.ok) throw new Error(`POST /api/chats → ${resp.status}`);
+      if (!resp.ok) throw new Error(`POST /api/chats → ${String(resp.status)}`);
       const data = (await resp.json()) as { id: number };
       return data.id;
     },
@@ -68,8 +68,8 @@ async function navigateToChat(
   backendURL: string,
   chatId: number
 ): Promise<void> {
-  await page.goto(`${backendURL}/chats/${chatId}`);
-  await page.waitForURL(`${backendURL}/chats/${chatId}`, { timeout: 10_000 });
+  await page.goto(`${backendURL}/chats/${String(chatId)}`);
+  await page.waitForURL(`${backendURL}/chats/${String(chatId)}`, { timeout: 10_000 });
   await page.waitForLoadState("networkidle", { timeout: 10_000 });
 }
 
@@ -545,7 +545,7 @@ test.describe("Model picker — keyboard walkthrough", () => {
       const activeEl = page.locator(":focus");
       const tag = await activeEl.evaluate((el) => el.tagName).catch(() => "");
       const ariaLabel = await activeEl.evaluate((el) => el.getAttribute("aria-label") ?? "").catch(() => "");
-      const className = await activeEl.evaluate((el) => el.className ?? "").catch(() => "");
+      const className = await activeEl.evaluate((el) => el.getAttribute("class") ?? "").catch(() => "");
 
       if (
         tag === "SELECT" ||

@@ -207,7 +207,7 @@ it("safe HTML preserved through sanitizeSchema", () => {
 
           const scriptCount = container.querySelectorAll("script").length;
           if (scriptCount > 0) {
-            survivors.push(`${payload.name}: ${scriptCount} script tag(s) survived`);
+            survivors.push(`${payload.name}: ${String(scriptCount)} script tag(s) survived`);
             totalSurvivors += scriptCount;
           }
 

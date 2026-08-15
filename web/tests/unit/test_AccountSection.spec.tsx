@@ -179,7 +179,7 @@ describe("AccountSection", () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const call = vi.mocked(global.fetch).mock.calls[0];
     expect(call?.[0]).toBe("/api/auth/password");
-    const init = call?.[1] as RequestInit | undefined;
+    const init = call?.[1];
     expect(init?.method).toBe("POST");
     const headers = init?.headers as Record<string, string> | undefined;
     expect(headers?.["Content-Type"]).toBe("application/x-www-form-urlencoded");

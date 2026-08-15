@@ -29,8 +29,13 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // jsdom doesn't implement scrollIntoView; Chat's auto-scroll effect crashes
-// without this stub.
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
+// without this stub. TS's DOM lib declares scrollIntoView as always present
+// on Element.prototype (it isn't, in jsdom). The `in` check reads real
+// runtime presence; going through a boolean (rather than the `in`
+// expression directly in the `if`) avoids narrowing Element.prototype to
+// `never` in the assignment below.
+const hasScrollIntoView = "scrollIntoView" in Element.prototype;
+if (typeof window !== "undefined" && !hasScrollIntoView) {
   Element.prototype.scrollIntoView = function (): void { /* no-op */ };
 }
 
@@ -117,7 +122,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 
@@ -316,7 +321,7 @@ function renderChat(initialPath: string, queryClient: QueryClient) {
 
 describe("Chat handleCompact (real component — PLAN §4.2 rid-clear)", () => {
   const chatId = 123;
-  const ridKey = `lmchat:sse:${chatId}:rid`;
+  const ridKey = `lmchat:sse:${String(chatId)}:rid`;
 
   beforeEach(() => {
     mockAuthState.user = { id: 1, username: "test", is_admin: false };

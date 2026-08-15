@@ -25,35 +25,35 @@ afterEach(() => {
 describe("useKeyboardShortcuts — focus mode (⌘/Ctrl+.)", () => {
   it("calls onToggleFocusMode on Ctrl+.", () => {
     const onToggleFocusMode = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onToggleFocusMode }));
+    renderHook(() => { useKeyboardShortcuts({ onToggleFocusMode }); });
     fireEvent.keyDown(window, { key: ".", ctrlKey: true });
     expect(onToggleFocusMode).toHaveBeenCalledOnce();
   });
 
   it("calls onToggleFocusMode on Meta+. (Mac)", () => {
     const onToggleFocusMode = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onToggleFocusMode }));
+    renderHook(() => { useKeyboardShortcuts({ onToggleFocusMode }); });
     fireEvent.keyDown(window, { key: ".", metaKey: true });
     expect(onToggleFocusMode).toHaveBeenCalledOnce();
   });
 
   it("does NOT toggle on a bare '.' with no modifier", () => {
     const onToggleFocusMode = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onToggleFocusMode }));
+    renderHook(() => { useKeyboardShortcuts({ onToggleFocusMode }); });
     fireEvent.keyDown(window, { key: "." });
     expect(onToggleFocusMode).not.toHaveBeenCalled();
   });
 
   it("does NOT toggle on Ctrl+Shift+.", () => {
     const onToggleFocusMode = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onToggleFocusMode }));
+    renderHook(() => { useKeyboardShortcuts({ onToggleFocusMode }); });
     fireEvent.keyDown(window, { key: ".", ctrlKey: true, shiftKey: true });
     expect(onToggleFocusMode).not.toHaveBeenCalled();
   });
 
   it("routes Esc to onEscape (Chat's focus-mode exit path)", () => {
     const onEscape = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onEscape }));
+    renderHook(() => { useKeyboardShortcuts({ onEscape }); });
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onEscape).toHaveBeenCalledOnce();
   });

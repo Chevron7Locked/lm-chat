@@ -59,7 +59,7 @@ if (typeof window !== "undefined" && typeof window.matchMedia === "undefined") {
 if (typeof globalThis.BroadcastChannel === "undefined") {
   class BroadcastChannelPolyfill {
     onmessage: ((ev: MessageEvent) => void) | null = null;
-    postMessage(_msg: unknown): void { /* no-op in tests without explicit stub */ }
+    postMessage(): void { /* no-op in tests without explicit stub */ }
     close(): void { /* no-op */ }
     addEventListener(): void { /* no-op */ }
     removeEventListener(): void { /* no-op */ }

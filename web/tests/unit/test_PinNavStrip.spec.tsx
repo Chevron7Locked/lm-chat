@@ -57,12 +57,13 @@ describe("PinNavStrip", () => {
     // Mount a stand-in message element so the click handler finds a target.
     const target = document.createElement("div");
     target.setAttribute("data-message-id", "2");
-    target.scrollIntoView = vi.fn();
+    const scrollIntoViewSpy = vi.fn();
+    target.scrollIntoView = scrollIntoViewSpy;
     document.body.appendChild(target);
 
     render(<PinNavStrip chatId={7} messages={messages} />);
     fireEvent.click(screen.getByTestId("pin-nav-item-2"));
-    expect(target.scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1);
 
     document.body.removeChild(target);
   });

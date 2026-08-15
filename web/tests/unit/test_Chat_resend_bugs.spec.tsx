@@ -85,7 +85,7 @@ describe("Finding 1 — auto-confirm path fires startStream", () => {
     // is a mutable string in production (see the sibling "missing model"
     // test below), and the inline guard on line 95 needs that real width to
     // stay type-checkable as the defensive check it actually is.
-    const model: string = "test-model";
+    const model: string | undefined = "test-model";
 
     // Simulate the onSuccess handler from handleRegenerateClick.
     function handleOnSuccess(result: {
@@ -124,7 +124,7 @@ describe("Finding 1 — auto-confirm path fires startStream", () => {
     const startStream = vi.fn();
     const push = vi.fn();
     const chatId = 7;
-    const model = ""; // empty model — guard should fire
+    const model: string | undefined = ""; // empty model — guard should fire
 
     function handleOnSuccess(result: {
       deleted: number;
@@ -253,7 +253,7 @@ describe("Finding 3 — handleRegenerateConfirm guard: confirmedChatId !== chatI
     push: (toast: { variant: string; message: string }) => void;
     startStream: (chatId: number, payload: unknown) => void;
     setRegenConfirm: (v: null) => void;
-    prior_user_content?: string;
+    prior_user_content?: string | null;
   }): void {
     const {
       confirmedChatId,

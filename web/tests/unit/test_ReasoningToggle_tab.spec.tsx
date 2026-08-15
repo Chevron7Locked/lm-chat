@@ -25,7 +25,7 @@ vi.mock("@/stores/chatSettingsStore", () => ({
     globalReasoning: "off" as const,
     cycleGlobalReasoning: mockCycleGlobalReasoning,
     setChatReasoning: mockSetChatReasoning,
-    effectiveReasoning: (_chatId: number) => "medium" as const,
+    effectiveReasoning: () => "medium" as const,
     chatOverrides: { 42: "medium" },
     setGlobalReasoning: vi.fn(),
   }),

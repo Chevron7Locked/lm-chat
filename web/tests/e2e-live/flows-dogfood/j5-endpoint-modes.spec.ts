@@ -43,7 +43,7 @@ test(
       );
       expect(
         resp.ok(),
-        `endpoint-mode=${mode} → HTTP ${resp.status()}`,
+        `endpoint-mode=${mode} → HTTP ${String(resp.status())}`,
       ).toBe(true);
 
       const chatId = await createChatViaRequest(page, backendURL, `J5 ${mode}`);

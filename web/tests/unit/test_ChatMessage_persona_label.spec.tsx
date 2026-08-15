@@ -53,7 +53,7 @@ describe("ChatMessage — persona / sub-agent label", () => {
     );
     const chip = screen.getByTestId("chat-message-persona-label");
     // The label shows the persona, not a raw model id like "qwen3" or "gpt-4o".
-    expect(chip.textContent?.toLowerCase()).toContain("research");
+    expect(chip.textContent.toLowerCase()).toContain("research");
     // Ensure no model-id-style string leaks into the chip.
     expect(chip.textContent).not.toMatch(/qwen|gpt|claude|llama/i);
   });
@@ -248,8 +248,8 @@ describe("ChatMessage — skipEntranceAnimation", () => {
       />,
     );
     const row = container.querySelector(".lmchat-message-row");
-    expect(row).toBeTruthy();
-    expect(row!.hasAttribute("data-skip-animate")).toBe(true);
+    if (!row) throw new Error("expected .lmchat-message-row to render");
+    expect(row.hasAttribute("data-skip-animate")).toBe(true);
   });
 
   it("does NOT set data-skip-animate when skipEntranceAnimation is false", () => {
@@ -260,8 +260,8 @@ describe("ChatMessage — skipEntranceAnimation", () => {
       />,
     );
     const row = container.querySelector(".lmchat-message-row");
-    expect(row).toBeTruthy();
-    expect(row!.hasAttribute("data-skip-animate")).toBe(false);
+    if (!row) throw new Error("expected .lmchat-message-row to render");
+    expect(row.hasAttribute("data-skip-animate")).toBe(false);
   });
 
   it("does NOT set data-skip-animate when skipEntranceAnimation is omitted", () => {
@@ -271,7 +271,7 @@ describe("ChatMessage — skipEntranceAnimation", () => {
       />,
     );
     const row = container.querySelector(".lmchat-message-row");
-    expect(row).toBeTruthy();
-    expect(row!.hasAttribute("data-skip-animate")).toBe(false);
+    if (!row) throw new Error("expected .lmchat-message-row to render");
+    expect(row.hasAttribute("data-skip-animate")).toBe(false);
   });
 });

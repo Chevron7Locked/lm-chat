@@ -11,8 +11,8 @@ import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
-const mockRequest = vi.fn();
-const mockPostForm = vi.fn();
+const mockRequest = vi.fn<(...args: unknown[]) => Promise<unknown>>();
+const mockPostForm = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -84,7 +84,7 @@ describe("useProjects", () => {
 
     const { result } = renderHook(() => useProjects(), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(mockRequest).toHaveBeenCalledWith("/api/projects");
   });
 
@@ -96,7 +96,7 @@ describe("useProjects", () => {
 
     const { result } = renderHook(() => useProjects(true), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(mockRequest).toHaveBeenCalledWith(
       "/api/projects?include_archived=true",
     );
@@ -257,7 +257,7 @@ describe("useProjectKnowledgeStats", () => {
       wrapper,
     });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(mockRequest).toHaveBeenCalledWith(
       "/api/projects/7/knowledge-stats",
     );
@@ -294,7 +294,14 @@ describe("useExportProject", () => {
     mockRequest.mockResolvedValue(bundle);
 
     const clickSpy = vi.fn();
-    const realCreateElement = document.createElement.bind(document);
+    // Captured via an unrelated local type (not DOM lib's Document) so this
+    // reference doesn't resolve to the overload set that carries the
+    // deprecated HTMLElementDeprecatedTagNameMap signature — same runtime
+    // object/property, captured BEFORE vi.spyOn below replaces it.
+    const documentUntyped = document as unknown as {
+      createElement: (tag: string) => HTMLElement;
+    };
+    const realCreateElement = documentUntyped.createElement.bind(document);
     const createElSpy = vi
       .spyOn(document, "createElement")
       .mockImplementation((tag: string) => {
@@ -346,7 +353,7 @@ describe("useProject", () => {
 
     const { result } = renderHook(() => useProject(42), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(mockRequest).toHaveBeenCalledWith("/api/projects/42");
   });
 });

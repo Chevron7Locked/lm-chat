@@ -67,6 +67,15 @@ function Wrapper({ children }: { children: ReactNode }) {
   );
 }
 
+/** Indexed array access that throws (rather than silently continuing) if out of range. */
+function at<T>(arr: readonly T[], i: number): T {
+  const v = arr[i];
+  if (v === undefined) {
+    throw new Error(`expected element at index ${String(i)}, array has length ${String(arr.length)}`);
+  }
+  return v;
+}
+
 const loadedModel = {
   id: "qwen3-8b",
   name: "Qwen3.6 35B",
@@ -145,7 +154,7 @@ describe("AdminModels", () => {
     render(<AdminModels />, { wrapper: Wrapper });
     const loadBtns = screen.getAllByRole("button", { name: /^load /i });
     // Click the second Load button (not-loaded model has 0 instances → no confirm modal).
-    act(() => { fireEvent.click(loadBtns[1]!); });
+    act(() => { fireEvent.click(at(loadBtns, 1)); });
     await waitFor(() => {
       expect(mockLoadModel).toHaveBeenCalledWith({ model: "deepseek-r1-7b" });
     });
@@ -155,7 +164,7 @@ describe("AdminModels", () => {
     render(<AdminModels />, { wrapper: Wrapper });
     const unloadBtns = screen.getAllByRole("button", { name: /^unload /i });
     // First model has 1 instance.
-    act(() => { fireEvent.click(unloadBtns[0]!); });
+    act(() => { fireEvent.click(at(unloadBtns, 0)); });
     await waitFor(() => {
       expect(mockUnloadModel).toHaveBeenCalledWith({
         instance_id: "qwen3-8b",
@@ -184,7 +193,7 @@ describe("AdminModels", () => {
 
     render(<AdminModels />, { wrapper: Wrapper });
     const unloadBtns = screen.getAllByRole("button", { name: /^unload /i });
-    act(() => { fireEvent.click(unloadBtns[0]!); });
+    act(() => { fireEvent.click(at(unloadBtns, 0)); });
 
     await waitFor(() => {
       // Instance picker should show the second instance ID (it won't appear
@@ -203,7 +212,7 @@ describe("AdminModels", () => {
 
     render(<AdminModels />, { wrapper: Wrapper });
     const unloadBtns = screen.getAllByRole("button", { name: /^unload /i });
-    act(() => { fireEvent.click(unloadBtns[0]!); });
+    act(() => { fireEvent.click(at(unloadBtns, 0)); });
 
     // Wait for picker to appear.
     await waitFor(() => {
@@ -228,7 +237,7 @@ describe("AdminModels", () => {
     render(<AdminModels />, { wrapper: Wrapper });
     const loadBtns = screen.getAllByRole("button", { name: /^load /i });
     // loadedModel has 1 instance — clicking Load should open confirm modal.
-    act(() => { fireEvent.click(loadBtns[0]!); });
+    act(() => { fireEvent.click(at(loadBtns, 0)); });
 
     await waitFor(() => {
       expect(screen.getByText(/already has 1 loaded instance/i)).toBeTruthy();
@@ -249,7 +258,7 @@ describe("AdminModels", () => {
     // --- Cancel path ---
     const { unmount } = render(<AdminModels />, { wrapper: Wrapper });
     let loadBtns = screen.getAllByRole("button", { name: /^load /i });
-    act(() => { fireEvent.click(loadBtns[0]!); });
+    act(() => { fireEvent.click(at(loadBtns, 0)); });
 
     await waitFor(() => {
       expect(screen.getByText(/already has 1 loaded instance/i)).toBeTruthy();
@@ -266,7 +275,7 @@ describe("AdminModels", () => {
     // --- Confirm path ---
     render(<AdminModels />, { wrapper: Wrapper });
     loadBtns = screen.getAllByRole("button", { name: /^load /i });
-    act(() => { fireEvent.click(loadBtns[0]!); });
+    act(() => { fireEvent.click(at(loadBtns, 0)); });
 
     await waitFor(() => {
       expect(screen.getByText(/already has 1 loaded instance/i)).toBeTruthy();
@@ -312,7 +321,7 @@ describe("AdminModels", () => {
 
     render(<AdminModels />, { wrapper: Wrapper });
     const loadBtns = screen.getAllByRole("button", { name: /^load /i });
-    act(() => { fireEvent.click(loadBtns[0]!); });
+    act(() => { fireEvent.click(at(loadBtns, 0)); });
 
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeNull();
@@ -336,7 +345,7 @@ describe("AdminModels", () => {
 
     render(<AdminModels />, { wrapper: Wrapper });
     const loadBtns = screen.getAllByRole("button", { name: /^load /i });
-    act(() => { fireEvent.click(loadBtns[0]!); });
+    act(() => { fireEvent.click(at(loadBtns, 0)); });
 
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeNull();
@@ -356,7 +365,7 @@ describe("AdminModels", () => {
 
     render(<AdminModels />, { wrapper: Wrapper });
     const unloadBtns = screen.getAllByRole("button", { name: /^unload /i });
-    act(() => { fireEvent.click(unloadBtns[0]!); });
+    act(() => { fireEvent.click(at(unloadBtns, 0)); });
 
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeNull();
@@ -379,7 +388,7 @@ describe("AdminModels", () => {
 
     render(<AdminModels />, { wrapper: Wrapper });
     const unloadBtns = screen.getAllByRole("button", { name: /^unload /i });
-    act(() => { fireEvent.click(unloadBtns[0]!); });
+    act(() => { fireEvent.click(at(unloadBtns, 0)); });
 
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeNull();

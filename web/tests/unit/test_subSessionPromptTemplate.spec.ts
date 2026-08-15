@@ -35,18 +35,20 @@ describe("buildSubSessionSystemPrompt", () => {
   it("frames a real preset (research) with date + tools, body verbatim", () => {
     const research = PRESETS.research;
     expect(research).toBeDefined();
-    const built = buildSubSessionSystemPrompt(research!.system_prompt, today);
+    if (research === undefined) throw new Error("expected PRESETS.research to be defined");
+    const built = buildSubSessionSystemPrompt(research.system_prompt, today);
     expect(built.startsWith(`Today is ${today}.`)).toBe(true);
-    expect(built).toContain(research!.system_prompt.trim());
+    expect(built).toContain(research.system_prompt.trim());
     expect(built).toContain("## TOOLS AVAILABILITY");
   });
 
   it("frames a real preset (coder) with date + tools, body verbatim", () => {
     const coder = PRESETS.coder;
     expect(coder).toBeDefined();
-    const built = buildSubSessionSystemPrompt(coder!.system_prompt, today);
+    if (coder === undefined) throw new Error("expected PRESETS.coder to be defined");
+    const built = buildSubSessionSystemPrompt(coder.system_prompt, today);
     expect(built.startsWith(`Today is ${today}.`)).toBe(true);
-    expect(built).toContain(coder!.system_prompt.trim());
+    expect(built).toContain(coder.system_prompt.trim());
     expect(built).toContain("## TOOLS AVAILABILITY");
   });
 

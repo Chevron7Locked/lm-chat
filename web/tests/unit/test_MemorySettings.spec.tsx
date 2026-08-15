@@ -24,7 +24,7 @@ const mockRequest = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   api: {
-    request: (...args: unknown[]) => mockRequest(...args),
+    request: (...args: unknown[]) => mockRequest(...args) as Promise<unknown>,
     postForm: vi.fn(),
   },
   ApiClient: vi.fn(),
@@ -418,10 +418,14 @@ describe("MemorySettings", () => {
     expect(patchCalls.length).toBeGreaterThanOrEqual(2);
 
     // Both indices guaranteed by the length check just above.
+    const [firstPatch, secondPatch] = patchCalls;
+    if (firstPatch == null || secondPatch == null) {
+      throw new Error("expected at least 2 PATCH calls");
+    }
     // First PATCH should set provider to ddg
-    expect(patchCalls[0]![1].body).toContain("web_search_provider");
+    expect(firstPatch[1].body).toContain("web_search_provider");
     // Second PATCH should clear the URL
-    expect(patchCalls[1]![1].body).toContain("searxng_url");
+    expect(secondPatch[1].body).toContain("searxng_url");
   });
 
     it("repeat-loop cut (K) edit button opens the numeric input", async () => {
@@ -607,7 +611,8 @@ describe("MemorySettings", () => {
       // Master toggle input should have the lmchat-mcp-toggle__input class
       const masterInput = masterLabel.querySelector("input");
       expect(masterInput).toBeTruthy();
-      expect(masterInput!.classList.contains("lmchat-mcp-toggle__input")).toBe(true);
+      if (masterInput == null) throw new Error("expected master toggle <input> to exist");
+      expect(masterInput.classList.contains("lmchat-mcp-toggle__input")).toBe(true);
 
       // Master toggle should have the track span
       const track = masterLabel.querySelector(".lmchat-mcp-toggle__track");
@@ -618,7 +623,8 @@ describe("MemorySettings", () => {
       expect(subLabel.classList.contains("lmchat-mcp-toggle")).toBe(true);
       const subInput = subLabel.querySelector("input");
       expect(subInput).toBeTruthy();
-      expect(subInput!.classList.contains("lmchat-mcp-toggle__input")).toBe(true);
+      if (subInput == null) throw new Error("expected sub-session toggle <input> to exist");
+      expect(subInput.classList.contains("lmchat-mcp-toggle__input")).toBe(true);
     });
 
     it("pinned insights row shows admin-set chip", async () => {

@@ -25,7 +25,10 @@ import type { MessageRecord } from "@/hooks/useChats";
 
 // jsdom doesn't implement scrollIntoView; Chat's auto-scroll effect crashes
 // without this stub.
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
+if (
+  typeof window !== "undefined" &&
+  !(Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+) {
   Element.prototype.scrollIntoView = function (): void { /* no-op */ };
 }
 
@@ -112,7 +115,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 
@@ -311,7 +314,7 @@ describe("Chat — persisted tool_calls thread into ProcessStream tool lines (Cl
     vi.clearAllMocks();
   });
 
-  it("renders inline tool lines from a refetched message carrying tool_calls", async () => {
+  it("renders inline tool lines from a refetched message carrying tool_calls", () => {
     mockMessages = [
       persistedAssistantMessage([
         {
@@ -324,7 +327,7 @@ describe("Chat — persisted tool_calls thread into ProcessStream tool lines (Cl
       ]),
     ];
 
-    const { container } = await renderChat("/chats/1");
+    const { container } = renderChat("/chats/1");
 
     // The real ChatMessage → ProcessStream rendered an inline tool line from
     // the persisted record (quiet <details> line, no longer a card).
@@ -336,7 +339,7 @@ describe("Chat — persisted tool_calls thread into ProcessStream tool lines (Cl
     expect(screen.getByText("LM Studio is a desktop application.")).toBeTruthy();
   });
 
-  it("renders one inline tool line per persisted call, preserving status", async () => {
+  it("renders one inline tool line per persisted call, preserving status", () => {
     mockMessages = [
       persistedAssistantMessage([
         { id: "tc_a", name: "tool_alpha", arguments: "{}", status: "success", result: "ok" },
@@ -344,7 +347,7 @@ describe("Chat — persisted tool_calls thread into ProcessStream tool lines (Cl
       ]),
     ];
 
-    const { container } = await renderChat("/chats/1");
+    const { container } = renderChat("/chats/1");
 
     const lines = container.querySelectorAll(".lmchat-process-tool");
     expect(lines.length).toBe(2);
@@ -353,22 +356,22 @@ describe("Chat — persisted tool_calls thread into ProcessStream tool lines (Cl
     expect(screen.getByText("failure")).toBeTruthy();
   });
 
-  it("renders no tool lines when tool_calls is null (pre-0024 rows)", async () => {
+  it("renders no tool lines when tool_calls is null (pre-0024 rows)", () => {
     mockMessages = [persistedAssistantMessage(null)];
 
-    const { container } = await renderChat("/chats/1");
+    const { container } = renderChat("/chats/1");
 
     expect(container.querySelectorAll(".lmchat-process-tool").length).toBe(0);
     // The message itself still renders.
     expect(screen.getByText("I searched for you.")).toBeTruthy();
   });
 
-  it("renders no tool lines when the field is absent (back-compat wire)", async () => {
+  it("renders no tool lines when the field is absent (back-compat wire)", () => {
     const msg = persistedAssistantMessage(null);
     delete (msg as Partial<MessageRecord>).tool_calls;
     mockMessages = [msg];
 
-    const { container } = await renderChat("/chats/1");
+    const { container } = renderChat("/chats/1");
 
     expect(container.querySelectorAll(".lmchat-process-tool").length).toBe(0);
   });

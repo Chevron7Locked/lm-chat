@@ -21,9 +21,9 @@ test.describe("§2.3 — /project/:id auth redirect (RequireAuth × Project)", (
   }) => {
     let authed = false;
 
-    await page.route("**/api/auth/me", (route) => {
+    await page.route("**/api/auth/me", async (route) => {
       if (authed) {
-        route.fulfill({
+        await route.fulfill({
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
@@ -33,7 +33,7 @@ test.describe("§2.3 — /project/:id auth redirect (RequireAuth × Project)", (
           }),
         });
       } else {
-        route.fulfill({
+        await route.fulfill({
           status: 401,
           contentType: "application/json",
           body: JSON.stringify({ detail: "authentication required" }),

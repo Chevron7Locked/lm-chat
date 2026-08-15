@@ -79,7 +79,7 @@ function parseSseChunks(chunks: readonly Uint8Array[]): {
     }
     // flush remaining buf (mirrors decoder.decode() at end of stream)
     return { events, crashed: false, buf };
-  } catch (err) {
+  } catch {
     return { events, crashed: true, buf };
   }
 }

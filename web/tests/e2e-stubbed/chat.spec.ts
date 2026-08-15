@@ -200,6 +200,6 @@ test.describe("Chat page", () => {
     // The Plus icon has aria-hidden; Playwright sees the accessible name as "New Chat".
     await page.getByRole("button", { name: "New Chat" }).click();
     // After create, the query is invalidated → sidebar rerenders.
-    await expect(page).not.toBeNull(); // creation dispatched without error.
+    expect(page).not.toBeNull(); // creation dispatched without error.
   });
 });

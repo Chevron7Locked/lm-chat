@@ -13,10 +13,20 @@ import { renderHook, act } from "@testing-library/react";
 import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import type { ModelListResponse } from "@/hooks/useModels";
 
 // ─── Mock useModels — isolate useModelList from the real /api/models fetch ──
 
-const mockUseModels = vi.fn();
+interface MockUseModelsResult {
+  data: ModelListResponse | undefined;
+  isError: boolean;
+  isFetching: boolean;
+  error: unknown;
+  dataUpdatedAt: number;
+  errorUpdatedAt: number;
+}
+
+const mockUseModels = vi.fn<(...args: unknown[]) => MockUseModelsResult>();
 
 vi.mock("@/hooks/useModels", () => ({
   useModels: (...args: unknown[]) => mockUseModels(...args),

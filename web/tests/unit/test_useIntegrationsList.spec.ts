@@ -16,7 +16,7 @@ const mockRequest = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   api: {
-    request: (...args: unknown[]) => mockRequest(...args),
+    request: (...args: unknown[]) => mockRequest(...args) as Promise<unknown>,
   },
   ApiClient: vi.fn(),
 }));
@@ -72,7 +72,7 @@ describe("useIntegrationsList", () => {
     const { qc, wrapper } = makeWrapper();
     const { result } = renderHook(() => useIntegrationsList(), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
 
     expect(mockRequest).toHaveBeenCalledWith("/api/integrations/available");
     expect(result.current.data).toEqual(STUB_ENTRIES);
@@ -84,7 +84,7 @@ describe("useIntegrationsList", () => {
     const { qc, wrapper } = makeWrapper();
     const { result } = renderHook(() => useIntegrationsList(), { wrapper });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
     expect(result.current.data).toEqual([]);
     qc.clear();
   });
@@ -94,9 +94,9 @@ describe("useIntegrationsList", () => {
     const { qc, wrapper } = makeWrapper();
     renderHook(() => useIntegrationsList(), { wrapper });
 
-    await waitFor(() =>
-      expect(qc.getQueryData(INTEGRATIONS_LIST_KEY)).toBeDefined()
-    );
+    await waitFor(() => {
+      expect(qc.getQueryData(INTEGRATIONS_LIST_KEY)).toBeDefined();
+    });
     qc.clear();
   });
 
@@ -111,7 +111,7 @@ describe("useIntegrationsList", () => {
     const { result } = renderHook(() => useIntegrationsList(), { wrapper });
 
     await waitFor(
-      () => expect(result.current.isError).toBe(true),
+      () => { expect(result.current.isError).toBe(true); },
       { timeout: 3000 }
     );
     expect(result.current.error?.message).toMatch(/401/);
@@ -129,14 +129,14 @@ describe("useUpdateIntegrationsList", () => {
 
     const { result } = renderHook(() => useUpdateIntegrationsList(), { wrapper });
 
-    await act(async () => {
+    act(() => {
       result.current.mutate([
         { value: "mcp/searxng", sort_order: 0 },
         { value: "mcp/filesystem", sort_order: 1 },
       ]);
     });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
 
     const [path, init] = mockRequest.mock.calls[0] as [
       string,
@@ -144,7 +144,7 @@ describe("useUpdateIntegrationsList", () => {
     ];
     expect(path).toBe("/api/integrations/available");
     expect(init.method).toBe("PUT");
-    expect(init.headers?.["Content-Type"]).toBe(
+    expect(init.headers["Content-Type"]).toBe(
       "application/x-www-form-urlencoded"
     );
     // Body must be URL-encoded with entries= field.
@@ -170,11 +170,11 @@ describe("useUpdateIntegrationsList", () => {
 
     const { result } = renderHook(() => useUpdateIntegrationsList(), { wrapper });
 
-    await act(async () => {
+    act(() => {
       result.current.mutate([{ value: "mcp/new", sort_order: 0 }]);
     });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
 
     // After success, the query key should be invalidated (marked stale).
     const queryState = qc.getQueryState(INTEGRATIONS_LIST_KEY);

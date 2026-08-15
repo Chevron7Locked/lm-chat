@@ -122,8 +122,10 @@ describe("submitTurn — payload contract", () => {
     });
     // submitTurn above is fully inlined (no branch skips startStream when
     // model is non-empty, as here) — the call is guaranteed to have landed.
+    const withToolsCall = withTools.mock.calls[0];
+    if (withToolsCall === undefined) throw new Error("expected startStream to have been called");
     expect(
-      (withTools.mock.calls[0]![1] as Record<string, unknown>).integrations,
+      (withToolsCall[1] as Record<string, unknown>).integrations,
     ).toEqual(["mcp/context7"]);
 
     const noTools = vi.fn();
@@ -136,8 +138,10 @@ describe("submitTurn — payload contract", () => {
       startStream: noTools,
       setAutoStick: vi.fn(),
     });
+    const noToolsCall = noTools.mock.calls[0];
+    if (noToolsCall === undefined) throw new Error("expected startStream to have been called");
     expect(
-      "integrations" in (noTools.mock.calls[0]![1] as Record<string, unknown>),
+      "integrations" in (noToolsCall[1] as Record<string, unknown>),
     ).toBe(false);
   });
 
@@ -153,8 +157,10 @@ describe("submitTurn — payload contract", () => {
       startStream,
       setAutoStick: vi.fn(),
     });
+    const startStreamCall = startStream.mock.calls[0];
+    if (startStreamCall === undefined) throw new Error("expected startStream to have been called");
     expect(
-      (startStream.mock.calls[0]![1] as Record<string, unknown>).integrations,
+      (startStreamCall[1] as Record<string, unknown>).integrations,
     ).toEqual(["mcp/override"]);
   });
 
@@ -207,8 +213,9 @@ describe("handleEditUserMessage — edit now regenerates a reply", () => {
 
   it("persists the edit BEFORE regenerating, then regenerates the message", async () => {
     const calls: string[] = [];
-    const editMessage = vi.fn(async () => {
+    const editMessage = vi.fn((): Promise<void> => {
       calls.push("edit");
+      return Promise.resolve();
     });
     const handleRegenerateClick = vi.fn(() => {
       calls.push("regenerate");
@@ -263,7 +270,7 @@ describe("handleEditUserMessage — edit now regenerates a reply", () => {
     }
 
     // Regenerate endpoint returns the (already-persisted) edited content.
-    const handleRegenerateClick = vi.fn((_messageId: number) => {
+    const handleRegenerateClick = vi.fn(() => {
       regenerateOnSuccess({ prior_user_content: "edited prompt" });
     });
 

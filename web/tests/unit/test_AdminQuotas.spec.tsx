@@ -24,7 +24,14 @@ import type { QuotaSummary } from "@/hooks/useQuota";
 
 // ─── Mock useQuota hooks ─────────────────────────────────────────────────────
 
-const mockUseAdminQuotaList = vi.fn();
+interface MockAdminQuotaListResult {
+  data: QuotaSummary[] | undefined;
+  isLoading: boolean;
+  error: { detail: string; message: string } | null;
+  refetch: () => void;
+}
+
+const mockUseAdminQuotaList = vi.fn<() => MockAdminQuotaListResult>();
 const mockUpdateMutate = vi.fn();
 const mockRefetch = vi.fn();
 

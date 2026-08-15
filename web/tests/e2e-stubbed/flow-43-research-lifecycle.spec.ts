@@ -24,7 +24,7 @@ test.describe("Flow 43 — /research sub-session lifecycle", () => {
     });
     page.on("response", (res) => {
       if (res.url().includes("/api/")) {
-        console.log(`[RES] ${res.status()} ${res.url()}`);
+        console.log(`[RES] ${String(res.status())} ${res.url()}`);
       }
     });
 

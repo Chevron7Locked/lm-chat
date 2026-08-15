@@ -17,8 +17,8 @@ const mockPostForm = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   api: {
-    request: (...args: unknown[]) => mockRequest(...args),
-    postForm: (...args: unknown[]) => mockPostForm(...args),
+    request: (...args: unknown[]) => mockRequest(...args) as Promise<unknown>,
+    postForm: (...args: unknown[]) => mockPostForm(...args) as Promise<unknown>,
   },
   ApiClient: vi.fn(),
 }));
@@ -141,7 +141,7 @@ describe("Projects landing page", () => {
     const mainList = screen.getByTestId("projects-list");
     expect(
       Array.from(mainList.querySelectorAll("li")).some((li) =>
-        li.textContent?.includes("Old Project"),
+        li.textContent.includes("Old Project"),
       ),
     ).toBe(false);
   });

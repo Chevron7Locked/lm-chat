@@ -23,8 +23,9 @@ function chunkedStream(chunks: string[]): ReadableStream<Uint8Array<ArrayBuffer>
   let idx = 0;
   return new ReadableStream<Uint8Array<ArrayBuffer>>({
     pull(controller) {
-      if (idx < chunks.length) {
-        controller.enqueue(encoder.encode(chunks[idx++]!));
+      const chunk = chunks[idx++];
+      if (chunk !== undefined) {
+        controller.enqueue(encoder.encode(chunk));
       } else {
         controller.close();
       }

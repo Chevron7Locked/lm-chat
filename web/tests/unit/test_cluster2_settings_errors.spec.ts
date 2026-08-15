@@ -74,7 +74,7 @@ describe("test_stop_preserves_partial_with_flush_lag_fallback", () => {
 
     // Build a stream that delivers one delta then stalls (never closes).
     const encoder = new TextEncoder();
-    let streamController: ReadableStreamDefaultController<Uint8Array>;
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
     const stream = new ReadableStream<Uint8Array>({
       start(ctrl) { streamController = ctrl; },
     });
@@ -96,7 +96,8 @@ describe("test_stop_preserves_partial_with_flush_lag_fallback", () => {
 
     // Deliver a message.delta SSE frame.
     await act(async () => {
-      streamController!.enqueue(
+      if (streamController === undefined) throw new Error("ReadableStream start() was not called synchronously");
+      streamController.enqueue(
         encoder.encode(
           "event: message.delta\ndata: " +
           JSON.stringify({ type: "message.delta", delta: "Hello " }) +
@@ -170,7 +171,8 @@ describe("test_chat_settings_save_failure_surfaces_toast", () => {
     useToastStore.getState().push({ variant: "error", message });
 
     const toasts = useToastStore.getState().toasts;
-    const last = toasts[toasts.length - 1]!;
+    const last = toasts[toasts.length - 1];
+    if (last === undefined) throw new Error("expected at least one toast to be pushed");
     expect(last.variant).toBe("error");
     expect(last.message.toLowerCase()).toContain("temperature");
     // Error toasts must be sticky (no auto-dismiss).
@@ -209,7 +211,7 @@ describe("test_model_change_failure_reverts_optimistic_update", () => {
     // A mutation with NO meta.errorHandled — global fallback should fire.
     const mutationWithoutMeta = {
       meta: undefined,
-      options: { mutationFn: async () => undefined },
+      options: { mutationFn: () => undefined },
     } as unknown as Parameters<NonNullable<typeof cacheConfig.onError>>[3];
 
     cacheConfig.onError(new Error("PATCH failed"), undefined, undefined, mutationWithoutMeta, {
@@ -219,7 +221,8 @@ describe("test_model_change_failure_reverts_optimistic_update", () => {
 
     const afterCount = useToastStore.getState().toasts.length;
     expect(afterCount).toBeGreaterThan(initialCount);
-    const last = useToastStore.getState().toasts[afterCount - 1]!;
+    const last = useToastStore.getState().toasts[afterCount - 1];
+    if (last === undefined) throw new Error("expected a toast to be pushed");
     expect(last.variant).toBe("error");
     expect(last.message.toLowerCase()).toContain("couldn't save");
 
@@ -239,7 +242,7 @@ describe("test_model_change_failure_reverts_optimistic_update", () => {
     // A mutation WITH meta.errorHandled = true — global fallback must NOT fire.
     const mutationWithMeta = {
       meta: { errorHandled: true },
-      options: { mutationFn: async () => undefined },
+      options: { mutationFn: () => undefined },
     } as unknown as Parameters<NonNullable<typeof cacheConfig.onError>>[3];
 
     cacheConfig.onError(new Error("PATCH failed"), undefined, undefined, mutationWithMeta, {
@@ -267,8 +270,8 @@ describe("test_model_change_failure_reverts_optimistic_update", () => {
     const adminMutation = {
       meta: undefined,
       options: {
-        mutationFn: async () => undefined,
-        onError: (_err: unknown) => { /* hook-level handler */ },
+        mutationFn: () => undefined,
+        onError: () => { /* hook-level handler */ },
       },
     } as unknown as Parameters<NonNullable<typeof cacheConfig.onError>>[3];
 
@@ -316,7 +319,8 @@ describe("test_model_change_failure_reverts_optimistic_update", () => {
 
     // A sticky (duration:0) error toast must appear with the field name.
     const toasts = useToastStore.getState().toasts;
-    const last = toasts[toasts.length - 1]!;
+    const last = toasts[toasts.length - 1];
+    if (last === undefined) throw new Error("expected at least one toast to be pushed");
     expect(last.variant).toBe("error");
     expect(last.message.toLowerCase()).toContain("model");
     expect(last.duration).toBe(0);
@@ -356,7 +360,8 @@ describe("test_model_change_failure_reverts_optimistic_update", () => {
 
     expect(selectedModel).toBe(prevModel);
     const toasts = useToastStore.getState().toasts;
-    const last = toasts[toasts.length - 1]!;
+    const last = toasts[toasts.length - 1];
+    if (last === undefined) throw new Error("expected at least one toast to be pushed");
     expect(last.message).toBe("Model couldn't be saved");
     expect(last.variant).toBe("error");
   });

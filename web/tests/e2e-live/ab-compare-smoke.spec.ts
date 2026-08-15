@@ -44,7 +44,7 @@ async function createChatViaApi(
       body: params.toString(),
       credentials: "include",
     });
-    if (!resp.ok) throw new Error(`POST /api/chats → ${resp.status}`);
+    if (!resp.ok) throw new Error(`POST /api/chats → ${String(resp.status)}`);
     const data = await resp.json() as { id: number };
     return data.id;
   }, backendURL);
@@ -70,13 +70,13 @@ async function patchAbCompare(
           model_b: "gemma-4-26b-a4b-it-mlx",
         }),
       });
-      const resp = await fetch(`${url}/api/chats/${id}`, {
+      const resp = await fetch(`${url}/api/chats/${String(id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: params.toString(),
         credentials: "include",
       });
-      if (!resp.ok) throw new Error(`PATCH /api/chats/${id} → ${resp.status}`);
+      if (!resp.ok) throw new Error(`PATCH /api/chats/${String(id)} → ${String(resp.status)}`);
     },
     { url: backendURL, id: chatId }
   );
@@ -99,8 +99,8 @@ test.describe("A/B compare view wiring (M-002)", () => {
       await patchAbCompare(page, backendURL, chatId);
 
       // Navigate to the chat page.
-      await page.goto(`${backendURL}/chats/${chatId}`);
-      await page.waitForURL(`${backendURL}/chats/${chatId}`, { timeout: 10_000 });
+      await page.goto(`${backendURL}/chats/${String(chatId)}`);
+      await page.waitForURL(`${backendURL}/chats/${String(chatId)}`, { timeout: 10_000 });
 
       // The Composer should be visible (ab mode still shows Composer).
       // Use the textarea specifically to avoid matching the "Send message" button.

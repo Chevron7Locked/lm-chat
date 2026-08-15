@@ -50,7 +50,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onFocusSearch on Cmd+K", () => {
     const onFocusSearch = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onFocusSearch }));
+    renderHook(() => { useKeyboardShortcuts({ onFocusSearch }); });
 
     act(() => { fire("k", { metaKey: true }); });
     expect(onFocusSearch).toHaveBeenCalledOnce();
@@ -58,7 +58,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onFocusSearch on Ctrl+K", () => {
     const onFocusSearch = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onFocusSearch }));
+    renderHook(() => { useKeyboardShortcuts({ onFocusSearch }); });
 
     act(() => { fire("k", { ctrlKey: true }); });
     expect(onFocusSearch).toHaveBeenCalledOnce();
@@ -66,7 +66,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onCommandPalette on Cmd+/", () => {
     const onCommandPalette = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onCommandPalette }));
+    renderHook(() => { useKeyboardShortcuts({ onCommandPalette }); });
 
     act(() => { fire("/", { metaKey: true }); });
     expect(onCommandPalette).toHaveBeenCalledOnce();
@@ -74,7 +74,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onCommandPalette on Ctrl+/", () => {
     const onCommandPalette = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onCommandPalette }));
+    renderHook(() => { useKeyboardShortcuts({ onCommandPalette }); });
 
     act(() => { fire("/", { ctrlKey: true }); });
     expect(onCommandPalette).toHaveBeenCalledOnce();
@@ -82,7 +82,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onEscape on Escape key", () => {
     const onEscape = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onEscape }));
+    renderHook(() => { useKeyboardShortcuts({ onEscape }); });
 
     act(() => { fire("Escape"); });
     expect(onEscape).toHaveBeenCalledOnce();
@@ -90,7 +90,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onToggleThinking on Cmd+J", () => {
     const onToggleThinking = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onToggleThinking }));
+    renderHook(() => { useKeyboardShortcuts({ onToggleThinking }); });
 
     act(() => { fire("j", { metaKey: true }); });
     expect(onToggleThinking).toHaveBeenCalledOnce();
@@ -99,7 +99,7 @@ describe("useKeyboardShortcuts", () => {
   it("does not call handlers on unrelated keys", () => {
     const onFocusSearch = vi.fn();
     const onCommandPalette = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onFocusSearch, onCommandPalette }));
+    renderHook(() => { useKeyboardShortcuts({ onFocusSearch, onCommandPalette }); });
 
     act(() => { fire("z", { metaKey: true }); });
     expect(onFocusSearch).not.toHaveBeenCalled();
@@ -108,14 +108,14 @@ describe("useKeyboardShortcuts", () => {
 
   it("does not call onFocusSearch on plain K (no modifier)", () => {
     const onFocusSearch = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onFocusSearch }));
+    renderHook(() => { useKeyboardShortcuts({ onFocusSearch }); });
 
     act(() => { fire("k"); });
     expect(onFocusSearch).not.toHaveBeenCalled();
   });
 
   it("Cmd+Shift+L cycles theme via setTheme", () => {
-    renderHook(() => useKeyboardShortcuts({}));
+    renderHook(() => { useKeyboardShortcuts({}); });
 
     act(() => { fire("L", { metaKey: true, shiftKey: true }); });
     // Starting from "dark" → cycles to "light".
@@ -124,7 +124,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("removes listener on unmount", () => {
     const onEscape = vi.fn();
-    const { unmount } = renderHook(() => useKeyboardShortcuts({ onEscape }));
+    const { unmount } = renderHook(() => { useKeyboardShortcuts({ onEscape }); });
     unmount();
 
     act(() => { fire("Escape"); });
@@ -135,7 +135,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onNewChat on Cmd+N (K-01)", () => {
     const onNewChat = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onNewChat }));
+    renderHook(() => { useKeyboardShortcuts({ onNewChat }); });
 
     act(() => { fire("n", { metaKey: true }); });
     expect(onNewChat).toHaveBeenCalledOnce();
@@ -143,7 +143,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onNewChat on Ctrl+N (K-01)", () => {
     const onNewChat = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onNewChat }));
+    renderHook(() => { useKeyboardShortcuts({ onNewChat }); });
 
     act(() => { fire("n", { ctrlKey: true }); });
     expect(onNewChat).toHaveBeenCalledOnce();
@@ -151,7 +151,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("does NOT call onNewChat on Cmd+Shift+N (modifier guard)", () => {
     const onNewChat = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onNewChat }));
+    renderHook(() => { useKeyboardShortcuts({ onNewChat }); });
 
     act(() => { fire("N", { metaKey: true, shiftKey: true }); });
     expect(onNewChat).not.toHaveBeenCalled();
@@ -159,7 +159,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onToggleSidebar on Cmd+Shift+S (K-02)", () => {
     const onToggleSidebar = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onToggleSidebar }));
+    renderHook(() => { useKeyboardShortcuts({ onToggleSidebar }); });
 
     act(() => { fire("S", { metaKey: true, shiftKey: true }); });
     expect(onToggleSidebar).toHaveBeenCalledOnce();
@@ -167,7 +167,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onToggleSidebar on Ctrl+Shift+S (K-02)", () => {
     const onToggleSidebar = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onToggleSidebar }));
+    renderHook(() => { useKeyboardShortcuts({ onToggleSidebar }); });
 
     act(() => { fire("S", { ctrlKey: true, shiftKey: true }); });
     expect(onToggleSidebar).toHaveBeenCalledOnce();
@@ -175,7 +175,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onOpenSettings on Cmd+, (K-03)", () => {
     const onOpenSettings = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onOpenSettings }));
+    renderHook(() => { useKeyboardShortcuts({ onOpenSettings }); });
 
     act(() => { fire(",", { metaKey: true }); });
     expect(onOpenSettings).toHaveBeenCalledOnce();
@@ -183,7 +183,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onOpenSettings on Ctrl+, (K-03)", () => {
     const onOpenSettings = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onOpenSettings }));
+    renderHook(() => { useKeyboardShortcuts({ onOpenSettings }); });
 
     act(() => { fire(",", { ctrlKey: true }); });
     expect(onOpenSettings).toHaveBeenCalledOnce();
@@ -191,7 +191,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onShowHelp on bare ? key (K-10)", () => {
     const onShowHelp = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onShowHelp }));
+    renderHook(() => { useKeyboardShortcuts({ onShowHelp }); });
 
     act(() => { fire("?"); });
     expect(onShowHelp).toHaveBeenCalledOnce();
@@ -199,7 +199,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onShowHelp on Shift+/ (which produces ? on US layouts)", () => {
     const onShowHelp = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onShowHelp }));
+    renderHook(() => { useKeyboardShortcuts({ onShowHelp }); });
 
     act(() => { fire("/", { shiftKey: true }); });
     expect(onShowHelp).toHaveBeenCalledOnce();
@@ -207,7 +207,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("does NOT call onShowHelp when ? is pressed while an INPUT is focused", () => {
     const onShowHelp = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onShowHelp }));
+    renderHook(() => { useKeyboardShortcuts({ onShowHelp }); });
 
     // Mount a real input and focus it so the keydown's target matches.
     const input = document.createElement("input");
@@ -226,7 +226,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("does NOT call onShowHelp when ? is pressed while a TEXTAREA is focused", () => {
     const onShowHelp = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onShowHelp }));
+    renderHook(() => { useKeyboardShortcuts({ onShowHelp }); });
 
     const ta = document.createElement("textarea");
     document.body.appendChild(ta);
@@ -244,7 +244,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("does NOT call onShowHelp when ? is pressed in a contenteditable", () => {
     const onShowHelp = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onShowHelp }));
+    renderHook(() => { useKeyboardShortcuts({ onShowHelp }); });
 
     const div = document.createElement("div");
     // jsdom's `isContentEditable` reflects the property, not the attribute,
@@ -267,7 +267,7 @@ describe("useKeyboardShortcuts", () => {
   // ───────── P13j: Cmd/Ctrl+Shift+E export shortcut ─────────
   it("calls onExportChat on Cmd+Shift+E (P13j K-04)", () => {
     const onExportChat = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onExportChat }));
+    renderHook(() => { useKeyboardShortcuts({ onExportChat }); });
 
     act(() => { fire("E", { metaKey: true, shiftKey: true }); });
     expect(onExportChat).toHaveBeenCalledOnce();
@@ -275,7 +275,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("calls onExportChat on Ctrl+Shift+E with lowercase key (P13j K-04)", () => {
     const onExportChat = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onExportChat }));
+    renderHook(() => { useKeyboardShortcuts({ onExportChat }); });
 
     act(() => { fire("e", { ctrlKey: true, shiftKey: true }); });
     expect(onExportChat).toHaveBeenCalledOnce();
@@ -283,7 +283,7 @@ describe("useKeyboardShortcuts", () => {
 
   it("does NOT call onExportChat for bare Shift+E (no modifier)", () => {
     const onExportChat = vi.fn();
-    renderHook(() => useKeyboardShortcuts({ onExportChat }));
+    renderHook(() => { useKeyboardShortcuts({ onExportChat }); });
 
     act(() => { fire("E", { shiftKey: true }); });
     expect(onExportChat).not.toHaveBeenCalled();

@@ -72,12 +72,17 @@ test(
     // Race a 750ms window against the placeholder appearing. If it never
     // appears (fast LM Studio response < 100ms), log a warning and continue —
     // do NOT fail.
-    let placeholderObserved = false;
+    // Held in an object (not a bare `let`) so the assignment inside the
+    // `.then()` closure below isn't literal-narrowed away by TS's control-flow
+    // analysis, which — unlike for a plain boolean — cannot see across the
+    // async closure boundary and would otherwise treat `placeholderObserved`
+    // as permanently `false` at every read after this point.
+    const placeholderState = { observed: false };
     const placeholderRace = page
       .locator("text=Generating title…")
       .waitFor({ state: "visible", timeout: 750 })
       .then(() => {
-        placeholderObserved = true;
+        placeholderState.observed = true;
       })
       .catch(() => {
         // Best-effort — not a failure.
@@ -93,7 +98,7 @@ test(
     // Resolve the placeholder race (will have settled either way by now).
     await placeholderRace;
 
-    if (!placeholderObserved) {
+    if (!placeholderState.observed) {
       test.info().annotations.push({
         type: "warn",
         description:

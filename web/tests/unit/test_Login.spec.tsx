@@ -124,7 +124,7 @@ describe("Login", () => {
     expect(global.fetch).toHaveBeenCalledTimes(2);
     const call = vi.mocked(global.fetch).mock.calls[1];
     expect(call?.[0]).toBe("/api/auth/login");
-    const init = call?.[1] as RequestInit | undefined;
+    const init = call?.[1];
     expect(init?.method).toBe("POST");
     const headers = init?.headers as Record<string, string> | undefined;
     expect(headers?.["Content-Type"]).toBe("application/x-www-form-urlencoded");
@@ -225,7 +225,7 @@ describe("Login", () => {
 
     // The second login POST must carry totp_code.
     const totpCall = vi.mocked(global.fetch).mock.calls[2];
-    const init = totpCall?.[1] as RequestInit | undefined;
+    const init = totpCall?.[1];
     const body = init?.body as string | undefined;
     expect(body).toContain("totp_code=123456");
   });

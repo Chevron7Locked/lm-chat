@@ -17,7 +17,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ─── Mock hooks ──────────────────────────────────────────────────────────────
 
-const mockUseIntegrationsList = vi.fn();
+interface MockUseIntegrationsListResult {
+  data: IntegrationEntry[];
+  isLoading: boolean;
+  error: unknown;
+}
+
+const mockUseIntegrationsList = vi.fn<() => MockUseIntegrationsListResult>();
 const mockMutate = vi.fn();
 const mockMutation = {
   mutate: mockMutate,
@@ -150,8 +156,11 @@ describe("AdminIntegrations", () => {
     fireEvent.click(screen.getByTestId("save-btn"));
 
     expect(mockMutate).toHaveBeenCalledTimes(1);
-    // Guaranteed non-null by the toHaveBeenCalledTimes(1) check just above.
-    const calledWith = mockMutate.mock.calls[0]![0] as Array<{ value: string }>;
+    const call = mockMutate.mock.calls[0];
+    if (call === undefined) {
+      throw new Error("unreachable: toHaveBeenCalledTimes(1) checked above");
+    }
+    const calledWith = call[0] as Array<{ value: string }>;
     const values = calledWith.map((e) => e.value);
     expect(values).toContain("mcp/extra");
     expect(values).toContain("mcp/searxng");

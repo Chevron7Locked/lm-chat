@@ -27,6 +27,13 @@ let mockRecInstance: {
   stop: ReturnType<typeof vi.fn>;
 };
 
+// Assigns to the outer mockRecInstance via a plain parameter (not a bare
+// `this` alias) so the ctor below can hand off its instance without
+// tripping @typescript-eslint/no-this-alias.
+function captureRecInstance(instance: typeof mockRecInstance): void {
+  mockRecInstance = instance;
+}
+
 function installMockRecognition(): void {
   mockRecStart = vi.fn();
   mockRecStop = vi.fn();
@@ -42,7 +49,7 @@ function installMockRecognition(): void {
     this.start = mockRecStart;
     this.stop = mockRecStop;
     // Capture the instance so tests can trigger events.
-    mockRecInstance = this as unknown as typeof mockRecInstance;
+    captureRecInstance(this);
   }
 
   Object.defineProperty(window, "webkitSpeechRecognition", {

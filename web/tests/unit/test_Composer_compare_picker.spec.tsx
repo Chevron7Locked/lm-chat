@@ -140,7 +140,7 @@ describe("/compare slash command — Composer (Part 2)", () => {
     expect(cmd?.comingSoon).not.toBe(true);
   });
 
-  it("picker opens when ≥2 models are available and /compare is dispatched", async () => {
+  it("picker opens when ≥2 models are available and /compare is dispatched", () => {
     mockModelsData = {
       models: [makeModel("model-a", "Model A"), makeModel("model-b", "Model B")],
     };
@@ -149,17 +149,17 @@ describe("/compare slash command — Composer (Part 2)", () => {
     const textarea = screen.getByRole("textbox", { name: /message/i });
 
     // Type /compare and press Enter to dispatch.
-    await act(async () => {
+    act(() => {
       fireEvent.change(textarea, { target: { value: "/compare" } });
     });
-    await act(async () => {
+    act(() => {
       fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
     });
 
     expect(screen.getByTestId("compare-picker")).toBeTruthy();
   });
 
-  it("confirming with two distinct models calls onABCompareStart", async () => {
+  it("confirming with two distinct models calls onABCompareStart", () => {
     mockModelsData = {
       models: [makeModel("model-a", "Model A"), makeModel("model-b", "Model B")],
     };
@@ -168,10 +168,10 @@ describe("/compare slash command — Composer (Part 2)", () => {
 
     const textarea = screen.getByRole("textbox", { name: /message/i });
 
-    await act(async () => {
+    act(() => {
       fireEvent.change(textarea, { target: { value: "/compare" } });
     });
-    await act(async () => {
+    act(() => {
       fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
     });
 
@@ -179,13 +179,14 @@ describe("/compare slash command — Composer (Part 2)", () => {
     const selects = screen.getAllByRole("combobox");
     // Model A select defaults to baseProps.modelId; change Model B.
     const modelBSelect = selects[1];
-    await act(async () => {
-      fireEvent.change(modelBSelect!, { target: { value: "model-b" } });
+    if (!modelBSelect) throw new Error("expected a second combobox (Model B select)");
+    act(() => {
+      fireEvent.change(modelBSelect, { target: { value: "model-b" } });
     });
 
     // Confirm.
     const confirmBtn = screen.getByTestId("compare-picker-confirm");
-    await act(async () => {
+    act(() => {
       fireEvent.click(confirmBtn);
     });
 
@@ -194,7 +195,7 @@ describe("/compare slash command — Composer (Part 2)", () => {
     expect(screen.queryByTestId("compare-picker")).toBeNull();
   });
 
-  it("shows a toast and no picker when fewer than 2 models are available", async () => {
+  it("shows a toast and no picker when fewer than 2 models are available", () => {
     mockModelsData = {
       models: [makeModel("model-a", "Model A")],
     };
@@ -202,10 +203,10 @@ describe("/compare slash command — Composer (Part 2)", () => {
 
     const textarea = screen.getByRole("textbox", { name: /message/i });
 
-    await act(async () => {
+    act(() => {
       fireEvent.change(textarea, { target: { value: "/compare" } });
     });
-    await act(async () => {
+    act(() => {
       fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
     });
 

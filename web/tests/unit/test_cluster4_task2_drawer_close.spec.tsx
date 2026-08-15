@@ -26,8 +26,9 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // jsdom doesn't implement scrollIntoView.
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
-  Element.prototype.scrollIntoView = function (): void { /* no-op */ };
+const elementProto = Element.prototype as { scrollIntoView?: () => void };
+if (typeof window !== "undefined" && !elementProto.scrollIntoView) {
+  elementProto.scrollIntoView = function (): void { /* no-op */ };
 }
 
 // ─── Mocks — same contract as test_Chat.spec.tsx but with isMobile=true ──────
@@ -117,7 +118,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 

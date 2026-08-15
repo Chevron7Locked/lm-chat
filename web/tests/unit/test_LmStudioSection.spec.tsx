@@ -216,7 +216,6 @@ async function freshSection() {
  * (createBrowserRouter / createMemoryRouter). Wrap every render
  * so the hook doesn't throw "useBlocker must be used within a data router."
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function renderInDataRouter(Component: () => any) {
   const router = createMemoryRouter(
     [{ path: "/", element: createElement(Component) }],
@@ -768,7 +767,7 @@ describe("LmStudioSection", () => {
       ([url]) => url === "/api/settings/lmstudio/embedding-model",
     );
     expect(patchCall).toBeTruthy();
-    const patchInit = patchCall?.[1] as RequestInit | undefined;
+    const patchInit = patchCall?.[1];
     expect(patchInit?.method).toBe("PATCH");
     const body = JSON.parse(patchInit?.body as string);
     expect(body.embedding_model_id).toBe("mxbai-embed@q4");
@@ -825,7 +824,10 @@ describe("LmStudioSection", () => {
     const patchCall = (fetchMock.mock.calls as [string, RequestInit | undefined][]).find(
       ([url]) => url === "/api/settings/lmstudio/embedding-model",
     );
-    const body = JSON.parse((patchCall?.[1] as RequestInit)?.body as string);
+    if (!patchCall) throw new Error("expected a PATCH call to /api/settings/lmstudio/embedding-model");
+    const requestInit = patchCall[1];
+    if (!requestInit) throw new Error("expected a request body on the embedding-model PATCH call");
+    const body = JSON.parse(requestInit.body as string);
     expect(body.embedding_model_id).toBeNull(); // Auto = null
   });
 
@@ -915,8 +917,11 @@ describe("LmStudioSection", () => {
     const select = screen.getByTestId(
       "lmstudio-embedding-model-select",
     ) as HTMLSelectElement;
-    const optByValue = (v: string): HTMLOptionElement =>
-      Array.from(select.options).find((o) => o.value === v)!;
+    const optByValue = (v: string): HTMLOptionElement => {
+      const opt = Array.from(select.options).find((o) => o.value === v);
+      if (!opt) throw new Error(`expected an <option value="${v}"> in the embedding-model select`);
+      return opt;
+    };
     // Active option carries the marker; the non-active loaded one does not.
     expect(optByValue("mxbai-embed@q4").textContent).toContain("· active");
     expect(optByValue("mxbai-embed@q4").textContent).toContain("· loaded");
@@ -999,7 +1004,7 @@ describe("LmStudioSection", () => {
     // Recommendation names the first non-embed model (coder models are now eligible).
     const hint = screen.getByTestId("lmstudio-background-model-recommendation");
     expect(hint.textContent).toContain("qwen3-8b-general");
-    expect(hint.textContent?.toLowerCase()).toContain("small, fast");
+    expect(hint.textContent.toLowerCase()).toContain("small, fast");
   });
 
   it("background-model recommendation: hidden when a model is already pinned", async () => {

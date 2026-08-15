@@ -23,7 +23,8 @@ import {
 import { createElement } from "react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 
-import type { UserAnalytics } from "@/hooks/useAnalytics";
+import type { UserAnalytics, SystemAnalytics } from "@/hooks/useAnalytics";
+import type { SidebarStats } from "@/hooks/useSidebarStats";
 
 // Force prefers-reduced-motion=true so the hero count-up hook short-circuits
 // to its terminal value and never schedules requestAnimationFrame. Otherwise
@@ -64,15 +65,31 @@ beforeEach(() => {
 
 // ─── Mock authStore — non-admin user by default; overridden per-case ────────
 
-const mockUseAuthStore = vi.fn();
+interface MockAuthState {
+  user: { id: number; username: string; is_admin: boolean; totp_enabled: boolean } | null;
+  isInitializing: boolean;
+}
+
+const mockUseAuthStore = vi.fn<() => MockAuthState>();
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: () => mockUseAuthStore(),
 }));
 
 // ─── Mock analytics hooks ────────────────────────────────────────────────────
 
-const mockUseMyAnalytics = vi.fn();
-const mockUseSystemAnalytics = vi.fn();
+interface MockMyAnalyticsResult {
+  data: UserAnalytics | undefined;
+  isLoading: boolean;
+  isError: boolean;
+}
+
+interface MockSystemAnalyticsResult {
+  data: SystemAnalytics | undefined;
+  isLoading: boolean;
+}
+
+const mockUseMyAnalytics = vi.fn<() => MockMyAnalyticsResult>();
+const mockUseSystemAnalytics = vi.fn<() => MockSystemAnalyticsResult>();
 
 vi.mock("@/hooks/useAnalytics", () => ({
   useMyAnalytics: () => mockUseMyAnalytics(),
@@ -81,7 +98,7 @@ vi.mock("@/hooks/useAnalytics", () => ({
 
 // ─── Mock useSidebarStats (the single source the hero pulls from) ───────────
 
-const mockUseSidebarStats = vi.fn();
+const mockUseSidebarStats = vi.fn<() => SidebarStats>();
 
 vi.mock("@/hooks/useSidebarStats", () => ({
   useSidebarStats: () => mockUseSidebarStats(),

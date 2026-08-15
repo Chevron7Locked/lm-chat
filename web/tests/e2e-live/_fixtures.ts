@@ -65,7 +65,7 @@ function findFreePort(): Promise<number> {
         return;
       }
       const port = addr.port;
-      srv.close(() => resolve(port));
+      srv.close(() => { resolve(port); });
     });
   });
 }
@@ -282,7 +282,7 @@ function startStubServer(port: number, captureFile: string): Promise<Server> {
       res.end();
     });
 
-    server.listen(port, "127.0.0.1", () => resolve(server));
+    server.listen(port, "127.0.0.1", () => { resolve(server); });
     server.on("error", reject);
   });
 }
@@ -313,7 +313,7 @@ async function waitForHealthz(baseURL: string, timeoutMs = 30_000): Promise<void
     }
     await new Promise((r) => setTimeout(r, 300));
   }
-  throw new Error(`Backend at ${baseURL} did not become healthy within ${timeoutMs}ms`);
+  throw new Error(`Backend at ${baseURL} did not become healthy within ${String(timeoutMs)}ms`);
 }
 
 /**
@@ -361,7 +361,7 @@ function seedTestUserViaDb(
   );
   if (result.status !== 0) {
     throw new Error(
-      `Failed to seed test user via DB: ${result.stderr ?? result.stdout}`
+      `Failed to seed test user via DB: ${result.stderr}`
     );
   }
 }
@@ -418,7 +418,7 @@ type LiveBackendTestFixtures = {
    * page-render-smoke "no console errors" checks to trip on chat-list
    * fetches from prior tests.
    */
-  cleanState: void;
+  cleanState: undefined;
 };
 
 // ---------------------------------------------------------------------------
@@ -426,21 +426,21 @@ type LiveBackendTestFixtures = {
 // ---------------------------------------------------------------------------
 
 export const test = base.extend<LiveBackendTestFixtures, LiveBackendWorkerFixtures>({
-  // eslint-disable-next-line no-empty-pattern
   backendURL: [
+    // eslint-disable-next-line no-empty-pattern
     async ({}, use) => {
       const backendPort = await findFreePort();
       const stubPort = await findFreePort();
-      const _dbPath = `/tmp/lmchat-e2e-${backendPort}.db`;
-      const baseURL = `http://127.0.0.1:${backendPort}`;
+      const _dbPath = `/tmp/lmchat-e2e-${String(backendPort)}.db`;
+      const baseURL = `http://127.0.0.1:${String(backendPort)}`;
       // Per-worker capture file for the upstream LM Studio chat request body
       // (keyed by backend port so the chatCaptureFile fixture can reconstruct
       // it the same way dbPath does). Written by the stub on each /api/v1/chat.
-      const _captureFile = `/tmp/lmchat-e2e-chat-${backendPort}.json`;
+      const _captureFile = `/tmp/lmchat-e2e-chat-${String(backendPort)}.json`;
       // Real-upstream (dogfood) only: uvicorn log tee, so grey-box journeys can
       // assert on fail-soft background ops (distill/title/followups) that are
       // invisible in the UI. Unused in stub mode.
-      const _logPath = `/tmp/lmchat-dogfood-${backendPort}.log`;
+      const _logPath = `/tmp/lmchat-dogfood-${String(backendPort)}.log`;
 
       // 1. Start the stub LM Studio server — SKIPPED in real-upstream mode,
       // where the backend talks to the operator's actual LM Studio instead.
@@ -458,7 +458,7 @@ export const test = base.extend<LiveBackendTestFixtures, LiveBackendWorkerFixtur
         // replay server on stubPort.
         LM_STUDIO_BASE_URL: REAL_UPSTREAM
           ? REAL_LMSTUDIO_URL
-          : `http://127.0.0.1:${stubPort}`,
+          : `http://127.0.0.1:${String(stubPort)}`,
         ...(REAL_UPSTREAM && REAL_LMSTUDIO_KEY
           ? { LM_STUDIO_API_KEY: REAL_LMSTUDIO_KEY }
           : {}),
@@ -509,7 +509,7 @@ export const test = base.extend<LiveBackendTestFixtures, LiveBackendWorkerFixtur
         await waitForHealthz(baseURL);
       } catch (err) {
         uvicorn.kill("SIGTERM");
-        if (stubServer) await new Promise<void>((r) => stubServer.close(() => r()));
+        if (stubServer) await new Promise<void>((r) => stubServer.close(() => { r(); }));
         throw err;
       }
 
@@ -526,7 +526,7 @@ export const test = base.extend<LiveBackendTestFixtures, LiveBackendWorkerFixtur
         seedTestUserViaDb(_dbPath, "setup_bypass", "bypass_seed_pw");
       } catch (err) {
         uvicorn.kill("SIGTERM");
-        if (stubServer) await new Promise<void>((r) => stubServer.close(() => r()));
+        if (stubServer) await new Promise<void>((r) => stubServer.close(() => { r(); }));
         throw err;
       }
 
@@ -536,7 +536,7 @@ export const test = base.extend<LiveBackendTestFixtures, LiveBackendWorkerFixtur
       // 5. Teardown.
       uvicorn.kill("SIGTERM");
       await new Promise<void>((r) => setTimeout(r, 500));
-      if (stubServer) await new Promise<void>((r) => stubServer.close(() => r()));
+      if (stubServer) await new Promise<void>((r) => stubServer.close(() => { r(); }));
       if (existsSync(_dbPath)) {
         await rm(_dbPath, { force: true });
       }
@@ -667,7 +667,7 @@ export const test = base.extend<LiveBackendTestFixtures, LiveBackendWorkerFixtur
         ["run", "python", "-c", script, dbPath, tables.join(",")],
         { cwd: REPO_ROOT, encoding: "utf-8" }
       );
-      await use();
+      await use(undefined);
     },
     { auto: true },
   ],

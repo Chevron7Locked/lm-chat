@@ -148,7 +148,10 @@ test.describe("CSP strict style-src — no unsafe-inline violations", () => {
       await expect(badge.first()).toBeVisible();
       const box = await badge.first().boundingBox();
       expect(box).not.toBeNull();
-      expect(box!.width).toBeGreaterThan(0);
+      if (box === null) {
+        throw new Error("unreachable: expect(box).not.toBeNull() above already failed the test");
+      }
+      expect(box.width).toBeGreaterThan(0);
     }
 
     expect(violations, `CSP violations while badge visible: ${violations.join("; ")}`).toHaveLength(0);

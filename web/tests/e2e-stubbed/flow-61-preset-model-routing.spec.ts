@@ -262,10 +262,11 @@ test.describe("Flow 61 — Preset model routing", () => {
 
     if (capturedPutBody.value === null) throw new Error("expected capturedPutBody to be captured");
     const body: PresetModelsMap = JSON.parse(capturedPutBody.value);
-    expect(body["research"]).toBeDefined();
-    // Guaranteed non-null by the toBeDefined() check just above.
-    expect(body["research"]!.provider).toBe(PRESET_PROVIDER);
-    expect(body["research"]!.model_id).toBe(PRESET_MODEL_ID);
+    const research = body["research"];
+    expect(research).toBeDefined();
+    if (!research) throw new Error("expected body.research to be defined");
+    expect(research.provider).toBe(PRESET_PROVIDER);
+    expect(research.model_id).toBe(PRESET_MODEL_ID);
   });
 
   test("/research sub-session stream carries assigned preset model+provider", async ({

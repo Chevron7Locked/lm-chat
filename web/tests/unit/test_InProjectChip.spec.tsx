@@ -14,11 +14,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<(path: string, init?: RequestInit) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: {
-    request: (...args: unknown[]) => mockRequest(...args),
+    // Tuple rest-param forwarding (not `(path, init) => mockRequest(path, init)`)
+    // — a fixed-arity forward would pass an explicit `undefined` init on every
+    // single-arg GET call, which would break any future toHaveBeenCalledWith
+    // assertion expecting a single-arg call.
+    request: (...args: [path: string, init?: RequestInit]) => mockRequest(...args),
     postForm: vi.fn(),
   },
   ApiClient: vi.fn(),

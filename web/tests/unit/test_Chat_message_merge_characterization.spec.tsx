@@ -49,7 +49,10 @@ import type { ChatStreamPayload } from "@/hooks/useSSE";
 
 // jsdom doesn't implement scrollIntoView; Chat's auto-scroll effect crashes
 // without this stub.
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
+if (
+  typeof window !== "undefined" &&
+  !(Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+) {
   Element.prototype.scrollIntoView = function (): void {
     /* no-op */
   };
@@ -177,7 +180,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 
@@ -223,7 +226,7 @@ vi.mock("@/hooks/useChats", () => ({
   // Promise).
   useGenerateTitle: () => ({
     mutate: vi.fn(),
-    mutateAsync: vi.fn(async () => undefined),
+    mutateAsync: vi.fn(() => Promise.resolve(undefined)),
     isPending: false,
   }),
   chatKeys: { messages: (id: number) => ["messages", id] },
@@ -403,7 +406,7 @@ import Chat from "@/pages/Chat";
 // `initialEntries` on its first render, so passing a different initialPath
 // to a `rerender()` call is a no-op for the already-mounted router and would
 // silently fail to exercise the wipe-on-chat-switch effect.
-let capturedNavigate: ((path: string) => void) | null = null;
+let capturedNavigate: ((path: string) => void | Promise<void>) | null = null;
 function NavCapture(): null {
   const navigate = useNavigate();
   useEffect(() => {
@@ -731,7 +734,7 @@ describe("Chat — message-merge derivations + pendingUser lifecycle (characteri
     // Chat instance (see the capturedNavigate/NavCapture comment above).
     expect(capturedNavigate).toBeTypeOf("function");
     act(() => {
-      capturedNavigate?.("/chats/2");
+      void capturedNavigate?.("/chats/2");
     });
 
     expect(userRows(container)).toHaveLength(0);

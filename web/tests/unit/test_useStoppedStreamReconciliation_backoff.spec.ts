@@ -121,8 +121,9 @@ describe("useStoppedStreamReconciliation — backoff poll", () => {
       resetStream,
       qc,
     };
-    const rendered = renderHook((props: UseStoppedStreamReconciliationArgs) =>
-      useStoppedStreamReconciliation(props), { initialProps: args });
+    const rendered = renderHook((props: UseStoppedStreamReconciliationArgs) => {
+      useStoppedStreamReconciliation(props);
+    }, { initialProps: args });
     resetStream.mockClear();
     return rendered;
   }

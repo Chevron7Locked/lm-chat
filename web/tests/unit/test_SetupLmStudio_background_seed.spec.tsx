@@ -17,10 +17,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<(path: string, init?: RequestInit) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
-  api: { request: (...args: unknown[]) => mockRequest(...args), postForm: vi.fn() },
+  api: {
+    request: (...args: [path: string, init?: RequestInit]) => mockRequest(...args),
+    postForm: vi.fn(),
+  },
   ApiClient: vi.fn(),
 }));
 

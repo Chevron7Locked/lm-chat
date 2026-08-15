@@ -54,9 +54,9 @@ const mockProvidersState = vi.hoisted(() => ({
     api_key_set: boolean;
   }[],
   status: [] as { provider: string; reachable: boolean; error: string | null }[],
-  upsertPending: false as boolean,
-  deletePending: false as boolean,
-  testPending: false as boolean,
+  upsertPending: false,
+  deletePending: false,
+  testPending: false,
 }));
 
 vi.mock("@/hooks/useProviders", () => ({

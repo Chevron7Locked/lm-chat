@@ -200,9 +200,9 @@ async function fetchLatestAssistant(
     state: last.state,
     contentLen: last.content.length,
     reasoningIsNull,
-    reasoningLen: reasoningIsNull ? 0 : last.reasoning_content!.length,
+    reasoningLen: (last.reasoning_content ?? "").length,
     toolCallsIsNull,
-    toolCallsCount: toolCallsIsNull ? 0 : last.tool_calls!.length,
+    toolCallsCount: (last.tool_calls ?? []).length,
   };
 }
 
@@ -263,8 +263,11 @@ function logGrowthVerdict(samples: GrowthSample[], label: string): void {
     );
     return;
   }
-  const first = visible[0]!;
-  const last = visible[visible.length - 1]!;
+  const first = visible[0];
+  const last = visible[visible.length - 1];
+  if (first === undefined || last === undefined) {
+    throw new Error("unreachable: visible.length >= 2 checked above");
+  }
   const delta = last.contentLen - first.contentLen;
   const verdict =
     delta > 0
@@ -301,7 +304,7 @@ async function installReasoningTee(page: Page): Promise<void> {
     const capture = { sawAny: false, chars: 0 };
     w.__j11Reasoning = capture;
     const originalFetch = window.fetch.bind(window);
-    window.fetch = (async (
+    window.fetch = async (
       input: RequestInfo | URL,
       init?: RequestInit,
     ): Promise<Response> => {
@@ -356,7 +359,7 @@ async function installReasoningTee(page: Page): Promise<void> {
         statusText: resp.statusText,
         headers: resp.headers,
       });
-    }) as typeof window.fetch;
+    };
   });
 }
 
@@ -527,6 +530,11 @@ test(
       "assistant row for the disconnected turn was not returned by " +
         "GET /api/chats/{id} at all after reload — total data loss",
     ).not.toBeNull();
+    if (postReloadOffline === null) {
+      throw new Error(
+        "unreachable: expect(postReloadOffline).not.toBeNull() above already failed the test",
+      );
+    }
     // Only a stable, code-verified invariant: SOMETHING moves the row out of
     // 'draft' (either the disconnect watcher's abort or the outer finally's
     // salvage-release — see the file docstring on the race between them).
@@ -534,11 +542,11 @@ test(
     // attempt, which the reaper's 5-minute sweep exists specifically to
     // prevent — so this should hold well before that safety net even fires.
     expect(
-      postReloadOffline!.state,
+      postReloadOffline.state,
       "row must not still be 'draft' after the disconnect settles + a reload",
     ).not.toBe("draft");
     expect(
-      postReloadOffline!.contentLen,
+      postReloadOffline.contentLen,
       "partial content was NOT preserved across the disconnect (several " +
         "seconds of real streaming happened before the cut)",
     ).toBeGreaterThan(0);
@@ -558,20 +566,20 @@ test(
     ).toBe(true);
 
     console.log(
-      `J11 RESULT [offline]: resting state='${postReloadOffline!.state}' | ` +
-        `content chars=${String(postReloadOffline!.contentLen)} | ` +
-        `reasoning chars=${String(postReloadOffline!.reasoningLen)} ` +
-        `(null=${String(postReloadOffline!.reasoningIsNull)}) | ` +
-        `tool_calls=${String(postReloadOffline!.toolCallsCount)} ` +
-        `(null=${String(postReloadOffline!.toolCallsIsNull)}) | ` +
+      `J11 RESULT [offline]: resting state='${postReloadOffline.state}' | ` +
+        `content chars=${String(postReloadOffline.contentLen)} | ` +
+        `reasoning chars=${String(postReloadOffline.reasoningLen)} ` +
+        `(null=${String(postReloadOffline.reasoningIsNull)}) | ` +
+        `tool_calls=${String(postReloadOffline.toolCallsCount)} ` +
+        `(null=${String(postReloadOffline.toolCallsIsNull)}) | ` +
         `stream caret gone=${String(caretGoneOffline)} | ` +
         `assistant bubble rendered=${String(bubbleVisibleOffline)}`,
     );
     logReasoningComparison(
       "offline",
       preCutReasoningOffline,
-      postReloadOffline!.reasoningLen,
-      postReloadOffline!.reasoningIsNull,
+      postReloadOffline.reasoningLen,
+      postReloadOffline.reasoningIsNull,
     );
 
     const postReloadSamplesOffline = await sampleGrowth(
@@ -635,12 +643,17 @@ test(
       "assistant row for the disconnected turn was not returned by " +
         "GET /api/chats/{id} at all after the reload — total data loss",
     ).not.toBeNull();
+    if (postReloadReload === null) {
+      throw new Error(
+        "unreachable: expect(postReloadReload).not.toBeNull() above already failed the test",
+      );
+    }
     expect(
-      postReloadReload!.state,
+      postReloadReload.state,
       "row must not still be 'draft' after a bare page.reload() disconnect",
     ).not.toBe("draft");
     expect(
-      postReloadReload!.contentLen,
+      postReloadReload.contentLen,
       "partial content was NOT preserved across a bare page.reload() disconnect",
     ).toBeGreaterThan(0);
 
@@ -659,20 +672,20 @@ test(
     ).toBe(true);
 
     console.log(
-      `J11 RESULT [reload]: resting state='${postReloadReload!.state}' | ` +
-        `content chars=${String(postReloadReload!.contentLen)} | ` +
-        `reasoning chars=${String(postReloadReload!.reasoningLen)} ` +
-        `(null=${String(postReloadReload!.reasoningIsNull)}) | ` +
-        `tool_calls=${String(postReloadReload!.toolCallsCount)} ` +
-        `(null=${String(postReloadReload!.toolCallsIsNull)}) | ` +
+      `J11 RESULT [reload]: resting state='${postReloadReload.state}' | ` +
+        `content chars=${String(postReloadReload.contentLen)} | ` +
+        `reasoning chars=${String(postReloadReload.reasoningLen)} ` +
+        `(null=${String(postReloadReload.reasoningIsNull)}) | ` +
+        `tool_calls=${String(postReloadReload.toolCallsCount)} ` +
+        `(null=${String(postReloadReload.toolCallsIsNull)}) | ` +
         `stream caret gone=${String(caretGoneReload)} | ` +
         `assistant bubble rendered=${String(bubbleVisibleReload)}`,
     );
     logReasoningComparison(
       "reload",
       preCutReasoningReload,
-      postReloadReload!.reasoningLen,
-      postReloadReload!.reasoningIsNull,
+      postReloadReload.reasoningLen,
+      postReloadReload.reasoningIsNull,
     );
 
     const postReloadSamplesReload = await sampleGrowth(

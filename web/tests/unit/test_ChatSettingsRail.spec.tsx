@@ -353,6 +353,9 @@ describe("ChatSettingsRail — persist", () => {
     const { act } = await import("@testing-library/react");
     await act(async () => {
       useChatSettingsStore.getState().setChatReasoning(7, "medium");
+      // Explicit microtask flush — matches the effect this act() block is
+      // meant to let settle (chatOverrides → local <select> sync effect).
+      await Promise.resolve();
     });
 
     // The select must now show "medium" — without a PATCH round-trip.

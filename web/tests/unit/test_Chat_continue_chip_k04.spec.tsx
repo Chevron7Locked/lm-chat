@@ -25,8 +25,9 @@ import type { ChatMessageData } from "@/components/ChatMessage";
 import type { StreamState } from "@/hooks/useSSE";
 import type { MessageRecord } from "@/hooks/useChats";
 
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
-  Element.prototype.scrollIntoView = function (): void {
+const elementProto = Element.prototype as { scrollIntoView?: () => void };
+if (typeof window !== "undefined" && !elementProto.scrollIntoView) {
+  elementProto.scrollIntoView = function (): void {
     /* no-op */
   };
 }
@@ -136,7 +137,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 

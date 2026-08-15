@@ -98,7 +98,7 @@ test(
     );
     expect(
       modeResp.ok(),
-      `endpoint-mode=openai_compat → HTTP ${modeResp.status()}`,
+      `endpoint-mode=openai_compat → HTTP ${String(modeResp.status())}`,
     ).toBe(true);
 
     const chatId = await createChatViaRequest(page, backendURL, "J6 web_search");

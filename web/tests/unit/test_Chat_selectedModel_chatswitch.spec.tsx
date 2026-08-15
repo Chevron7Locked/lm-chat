@@ -35,7 +35,7 @@ import { __resetChatScopedMemoryForTests } from "@/hooks/useChatScopedState";
 
 // jsdom doesn't implement scrollIntoView; Chat's auto-scroll effect crashes
 // without this stub.
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
+if (typeof window !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = function (): void { /* no-op */ };
 }
 
@@ -122,7 +122,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 
@@ -363,13 +363,17 @@ function renderChat(initialPath: string) {
 }
 
 function shownModel(): string {
-  return screen.getByTestId("model-select-value").textContent ?? "";
+  return screen.getByTestId("model-select-value").textContent;
 }
 
-function navigateTo(path: string): void {
-  act(() => {
+async function navigateTo(path: string): Promise<void> {
+  // react-router's NavigateFunction is typed `void | Promise<void>` (it
+  // awaits route loaders under the data-router APIs), so the call must be
+  // awaited rather than fired-and-forgotten even though this MemoryRouter
+  // setup resolves it synchronously today.
+  await act(async () => {
     if (capturedNavigate === null) throw new Error("navigate not captured");
-    capturedNavigate(path);
+    await capturedNavigate(path);
   });
 }
 
@@ -383,7 +387,7 @@ describe("Chat — selectedModel chat-switch isolation (Item 6)", () => {
     vi.clearAllMocks();
   });
 
-  it("override in chat A PATCHes A once; chat B shows its own model with no PATCH; back in A the override is retained", () => {
+  it("override in chat A PATCHes A once; chat B shows its own model with no PATCH; back in A the override is retained", async () => {
     renderChat("/chats/1");
 
     // Chat A resolves its persisted model (no override yet).
@@ -406,22 +410,22 @@ describe("Chat — selectedModel chat-switch isolation (Item 6)", () => {
     // Navigate to chat B — dropdown shows B's persisted model Z, NOT A's
     // override, and navigation alone fires NO PATCH (the old bug silently
     // rewrote B's model_id on the next send).
-    navigateTo("/chats/2");
+    await navigateTo("/chats/2");
     expect(shownModel()).toBe("lmstudio::model-z");
     expect(updateChatCalls).toHaveLength(1);
 
     // Back to A — the memory-tier override survives for the tab session.
-    navigateTo("/chats/1");
+    await navigateTo("/chats/1");
     expect(shownModel()).toBe("lmstudio::model-y");
     expect(updateChatCalls).toHaveLength(1);
   });
 
-  it("a chat with no override and no interaction never PATCHes on visit", () => {
+  it("a chat with no override and no interaction never PATCHes on visit", async () => {
     renderChat("/chats/2");
     expect(shownModel()).toBe("lmstudio::model-z");
-    navigateTo("/chats/1");
+    await navigateTo("/chats/1");
     expect(shownModel()).toBe("lmstudio::model-x");
-    navigateTo("/chats/2");
+    await navigateTo("/chats/2");
     expect(shownModel()).toBe("lmstudio::model-z");
     expect(updateChatCalls).toHaveLength(0);
   });

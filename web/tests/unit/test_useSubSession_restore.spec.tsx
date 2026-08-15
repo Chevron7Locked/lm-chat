@@ -21,11 +21,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // ─── Mock api module (usePresetModels + the P3 fetch helpers both route
 // through api.request) ────────────────────────────────────────────────────
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<(path: string, init?: RequestInit) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: {
-    request: (...args: unknown[]) => mockRequest(...args),
+    request: (...args: [path: string, init?: RequestInit]) => mockRequest(...args),
     postForm: vi.fn(),
   },
   ApiClient: vi.fn(),
@@ -100,7 +100,7 @@ const noopArgs = {
   savedDefaultModel: undefined,
   resolveTurnModel: () => "",
   push: vi.fn(),
-  refetchMessages: vi.fn(async () => undefined),
+  refetchMessages: vi.fn(() => Promise.resolve(undefined)),
 };
 
 describe("useSubSession — restore-on-load (P3)", () => {

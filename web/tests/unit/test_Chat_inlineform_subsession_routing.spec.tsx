@@ -26,7 +26,12 @@ import { createElement } from "react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
+// TS's DOM lib declares scrollIntoView as always present on Element.prototype
+// (it isn't, in jsdom). The `in` check reads real runtime presence; going
+// through a boolean (rather than the `in` expression directly in the `if`)
+// avoids narrowing Element.prototype to `never` in the assignment below.
+const hasScrollIntoView = "scrollIntoView" in Element.prototype;
+if (typeof window !== "undefined" && !hasScrollIntoView) {
   Element.prototype.scrollIntoView = function (): void { /* no-op */ };
 }
 
@@ -145,7 +150,7 @@ vi.mock("@/hooks/useModelList", () => ({
     loadedModels: [],
     error: null,
     isFetching: false,
-    refresh: async () => undefined,
+    refresh: () => undefined,
   }),
 }));
 

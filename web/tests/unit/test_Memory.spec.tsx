@@ -58,8 +58,14 @@ const mockEditMutate = vi.fn();
 const mockReindexMutate = vi.fn();
 const mockRefineMutate = vi.fn();
 const mockRestoreMutate = vi.fn();
-const mockUseMemoryPins = vi.fn();
-const mockUseAutoMemories = vi.fn();
+interface MockMemoryQueryResult {
+  data: MemoryInsight[];
+  isLoading: boolean;
+  isError: boolean;
+}
+
+const mockUseMemoryPins = vi.fn<() => MockMemoryQueryResult>();
+const mockUseAutoMemories = vi.fn<() => MockMemoryQueryResult>();
 
 vi.mock("@/hooks/useMemory", () => ({
   useMemoryPins: () => mockUseMemoryPins(),
@@ -298,8 +304,13 @@ describe("Memory", () => {
     const select = (await screen.findByTestId(
       "memory-reindex-model-select",
     )) as HTMLSelectElement;
-    const byValue = (v: string): HTMLOptionElement =>
-      Array.from(select.options).find((o) => o.value === v)!;
+    const byValue = (v: string): HTMLOptionElement => {
+      const opt = Array.from(select.options).find((o) => o.value === v);
+      if (opt === undefined) {
+        throw new Error(`expected an <option value="${v}"> in the reindex model select`);
+      }
+      return opt;
+    };
 
     // Loaded model: enabled, marked active.
     const loaded = byValue("text-embedding-nomic-embed-text-v1.5");

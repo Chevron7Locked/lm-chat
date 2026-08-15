@@ -60,7 +60,7 @@ test(
         input: RequestInfo | URL,
         init?: RequestInit
       ): Promise<Response> {
-        const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         if (url.includes("/api/chat/stream")) {
           let body: Record<string, unknown> = {};
           try {
@@ -146,7 +146,7 @@ test(
         input: RequestInfo | URL,
         init?: RequestInit
       ): Promise<Response> {
-        const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         if (url.includes("/api/chat/stream")) {
           const chatStart = JSON.stringify({
             type: "chat.start",
@@ -265,7 +265,7 @@ test(
             ? input
             : input instanceof URL
               ? input.href
-              : (input as Request).url;
+              : input.url;
         if (url.includes("/api/chat/stream")) {
           const chatStart = JSON.stringify({
             type: "chat.start",

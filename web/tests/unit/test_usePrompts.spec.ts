@@ -15,7 +15,7 @@ import type { ReactNode } from "react";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<(...args: unknown[]) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: { request: (...args: unknown[]) => mockRequest(...args) },
@@ -68,7 +68,7 @@ describe("usePrompts", () => {
     mockRequest.mockResolvedValue([fixedPrompt]);
 
     const { result } = renderHook(() => usePrompts(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() => { expect(result.current.isSuccess).toBe(true); });
 
     expect(mockRequest).toHaveBeenCalledWith("/api/prompts");
     expect(result.current.data).toHaveLength(1);
@@ -82,7 +82,7 @@ describe("usePrompts", () => {
     mockRequest.mockRejectedValue(err);
 
     const { result } = renderHook(() => usePrompts(), { wrapper });
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(401);
   });
 });
@@ -112,7 +112,7 @@ describe("useCreatePrompt", () => {
     );
 
     const callArgs = mockRequest.mock.calls[0];
-    const bodyStr = (callArgs?.[1] as { body?: string })?.body ?? "";
+    const bodyStr = (callArgs?.[1] as { body?: string } | undefined)?.body ?? "";
     const params = new URLSearchParams(bodyStr);
     expect(params.get("name")).toBe("greeting");
     expect(params.get("content")).toBe("Hello!");
@@ -126,11 +126,11 @@ describe("useCreatePrompt", () => {
 
     const { result } = renderHook(() => useCreatePrompt(), { wrapper });
 
-    await act(async () => {
-      await result.current.mutate({ name: "dup", content: "x" });
+    act(() => {
+      result.current.mutate({ name: "dup", content: "x" });
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(409);
   });
 });
@@ -150,7 +150,7 @@ describe("useUpdatePrompt", () => {
     });
 
     const callArgs = mockRequest.mock.calls[0];
-    const bodyStr = (callArgs?.[1] as { body?: string })?.body ?? "";
+    const bodyStr = (callArgs?.[1] as { body?: string } | undefined)?.body ?? "";
     const params = new URLSearchParams(bodyStr);
     expect(params.has("name")).toBe(false);
     expect(params.get("content")).toBe("new content only");
@@ -181,11 +181,11 @@ describe("useUpdatePrompt", () => {
 
     const { result } = renderHook(() => useUpdatePrompt(999), { wrapper });
 
-    await act(async () => {
-      await result.current.mutate({ name: "x" });
+    act(() => {
+      result.current.mutate({ name: "x" });
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(404);
   });
 });
@@ -218,11 +218,11 @@ describe("useDeletePrompt", () => {
 
     const { result } = renderHook(() => useDeletePrompt(), { wrapper });
 
-    await act(async () => {
-      await result.current.mutate(999);
+    act(() => {
+      result.current.mutate(999);
     });
 
-    await waitFor(() => expect(result.current.isError).toBe(true));
+    await waitFor(() => { expect(result.current.isError).toBe(true); });
     expect((result.current.error as { status?: number } | null)?.status).toBe(404);
   });
 });

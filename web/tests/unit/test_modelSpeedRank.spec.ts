@@ -48,7 +48,11 @@ describe("pickFastestModel", () => {
   });
 
   it("returns undefined for an empty list", () => {
-    expect(pickFastestModel([], (m) => String(m))).toBeUndefined();
+    // Explicit type argument: with `[]` and no other candidate, T degenerates
+    // to a bare `undefined` return type — which the linter treats the same
+    // as `void` when embedded in an expression (VoidLike). Supplying T
+    // matches how real callers use this (a list of string-keyed models).
+    expect(pickFastestModel<string>([], (m) => m)).toBeUndefined();
   });
 });
 
@@ -70,6 +74,8 @@ describe("pickSlowestModel", () => {
   });
 
   it("returns undefined for an empty list", () => {
-    expect(pickSlowestModel([], (m) => String(m))).toBeUndefined();
+    // See the analogous pickFastestModel test above for why the explicit
+    // type argument is needed to avoid a VoidLike (undefined) expression.
+    expect(pickSlowestModel<string>([], (m) => m)).toBeUndefined();
   });
 });

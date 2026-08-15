@@ -26,7 +26,7 @@ function chunkedSseResponse(chunks: string[]): Response {
   const stream = new ReadableStream<Uint8Array>({
     pull(controller) {
       if (idx < chunks.length) {
-        controller.enqueue(encoder.encode(chunks[idx++]!));
+        controller.enqueue(encoder.encode(chunks[idx++]));
       } else {
         controller.close();
       }
@@ -257,7 +257,7 @@ describe("useSubSessionSSE — SSE parser (fix #1)", () => {
     expect(result.current.state.content).toBe("second");
   });
 
-  it("empty model_id is rejected with an error state immediately", async () => {
+  it("empty model_id is rejected with an error state immediately", () => {
     const { result } = renderHook(() => useSubSessionSSE());
 
     act(() => {

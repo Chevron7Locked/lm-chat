@@ -397,7 +397,7 @@ test.describe("P10b — page navigation + component render smoke (live)", () => 
     // Attempt to seed an assistant message WITH reasoning_content.
     // The API may not accept reasoning_content in a direct POST (it could be
     // stripped). We attempt it and fall through gracefully.
-    let thinkingSeeded = false;
+    let thinkingSeeded: boolean;
     try {
       await postMessageViaApi(
         page, backendURL, chatId, "assistant",

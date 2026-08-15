@@ -29,7 +29,7 @@ import {
 import { createElement } from "react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 
-import type { Document } from "@/hooks/useDocuments";
+import type { ChunkPreview, Document } from "@/hooks/useDocuments";
 
 // ─── Mock toast store ────────────────────────────────────────────────────────
 
@@ -50,10 +50,22 @@ vi.mock("@/stores/authStore", () => ({
 
 // ─── Mock useDocuments hooks (no QueryClientProvider needed) ─────────────────
 
+interface MockUseDocumentsResult {
+  data: Document[];
+  isLoading: boolean;
+  isError: boolean;
+}
+
+interface MockUseDocumentChunksResult {
+  data: ChunkPreview[];
+  isLoading: boolean;
+  isError: boolean;
+}
+
 const mockUploadMutate = vi.fn();
 const mockDeleteMutate = vi.fn();
-const mockUseDocuments = vi.fn();
-const mockUseDocumentChunks = vi.fn();
+const mockUseDocuments = vi.fn<() => MockUseDocumentsResult>();
+const mockUseDocumentChunks = vi.fn<(id: number) => MockUseDocumentChunksResult>();
 
 vi.mock("@/hooks/useDocuments", () => ({
   useDocuments: () => mockUseDocuments(),

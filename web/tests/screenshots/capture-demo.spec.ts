@@ -187,7 +187,7 @@ async function settle(page: Page, extraMs = 300): Promise<void> {
   await page.evaluate(
     () =>
       new Promise<void>((r) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => r()));
+        requestAnimationFrame(() => requestAnimationFrame(() => { r(); }));
       })
   );
   if (extraMs > 0) {
@@ -224,7 +224,7 @@ async function seedAuthCookies(context: BrowserContext): Promise<void> {
   });
   if (!res.ok()) {
     throw new Error(
-      `Login failed: ${res.status()} ${await res.text()} ` +
+      `Login failed: ${String(res.status())} ${await res.text()} ` +
         `(BASE_URL=${BASE_URL}, user=${DEMO_USER})`
     );
   }
@@ -233,7 +233,7 @@ async function seedAuthCookies(context: BrowserContext): Promise<void> {
   await api.dispose();
 }
 
-async function loginIfNeeded(_page: Page): Promise<void> {
+async function loginIfNeeded(): Promise<void> {
   // No-op: cookies are seeded once on context creation. Kept as a stub so
   // per-shot bodies don't need to change shape.
 }
@@ -290,7 +290,6 @@ let _sharedPage: Page | null = null;
 let _sharedContext: BrowserContext | null = null;
 
 const test = base.extend<CaptureFixtures>({
-  // eslint-disable-next-line no-empty-pattern
   capturePage: [
     async ({ browser }, use) => {
       // Re-use the shared page if it was already created by a previous test
@@ -334,7 +333,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
     }
 
     // Eyes-on signal: list every PNG that landed plus byte size.
-    let entries: string[] = [];
+    let entries: string[];
     try {
       entries = await readdir(SHOTS_DIR);
     } catch {
@@ -342,18 +341,16 @@ test.describe("LMChat v1 — README capture sweep", () => {
       return;
     }
     const pngs = entries.filter((e) => e.endsWith(".png")).sort();
-    // eslint-disable-next-line no-console
-    console.log(`\nCaptured ${pngs.length} screenshot(s) in ${SHOTS_DIR}:`);
+    console.log(`\nCaptured ${String(pngs.length)} screenshot(s) in ${SHOTS_DIR}:`);
     for (const name of pngs) {
       const full = join(SHOTS_DIR, name);
       const st = await stat(full);
-      // eslint-disable-next-line no-console
       console.log(`  ${name}  ${st.size.toLocaleString()} bytes`);
     }
     if (consoleErrors.length > 0) {
       const sample = consoleErrors.slice(0, 5).join("\n  - ");
       throw new Error(
-        `Captured ${consoleErrors.length} console.error(s) during the demo ` +
+        `Captured ${String(consoleErrors.length)} console.error(s) during the demo ` +
           `sweep — the seeded BE is throwing into the page console.\n` +
           `First few:\n  - ${sample}`
       );
@@ -364,7 +361,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
   // 01 — Empty state (dark)
   // -----------------------------------------------------------------------
   test("01 — empty state (dark)", async ({ capturePage: page }) => {
-    await loginIfNeeded(page);
+    await loginIfNeeded();
     await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
     await settle(page, 500);
     // The empty-state hint is gated by "no chat selected" — make sure
@@ -388,7 +385,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
   // 02 — Stargate chat (dark)
   // -----------------------------------------------------------------------
   test("02 — stargate chat (dark)", async ({ capturePage: page }) => {
-    await loginIfNeeded(page);
+    await loginIfNeeded();
     await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
     await settle(page, 400);
 
@@ -422,9 +419,9 @@ test.describe("LMChat v1 — README capture sweep", () => {
   // falling back to the home screen on slow navigation.
   // -----------------------------------------------------------------------
   test("03 — project home (dark)", async ({ capturePage: page }) => {
-    await loginIfNeeded(page);
+    await loginIfNeeded();
     // First discover the project ID via the API so we don't hardcode 1.
-    const api = await page.context().request;
+    const api = page.context().request;
     const resp = await api.get(`${BASE_URL}/api/projects`).catch(() => null);
     let projectId = 1; // fallback: seed always creates Stargate first
     if (resp && resp.ok()) {
@@ -433,7 +430,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
         projectId = (data[0] as { id: number }).id;
       }
     }
-    await page.goto(`${BASE_URL}/project/${projectId}`, {
+    await page.goto(`${BASE_URL}/project/${String(projectId)}`, {
       waitUntil: "domcontentloaded",
     });
     await settle(page, 700);
@@ -447,7 +444,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
   // 04 — Slash palette (dark)
   // -----------------------------------------------------------------------
   test("04 — slash palette (dark)", async ({ capturePage: page }) => {
-    await loginIfNeeded(page);
+    await loginIfNeeded();
     await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
     await settle(page, 400);
     const firstChat = page.locator('a[href*="/chats/"]').first();
@@ -460,7 +457,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
     await composer.click();
     // Type only the leading slash — the palette renders inline above the
     // input column with all commands listed.
-    await composer.type("/", { delay: 50 });
+    await composer.pressSequentially("/", { delay: 50 });
     await page.waitForTimeout(400);
     await shoot(page, {
       name: "04-slash-menu-dark.png",
@@ -472,7 +469,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
   // 05 — Memory page (dark)
   // -----------------------------------------------------------------------
   test("05 — memory page (dark)", async ({ capturePage: page }) => {
-    await loginIfNeeded(page);
+    await loginIfNeeded();
     await page.goto(`${BASE_URL}/memory`, { waitUntil: "domcontentloaded" });
     await settle(page, 500);
     await shoot(page, {
@@ -485,7 +482,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
   // 06 — Documents page (dark)
   // -----------------------------------------------------------------------
   test("06 — documents page (dark)", async ({ capturePage: page }) => {
-    await loginIfNeeded(page);
+    await loginIfNeeded();
     await page.goto(`${BASE_URL}/documents`, {
       waitUntil: "domcontentloaded",
     });
@@ -500,7 +497,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
   // 07 — Settings → LM Studio (dark)
   // -----------------------------------------------------------------------
   test("07 — settings/lm-studio (dark)", async ({ capturePage: page }) => {
-    await loginIfNeeded(page);
+    await loginIfNeeded();
     await page.goto(`${BASE_URL}/settings/lm-studio`, {
       waitUntil: "domcontentloaded",
     });
@@ -516,7 +513,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
   // -----------------------------------------------------------------------
   test("08 — stargate chat (light)", async ({ capturePage: page }) => {
     await setColorScheme(page, "light");
-    await loginIfNeeded(page);
+    await loginIfNeeded();
     await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
     await settle(page, 400);
     const stargateChat = page
@@ -544,8 +541,8 @@ test.describe("LMChat v1 — README capture sweep", () => {
   // -----------------------------------------------------------------------
   test("09 — project home (light)", async ({ capturePage: page }) => {
     await setColorScheme(page, "light");
-    await loginIfNeeded(page);
-    const api = await page.context().request;
+    await loginIfNeeded();
+    const api = page.context().request;
     const resp = await api.get(`${BASE_URL}/api/projects`).catch(() => null);
     let projectId = 1;
     if (resp && resp.ok()) {
@@ -554,7 +551,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
         projectId = (data[0] as { id: number }).id;
       }
     }
-    await page.goto(`${BASE_URL}/project/${projectId}`, {
+    await page.goto(`${BASE_URL}/project/${String(projectId)}`, {
       waitUntil: "domcontentloaded",
     });
     await settle(page, 700);
@@ -571,7 +568,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
     await setColorScheme(page, "dark");
     await page.setViewportSize(MOBILE_VIEWPORT);
     await page.emulateMedia({ media: "screen", colorScheme: "dark" });
-    await loginIfNeeded(page);
+    await loginIfNeeded();
     await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
     await settle(page, 400);
     const firstChat = page.locator('a[href*="/chats/"]').first();
@@ -598,7 +595,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
     await setColorScheme(page, "dark");
     await page.setViewportSize(MOBILE_VIEWPORT);
     await page.emulateMedia({ media: "screen", colorScheme: "dark" });
-    await loginIfNeeded(page);
+    await loginIfNeeded();
     await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
     await settle(page, 400);
     const menuBtn = page.getByTestId("topbar-mobile-menu").first();
@@ -618,7 +615,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
   test("12 — settings/providers (dark)", async ({ capturePage: page }) => {
     await setColorScheme(page, "dark");
     await page.setViewportSize(DESKTOP_VIEWPORT);
-    await loginIfNeeded(page);
+    await loginIfNeeded();
     await page.goto(`${BASE_URL}/settings/providers`, {
       waitUntil: "domcontentloaded",
     });
@@ -643,7 +640,7 @@ test.describe("LMChat v1 — README capture sweep", () => {
   test("13 — settings/mcp-servers (dark)", async ({ capturePage: page }) => {
     await setColorScheme(page, "dark");
     await page.setViewportSize(DESKTOP_VIEWPORT);
-    await loginIfNeeded(page);
+    await loginIfNeeded();
     await page.goto(`${BASE_URL}/settings/mcp-servers`, {
       waitUntil: "domcontentloaded",
     });
@@ -677,10 +674,10 @@ test.describe("LMChat v1 — README capture sweep", () => {
   test("14 — persona chip (dark)", async ({ capturePage: page }) => {
     await setColorScheme(page, "dark");
     await page.setViewportSize(DESKTOP_VIEWPORT);
-    await loginIfNeeded(page);
+    await loginIfNeeded();
 
     // Find the chat id whose title matches the seeded persona chat.
-    const api = await page.context().request;
+    const api = page.context().request;
     const resp = await api.get(`${BASE_URL}/api/chats`).catch(() => null);
     let chatId: number | null = null;
     if (resp && resp.ok()) {
@@ -693,13 +690,13 @@ test.describe("LMChat v1 — README capture sweep", () => {
             ? body.items
             : [];
       const match = list.find((c) =>
-        /asgard transporter/i.test(c.title ?? "")
+        /asgard transporter/i.test(c.title)
       );
       if (match) chatId = match.id;
     }
 
     if (chatId !== null) {
-      await page.goto(`${BASE_URL}/chats/${chatId}`, {
+      await page.goto(`${BASE_URL}/chats/${String(chatId)}`, {
         waitUntil: "domcontentloaded",
       });
     } else {

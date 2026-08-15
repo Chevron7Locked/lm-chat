@@ -91,7 +91,7 @@ describe("authStore", () => {
     await useAuthStore.getState().login("alice", "pass", "123456");
 
     const call = vi.mocked(global.fetch).mock.calls[0];
-    const body = (call?.[1] as RequestInit | undefined)?.body as string | undefined;
+    const body = call?.[1]?.body as string | undefined;
     expect(body).toContain("totp_code=123456");
   });
 
@@ -107,7 +107,7 @@ describe("authStore", () => {
     await useAuthStore.getState().login("alice", "pass", "");
 
     const call = vi.mocked(global.fetch).mock.calls[0];
-    const body = (call?.[1] as RequestInit | undefined)?.body as string | undefined;
+    const body = call?.[1]?.body as string | undefined;
     expect(body).not.toContain("totp_code");
   });
 

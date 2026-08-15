@@ -80,7 +80,7 @@ function sseResponse(frames: string): Response {
 
 class StubChannel {
   onmessage: ((ev: { data: unknown }) => void) | null = null;
-  postMessage(_msg: unknown) {
+  postMessage() {
     /* no-op */
   }
   close() {

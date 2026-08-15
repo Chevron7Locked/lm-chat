@@ -15,11 +15,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ─── Mock api.request ────────────────────────────────────────────────────────
 
-const mockRequest = vi.fn();
+const mockRequest = vi.fn<(path: string, init?: RequestInit) => Promise<unknown>>();
 
 vi.mock("@/lib/api", () => ({
   api: {
-    request: (...args: unknown[]) => mockRequest(...args),
+    request: (...args: [path: string, init?: RequestInit]) => mockRequest(...args),
     postForm: vi.fn(),
   },
   ApiClient: vi.fn(),
@@ -114,7 +114,7 @@ beforeEach(() => {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("ChatSection", () => {
-  it("renders the section container with description text", async () => {
+  it("renders the section container with description text", () => {
     wrap(<ChatSection />);
 
     expect(screen.getByTestId("settings-chat-section")).toBeTruthy();
@@ -125,7 +125,7 @@ describe("ChatSection", () => {
     ).toBeTruthy();
   });
 
-  it("renders the default model select with the resolved default_model as value", async () => {
+  it("renders the default model select with the resolved default_model as value", () => {
     wrap(<ChatSection />);
 
     const select = screen.getByTestId("settings-chat-default-model");
@@ -185,7 +185,7 @@ describe("ChatSection", () => {
     expect(source).not.toContain("defaultValue");
   });
 
-  it("shows 'Loading models…' when useChatModelOptions is loading", async () => {
+  it("shows 'Loading models…' when useChatModelOptions is loading", () => {
     mockModelOptions.value = {
       options: [],
       groups: [],
