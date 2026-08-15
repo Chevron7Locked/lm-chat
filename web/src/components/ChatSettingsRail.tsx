@@ -167,7 +167,7 @@ function ChatSettingsRailBody({ chatId }: { chatId: number }) {
   // rail selector and the Composer badge share a single source of truth.
   // Selecting a preset here updates the Composer's lock-in state instantly
   // (and vice versa).
-  const { activePreset, setPreset } = useChatPreset(chatId);
+  const { activePreset, setPreset, adoptedByModel } = useChatPreset(chatId);
 
   // ─── Local form state ────────────────────────────────────────────────────
   // We mirror the persisted values into local state so the inputs stay
@@ -469,8 +469,15 @@ function ChatSettingsRailBody({ chatId }: { chatId: number }) {
             sending. Leave blank to use the preset as-is.
           </p>
           {presetMatch && (
-            <p className="lmchat-settings-rail__hint">
+            <p className="lmchat-settings-rail__hint" data-testid="chat-settings-active-preset-hint">
               Active preset: {activePreset}
+              {/* C3 — surfaces model-decided role adoption on the SAME
+                  hint the rail already shows, rather than a new indicator.
+                  Picking anything from the <select> above (including this
+                  same value again) is the existing revert path — it goes
+                  through setPreset, which always re-locks adoption source
+                  to "user" (see useChatPresetStore.adoptModel's guard). */}
+              {adoptedByModel && " — adopted automatically after the last reply"}
             </p>
           )}
         </div>

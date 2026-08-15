@@ -183,6 +183,62 @@ describe("ChatMessage — persona / sub-agent label", () => {
   });
 });
 
+describe("ChatMessage — C3 personaAdopted marker", () => {
+  it("adds the --adopted modifier + '· auto' tag when personaAdopted=true", () => {
+    render(
+      <ChatMessage
+        message={{
+          id: 20,
+          role: "assistant",
+          content: "Switched into research mode for this reply.",
+        }}
+        personaLabel="Research"
+        personaAdopted={true}
+      />,
+    );
+    const chip = screen.getByTestId("chat-message-persona-label");
+    expect(chip.className).toContain("lmchat-persona-label--adopted");
+    expect(chip.getAttribute("data-adopted")).toBe("true");
+    expect(chip.getAttribute("aria-label")).toContain("adopted automatically");
+    expect(chip.textContent).toContain("Research");
+    expect(chip.textContent).toContain("auto");
+  });
+
+  it("renders the plain (unmarked) chip when personaAdopted is absent — RED-ON-REVERT for the default", () => {
+    render(
+      <ChatMessage
+        message={{
+          id: 21,
+          role: "assistant",
+          content: "A user-picked persona turn.",
+        }}
+        personaLabel="Coder"
+      />,
+    );
+    const chip = screen.getByTestId("chat-message-persona-label");
+    expect(chip.className).not.toContain("lmchat-persona-label--adopted");
+    expect(chip.getAttribute("data-adopted")).toBeNull();
+    expect(chip.getAttribute("aria-label")).not.toContain("adopted automatically");
+    expect(chip.textContent).not.toContain("auto");
+  });
+
+  it("renders the plain chip when personaAdopted=false explicitly", () => {
+    render(
+      <ChatMessage
+        message={{
+          id: 22,
+          role: "assistant",
+          content: "Explicitly not adopted.",
+        }}
+        personaLabel="General"
+        personaAdopted={false}
+      />,
+    );
+    const chip = screen.getByTestId("chat-message-persona-label");
+    expect(chip.className).not.toContain("lmchat-persona-label--adopted");
+  });
+});
+
 describe("ChatMessage — skipEntranceAnimation", () => {
   it("sets data-skip-animate on the row when skipEntranceAnimation=true", () => {
     const { container } = render(

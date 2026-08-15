@@ -176,8 +176,8 @@ vi.mock("@/hooks/useChats", () => ({
 vi.mock("@/hooks/useChatPreset", () => ({
   useChatPreset: () => ({ activePreset: "", preset: null, setPreset: vi.fn(), clearPreset: vi.fn() }),
   useHydrateChatPresets: () => undefined,
-  useChatPresetStore: (sel: (s: { overrides: Record<number, string> }) => unknown) =>
-    sel({ overrides: {} }),
+  useChatPresetStore: (sel: (s: { overrides: Record<number, string>; sources: Record<number, "user" | "model"> }) => unknown) =>
+    sel({ overrides: {}, sources: {} }),
 }));
 
 vi.mock("@/hooks/useMemory", () => ({

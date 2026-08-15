@@ -286,3 +286,19 @@
   user-select: none;
   white-space: nowrap;
 }
+
+/* C3 (model-decided role adoption) — same pill, distinguished by a dashed
+   border rather than a second badge/icon, so it reads as "this persona"
+   with a lighter-weight "how it got here" cue instead of competing for
+   attention. The "· auto" text tag (below) carries the actual meaning;
+   this border is a peripheral-vision cue for scanning a long transcript. */
+.lmchat-persona-label--adopted {
+  border-style: dashed;
+}
+
+.lmchat-persona-label__adopted-tag {
+  opacity: 0.7;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}

@@ -84,7 +84,7 @@ import { PinNavStrip } from "@/components/PinNavStrip";
 import { PinnedMessagesPanel } from "@/components/PinnedMessagesPanel";
 import { useToast } from "@/stores/toastStore";
 import { useCompactions } from "@/hooks/useCompactions";
-import { useHydrateChatPresets, useChatPresetStore } from "@/hooks/useChatPreset";
+import { useChatPreset, useHydrateChatPresets, useChatPresetStore } from "@/hooks/useChatPreset";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useFocusMode } from "@/hooks/useFocusMode";
 import { InterruptedRow } from "@/components/InterruptedRow";
@@ -287,6 +287,14 @@ export default function Chat() {
     // Known preset → its label. Unknown id → undefined (no chip).
     return resolved !== null ? resolved.label : undefined;
   })();
+  // C3 — was the chat's CURRENT preset applied by model adoption rather
+  // than chosen by the user?
+  const currentPersonaAdopted: boolean = useChatPresetStore((s) =>
+    chatId !== null && s.sources[chatId] === "model",
+  );
+  // adoptModelPreset applies a `mode_adopt` SSE verdict — see the effect
+  // below, right after the OOB followups effect it mirrors.
+  const { adoptModelPreset } = useChatPreset(chatId);
 
   const { state: sseState, start: startStream, stop: stopStream, reset: resetStream } = useSSE();
 
@@ -532,6 +540,22 @@ export default function Chat() {
       setFollowupSuggestions(chips);
     }
   }, [sseState.followups]);
+
+  // C3 — model-decided role adoption (next turn). Arrives via the
+  // `mode_adopt` SSE frame AFTER chat.end (see streaming_service
+  // _infer_mode_oob / _format_mode_adopt_frame), gated server-side by
+  // lm_chat_mode_adoption_enabled (off by default). `presetId` is `null`
+  // when the OOB inference found no clear match this turn — the common
+  // case, since the classifier is deliberately biased toward "no change"
+  // to avoid churning the persona every turn — or the flag is off;
+  // either way there's nothing to apply. `adoptModelPreset` is itself a
+  // no-op whenever the user has explicitly picked the chat's current
+  // preset (see useChatPresetStore.adoptModel) — a manual rail-picker
+  // choice always wins over an inferred one.
+  useEffect(() => {
+    const presetId = sseState.modeAdopt?.presetId;
+    if (presetId) adoptModelPreset(presetId);
+  }, [sseState.modeAdopt, adoptModelPreset]);
 
   useSSEWarningToasts(sseState.warnings, push);
 
@@ -1399,6 +1423,7 @@ export default function Chat() {
                 startSubSession(presetId);
               }}
               currentPersonaLabel={currentPersonaLabel}
+              currentPersonaAdopted={currentPersonaAdopted}
               recentlyStreamedIdRef={recentlyStreamedIdRef}
               activePresetLabel={activePresetLabel}
               pendingUser={pendingUser}

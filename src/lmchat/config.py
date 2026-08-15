@@ -51,6 +51,25 @@ class Settings(BaseSettings):
     # the OOB decoupling because it poisoned reasoning. This flag only gates the
     # post-answer chip call.
     lm_chat_followups_enabled: bool = True
+    # Model-decided persona adoption ("C3"). After a completed MAIN-chat
+    # assistant turn, a separate OUT-OF-BAND call (_infer_mode_oob,
+    # streaming_service.py — mirrors _generate_followups_oob exactly)
+    # asks the chat's own model which of the six role presets (if any)
+    # best fits the NEXT turn, using the just-finished exchange as
+    # evidence. The verdict is emitted as a synthetic `mode_adopt` SSE
+    # frame AFTER chat.end and applied client-side via useChatPreset's
+    # adoptModelPreset — it is NEVER a directive riding the main answer's
+    # system prompt. That distinction is load-bearing: a prior incident
+    # measured an injected followups directive on the MAIN prompt
+    # inflating local-model reasoning ~30x (193->5867 chars, ~1470 wasted
+    # tokens/turn), which is exactly why this feature is a separate call.
+    # Off by default — unlike follow-up chips (additive, inert if wrong),
+    # an adopted mode changes the persona + temperature of the user's
+    # NEXT message, so it stays opt-in until an admin turns it on (same
+    # public-launch-safe posture as
+    # lm_chat_default_integrations_enabled_by_default: never auto-armed
+    # from first boot). Override via LM_CHAT_MODE_ADOPTION_ENABLED.
+    lm_chat_mode_adoption_enabled: bool = False
     lm_chat_trusted_proxy: str = ""
 
     lm_chat_login_rate_limit_per_min: int = Field(default=10, ge=1)

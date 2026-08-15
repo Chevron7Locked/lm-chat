@@ -7,15 +7,17 @@ role/persona system prompts otherwise live SOLELY on the frontend, in
 slash commands, and the sub-agent sub-session flow all read from that FE
 module, and the backend only ever persists the preset *key*
 (``ChatSettings.active_preset``). This module exists to give the BACKEND a
-copy of the persona bodies, keyed by the same ids, so a future "main chat
-model adopts a role" feature can build the system prompt server-side
-without a round trip through the client.
+copy of the persona bodies, keyed by the same ids, so the "main chat model
+adopts a role" feature (C3 — see :func:`lmchat.services.streaming_service.
+_infer_mode_oob`) can build the system prompt server-side without a round
+trip through the client.
 
-**Catalog only.** This module is intentionally NOT wired into prompt
-assembly (:mod:`lmchat.services.prompt_assembly`), any route, or
-:mod:`lmchat.services.streaming_service`. Nothing here changes current
-behavior — it is dead code from the running app's point of view until a
-future change reads from it.
+**Consumer.** :func:`lmchat.services.streaming_service._infer_mode_oob`
+reads ``short_description`` (below) to build the out-of-band mode
+classifier's prompt, and ``list_preset_ids``/``get_preset_definition`` to
+validate the model's reply — never trusting free text. That is this
+catalog's only wiring; it does not otherwise participate in prompt
+assembly (:mod:`lmchat.services.prompt_assembly`) or any route.
 
 **Keeping this in sync with the frontend.** ``system_prompt`` text is
 copied VERBATIM from ``web/src/lib/presets.ts``. There is no shared
@@ -65,6 +67,14 @@ class PresetDefinition:
     temperature: float
     """Auto-temperature applied when this preset is active, mirrored
     verbatim from the frontend's ``Preset.temperature``."""
+
+    short_description: str
+    """One-line, non-verbatim summary used ONLY by the C3 mode-adoption
+    classifier prompt (:func:`lmchat.services.streaming_service.
+    _infer_mode_oob`) to describe each persona cheaply — the full
+    ``system_prompt`` bodies run 1-3k chars each and would bloat that
+    OOB call's prompt six-fold if used instead. Has no FE counterpart;
+    written fresh for this catalog, not mirrored from anywhere."""
 
 
 _GENERAL_SYSTEM_PROMPT = """## IDENTITY
@@ -354,36 +364,42 @@ _CATALOG: dict[str, PresetDefinition] = {
         label="General",
         system_prompt=_GENERAL_SYSTEM_PROMPT,
         temperature=0.7,
+        short_description="General-purpose conversation with no specialized mode.",
     ),
     "coder": PresetDefinition(
         id="coder",
         label="Coder",
         system_prompt=_CODER_SYSTEM_PROMPT,
         temperature=0.1,
+        short_description="Software engineering — reading, writing, or reviewing code.",
     ),
     "creative": PresetDefinition(
         id="creative",
         label="Creative",
         system_prompt=_CREATIVE_SYSTEM_PROMPT,
         temperature=0.9,
+        short_description="Creative writing craft work — fiction, poetry, scripts, prose.",
     ),
     "research": PresetDefinition(
         id="research",
         label="Research",
         system_prompt=_RESEARCH_SYSTEM_PROMPT,
         temperature=0.4,
+        short_description="Fact-finding that needs sourced, cited, verified evidence.",
     ),
     "analyst": PresetDefinition(
         id="analyst",
         label="Analyst",
         system_prompt=_ANALYST_SYSTEM_PROMPT,
         temperature=0.3,
+        short_description="Analytical reasoning over material the user already provided.",
     ),
     "architect": PresetDefinition(
         id="architect",
         label="Architect",
         system_prompt=_ARCHITECT_SYSTEM_PROMPT,
         temperature=0.2,
+        short_description="Systems design and architecture tradeoff decisions.",
     ),
 }
 
@@ -398,6 +414,46 @@ def get_preset_definition(preset_id: str) -> PresetDefinition | None:
     prompt at all."
     """
     return _CATALOG.get(preset_id)
+
+
+# Mirrors the frontend's ``DEFAULT_PRESET_ID`` (``web/src/lib/presets.ts``) —
+# the preset id that's the implicit default when no override has been set.
+# Kept as its own named constant (not a bare "general" string scattered
+# across call sites) so anything that needs to single out the default
+# persona — e.g. :func:`list_adoptable_preset_ids` — reads its intent from
+# the name, not a string literal, the same discipline ``presets.ts`` already
+# applies on the frontend.
+DEFAULT_PRESET_ID = "general"
+
+
+def list_adoptable_preset_ids() -> list[str]:
+    """Return catalog preset ids a classifier may actively ADOPT — never the default.
+
+    ``DEFAULT_PRESET_ID`` ("general") is deliberately excluded, mirroring
+    the same exclusion ``capability_legend.MODES`` already applies for an
+    identical reason ("'general' is omitted: it's the silent default, not
+    a mode to reach for"). For an "adopt a role" classifier specifically,
+    offering the default as a pickable option is worse than merely
+    redundant: live probing (2026-08-14) found a local model choosing
+    ``general`` deterministically (8/8) for a clear /research-shaped
+    exchange, most likely because the catalog's own "general" entry reads
+    as "general-purpose CONVERSATION" — semantically adjacent to the
+    classifier's own "reply none for general conversation" instruction,
+    creating a token the model reaches for even when it isn't the right
+    answer. Structurally removing it from the offered set closes the
+    whole failure class regardless of the exact wording that triggers it;
+    only :func:`~lmchat.services.streaming_service._infer_mode_oob`
+    consumes this (C3 mode adoption) as of this writing.
+
+    Derived from :func:`list_preset_ids` on every call — never a
+    hand-maintained second list, so a future 7th preset (or a change to
+    which id is the default) can't silently drift out of sync here.
+
+    Returns:
+        All catalog preset ids except ``DEFAULT_PRESET_ID``, in
+        catalog-definition order.
+    """
+    return [pid for pid in list_preset_ids() if pid != DEFAULT_PRESET_ID]
 
 
 def list_preset_ids() -> list[str]:

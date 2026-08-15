@@ -1869,6 +1869,10 @@ async def test_lmstudio_openai_compat_resolves_model_to_wire_id(
     with patch("lmchat.config.get_settings") as mock_settings:
         _cfg = MagicMock()
         _cfg.lm_chat_followups_enabled = False
+        # C3 mode adoption (streaming_service._infer_mode_oob) independently
+        # calls resolve_to_loaded_or_fallback too, same as followups above —
+        # disable it so the assertion below counts only OUR resolution call.
+        _cfg.lm_chat_mode_adoption_enabled = False
         mock_settings.return_value = _cfg
 
         frames = await _drain(
@@ -1984,6 +1988,10 @@ async def test_lmstudio_store_integration_reroute_resolves_model_to_wire_id(
     ):
         _cfg = MagicMock()
         _cfg.lm_chat_followups_enabled = False
+        # C3 mode adoption (streaming_service._infer_mode_oob) independently
+        # calls resolve_to_loaded_or_fallback too, same as followups above —
+        # disable it so the assertion below counts only OUR resolution call.
+        _cfg.lm_chat_mode_adoption_enabled = False
         mock_settings.return_value = _cfg
 
         frames = await _drain(
@@ -2049,6 +2057,10 @@ async def test_replay_cloud_provider_ignores_models_service(engine: AsyncEngine)
     with patch("lmchat.config.get_settings") as mock_settings:
         _cfg = MagicMock()
         _cfg.lm_chat_followups_enabled = False
+        # C3 mode adoption (streaming_service._infer_mode_oob) independently
+        # calls resolve_to_loaded_or_fallback too, same as followups above —
+        # disable it so the assertion below counts only OUR resolution call.
+        _cfg.lm_chat_mode_adoption_enabled = False
         mock_settings.return_value = _cfg
 
         frames = await _drain(

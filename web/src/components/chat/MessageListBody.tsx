@@ -41,6 +41,8 @@ interface MessageListBodyProps {
   handleDeleteMessage: (messageId: number) => void;
   onLaunchMode: (presetId: string) => void;
   currentPersonaLabel: string | undefined;
+  /** C3 — true when currentPersonaLabel was applied by model adoption, not the user. */
+  currentPersonaAdopted: boolean;
   recentlyStreamedIdRef: RefObject<number | null>;
   activePresetLabel: string | null;
   pendingUser: { text: string; baseline: number } | null;
@@ -80,6 +82,7 @@ export function MessageListBody({
   handleDeleteMessage,
   onLaunchMode,
   currentPersonaLabel,
+  currentPersonaAdopted,
   recentlyStreamedIdRef,
   activePresetLabel,
   pendingUser,
@@ -149,6 +152,7 @@ export function MessageListBody({
               onDeleteMessage={handleDeleteMessage}
               onLaunchMode={onLaunchMode}
               personaLabel={item.msg.role === "assistant" ? currentPersonaLabel : undefined}
+              personaAdopted={item.msg.role === "assistant" ? currentPersonaAdopted : undefined}
               skipEntranceAnimation={
                 typeof item.msg.id === "number" &&
                 item.msg.id === recentlyStreamedIdRef.current
@@ -177,6 +181,7 @@ export function MessageListBody({
           onDeleteMessage={handleDeleteMessage}
           onLaunchMode={onLaunchMode}
           personaLabel={msg.role === "assistant" ? currentPersonaLabel : undefined}
+          personaAdopted={msg.role === "assistant" ? currentPersonaAdopted : undefined}
         />
       ))}
       {/* The pre-token "thinking" state now lives inside

@@ -31,3 +31,15 @@ def test_mcp_tool_call_timeout_defaults_local_first() -> None:
         settings.lm_chat_mcp_tool_call_timeout_sec
         == settings.lm_chat_stream_idle_timeout_sec
     )
+
+
+def test_mode_adoption_defaults_off() -> None:
+    """C3 (model-decided role adoption) is opt-in, unlike follow-up chips.
+
+    Adopting a mode changes the persona + temperature of the user's NEXT
+    message — a bigger behavioral change than an additive chip row — so it
+    stays off until an admin turns it on, same posture as
+    ``lm_chat_default_integrations_enabled_by_default``.
+    """
+    settings = Settings(lm_chat_secret=_SECRET)  # type: ignore[call-arg]
+    assert settings.lm_chat_mode_adoption_enabled is False

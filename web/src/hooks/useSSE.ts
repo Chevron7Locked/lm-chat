@@ -138,6 +138,17 @@ export interface StreamState {
    * that turn.
    */
   memorySaved: { count: number; msgId: number } | undefined;
+  /**
+   * C3 — out-of-band model-decided role adoption from the BE `mode_adopt`
+   * SSE event. Arrives after `chat.end` (and after `followups`, when both
+   * fire — `mode_adopt` is yielded before the `memory.saved` wait).
+   * `presetId` is `null` when the classifier found no confident match this
+   * turn or the feature is disabled server-side — Chat.tsx treats `null`
+   * as a no-op. Reset to `undefined` on every start()/reset(); consumed by
+   * an effect in Chat.tsx that applies it via `useChatPreset`'s
+   * `adoptModelPreset`.
+   */
+  modeAdopt: { presetId: string | null; msgId: number } | undefined;
 }
 
 export interface ChatStreamPayload {
@@ -256,6 +267,15 @@ export const CANONICAL_EVENT_TYPES = [
   // resolves within the BE's bounded wait. Omitted entirely when nothing
   // new was stored or the wait timed out.
   "memory.saved",
+  // C3 — model-decided role adoption. Emitted AFTER chat.end (and after
+  // `followups`, when both fire — before the `memory.saved` wait) once
+  // the separate out-of-band mode-classifier call (_infer_mode_oob)
+  // completes.
+  // `preset_id` is `null` when no persona clearly fit the next turn (the
+  // common case — the classifier is deliberately biased toward no
+  // change) or the feature is disabled server-side
+  // (lm_chat_mode_adoption_enabled). Never blocks the main answer.
+  "mode_adopt",
 ] as const;
 
 /** Known SSE event types emitted by streaming_service.py. */
@@ -309,6 +329,8 @@ interface RawEvent {
   followups?: string[] | undefined;
   /** Quiet auto-memory-saved count — emitted after chat.end completes. */
   count?: number | undefined;
+  /** C3 mode-adoption verdict — emitted after chat.end completes. */
+  preset_id?: string | null | undefined;
 }
 
 /**
@@ -661,6 +683,23 @@ function handleEvent(
       break;
     }
 
+    // C3 mode-adoption frame — arrives after chat.end. Store the verdict
+    // (possibly `preset_id: null`) so Chat.tsx's effect can apply it via
+    // useChatPreset. Unlike memory.saved, this is stored even when
+    // preset_id is null — Chat.tsx's effect is what decides null is a
+    // no-op, mirroring how the followups case stores an empty array rather
+    // than omitting state on the empty case.
+    case "mode_adopt": {
+      const msgId = raw.msg_id;
+      if (msgId !== undefined) {
+        setState((s) => ({
+          ...s,
+          modeAdopt: { presetId: raw.preset_id ?? null, msgId },
+        }));
+      }
+      break;
+    }
+
     case "message.end":
     case "reasoning.start":
     case "reasoning.end":
@@ -701,6 +740,7 @@ const INITIAL_STATE: StreamState = {
   warnings: [],
   followups: [],
   memorySaved: undefined,
+  modeAdopt: undefined,
 };
 
 export function useSSE(): UseSSEReturn {
@@ -819,6 +859,7 @@ export function useSSE(): UseSSEReturn {
         warnings: [],
         followups: [],
         memorySaved: undefined,
+        modeAdopt: undefined,
       });
 
       const ch = channelRef.current;
@@ -860,20 +901,22 @@ export function useSSE(): UseSSEReturn {
         }
 
         // `error` is terminal. `chat.end` marks the ANSWER complete but is
-        // NOT the end of the stream: up to two optional out-of-band frames
-        // follow it — `followups` (chips), then `memory.saved` (the quiet
-        // auto-memory indicator, gated on the BE's own bounded wait on the
-        // detached distillation task) — neither delays the visible answer
-        // (see streaming_service `_generate_followups_oob` /
+        // NOT the end of the stream: up to three optional out-of-band
+        // frames follow it, always yielded in this order — `followups`
+        // (chips), `mode_adopt` (C3 role adoption), then `memory.saved`
+        // (the quiet auto-memory indicator, gated on the BE's own bounded
+        // wait on the detached distillation task) — none of them delay
+        // the visible answer (see streaming_service
+        // `_generate_followups_oob` / `_infer_mode_oob` /
         // `_MEMORY_SAVED_FRAME_WAIT_SEC`). Keep reading past `chat.end`
         // until the LAST possible OOB frame arrives, or the server closes
-        // the stream (readSseStream's `done`, e.g. both OOB frames
-        // skipped/disabled this turn). `memory.saved` is always the later
-        // of the two when both fire, so it — not `followups` — is the
-        // stop trigger; stopping on `followups` here would cancel the
-        // reader (and the underlying connection) before the BE ever gets
-        // to yield `memory.saved`, silently losing the indicator whenever
-        // followups are enabled. A new message / unmount aborts any
+        // the stream (readSseStream's `done`, e.g. all OOB frames
+        // skipped/disabled this turn). `memory.saved` is always yielded
+        // last of the three when it fires, so it — not `followups` or
+        // `mode_adopt` — is the stop trigger; stopping on an earlier OOB
+        // frame here would cancel the reader (and the underlying
+        // connection) before the BE ever gets to yield the later ones,
+        // silently losing them. A new message / unmount aborts any
         // lingering read via `abortRef`, so this never holds a connection
         // past its use.
         const { exhausted } = await readSseStream(response.body, (frame) => {
@@ -969,6 +1012,7 @@ export function useSSE(): UseSSEReturn {
       warnings: [],
       followups: [],
       memorySaved: undefined,
+      modeAdopt: undefined,
     }));
   }, []);
 

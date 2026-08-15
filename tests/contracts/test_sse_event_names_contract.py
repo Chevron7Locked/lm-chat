@@ -8,7 +8,7 @@ this file asserts the BE side of the contract:
     {CanonicalEvent.type Literal members}
   ∪ {event names of the synthetic frames from _format_error_frame /
      _format_warning_frame / _format_followups_frame /
-     _format_memory_saved_frame}
+     _format_memory_saved_frame / _format_mode_adopt_frame}
   == set(sse-event-names.json)
 
 The FE side is asserted by vitest
@@ -28,6 +28,7 @@ from lmchat.services.streaming_service import (
     _format_error_frame,
     _format_followups_frame,
     _format_memory_saved_frame,
+    _format_mode_adopt_frame,
     _format_warning_frame,
 )
 
@@ -66,7 +67,7 @@ def _frame_event_name(frame: bytes) -> str:
 
 
 def _synthetic_frame_names() -> set[str]:
-    """Event names of the four synthetic frames, from the real formatters."""
+    """Event names of the five synthetic frames, from the real formatters."""
     return {
         _frame_event_name(
             _format_error_frame(code="contract_probe", detail="x", msg_id=1)
@@ -79,6 +80,9 @@ def _synthetic_frame_names() -> set[str]:
         ),
         _frame_event_name(
             _format_memory_saved_frame(count=1, msg_id=1)
+        ),
+        _frame_event_name(
+            _format_mode_adopt_frame(preset_id=None, msg_id=1)
         ),
     }
 
@@ -116,4 +120,5 @@ def test_synthetic_frames_are_error_warning_followups_memory_saved() -> None:
         "warning",
         "followups",
         "memory.saved",
+        "mode_adopt",
     }

@@ -22,8 +22,10 @@ import re
 from pathlib import Path
 
 from lmchat.services.preset_catalog import (
+    DEFAULT_PRESET_ID,
     PresetDefinition,
     get_preset_definition,
+    list_adoptable_preset_ids,
     list_preset_ids,
 )
 
@@ -117,3 +119,38 @@ def test_all_catalog_entries_are_well_formed() -> None:
         assert preset.system_prompt
         assert isinstance(preset.temperature, float)
         assert 0.0 <= preset.temperature <= 1.0
+        assert preset.short_description
+        # The classifier prompt (_infer_mode_oob) needs this to stay a
+        # cheap one-liner, not a second copy of the full system_prompt.
+        assert len(preset.short_description) < 120
+
+
+def test_default_preset_id_is_general() -> None:
+    """Mirrors web/src/lib/presets.ts::DEFAULT_PRESET_ID."""
+    assert DEFAULT_PRESET_ID == "general"
+
+
+def test_list_adoptable_preset_ids_excludes_the_default() -> None:
+    """RED-ON-REVERT for the operator-reported live defect (2026-08-14): a
+    classifier offering the default persona as an adoptable option
+    deterministically mis-picked it (8/8) for a clear /research-shaped
+    exchange. The adoptable set must never include DEFAULT_PRESET_ID."""
+    adoptable = list_adoptable_preset_ids()
+    assert DEFAULT_PRESET_ID not in adoptable
+    assert "general" not in adoptable
+
+
+def test_list_adoptable_preset_ids_is_all_presets_minus_the_default() -> None:
+    assert set(list_adoptable_preset_ids()) == set(list_preset_ids()) - {DEFAULT_PRESET_ID}
+    assert len(list_adoptable_preset_ids()) == len(list_preset_ids()) - 1
+
+
+def test_list_adoptable_preset_ids_preserves_catalog_order() -> None:
+    adoptable = list_adoptable_preset_ids()
+    full = [pid for pid in list_preset_ids() if pid != DEFAULT_PRESET_ID]
+    assert adoptable == full
+
+
+def test_list_adoptable_preset_ids_no_duplicates() -> None:
+    ids = list_adoptable_preset_ids()
+    assert len(ids) == len(set(ids))

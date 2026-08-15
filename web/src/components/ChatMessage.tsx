@@ -160,6 +160,15 @@ interface ChatMessageProps {
    */
   personaLabel?: string | undefined;
   /**
+   * C3 — true when ``personaLabel`` was applied by out-of-band model
+   * adoption (see streaming_service._infer_mode_oob / the `mode_adopt`
+   * SSE frame) rather than chosen by the user via the settings rail.
+   * Adds a subtle \"auto\" marker to the chip so the distinction is visible
+   * without a second, near-duplicate indicator. Undefined/false renders
+   * identically to before this field existed.
+   */
+  personaAdopted?: boolean | undefined;
+  /**
    * When true, suppresses the entrance animation on this message row.
    * Used to prevent the just-completed streamed message from re-animating
    * when the persisted copy replaces the streaming bubble.
@@ -336,6 +345,7 @@ function ChatMessageInner({
   onForkFromHere,
   onDeleteMessage,
   personaLabel,
+  personaAdopted = false,
   skipEntranceAnimation = false,
   onLaunchMode,
 }: ChatMessageProps) {
@@ -476,11 +486,26 @@ function ChatMessageInner({
         personaLabel !== "" &&
         message.streaming !== true && (
           <div
-            className="lmchat-persona-label"
+            className={
+              personaAdopted
+                ? "lmchat-persona-label lmchat-persona-label--adopted"
+                : "lmchat-persona-label"
+            }
             data-testid="chat-message-persona-label"
-            aria-label={`Response from ${personaLabel} persona`}
+            data-adopted={personaAdopted ? "true" : undefined}
+            aria-label={
+              personaAdopted
+                ? `Response from ${personaLabel} persona, adopted automatically`
+                : `Response from ${personaLabel} persona`
+            }
           >
             {personaLabel}
+            {personaAdopted && (
+              <span className="lmchat-persona-label__adopted-tag" aria-hidden="true">
+                {" "}
+                · auto
+              </span>
+            )}
           </div>
         )}
 
@@ -838,6 +863,7 @@ function areChatMessagePropsEqual(
   // stats: only the streaming message carries live stats; identity is enough.
   if (prev.message.stats !== next.message.stats) return false;
   if (prev.personaLabel !== next.personaLabel) return false;
+  if (prev.personaAdopted !== next.personaAdopted) return false;
   if (prev.skipEntranceAnimation !== next.skipEntranceAnimation) return false;
 
   // toolCalls: compare by length + last-item identity (fast path for the
