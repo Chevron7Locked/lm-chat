@@ -20,6 +20,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import type { ReactNode } from "react";
+import type { SubSessionState } from "@/hooks/useSubSession";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ─── Mock api module (usePresetModels + the P3/P4 fetch helpers all route
@@ -312,7 +313,7 @@ describe("useSubSession — P4 history + reopen + continue", () => {
       wrapper: makeWrapper(),
     });
 
-    let started: ReturnType<typeof result.current.startSubSession> = null;
+    let started: SubSessionState | null = null;
     act(() => {
       started = result.current.startSubSession("coder");
     });

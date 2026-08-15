@@ -17,7 +17,7 @@
  *   web/src/hooks/useChatModelOptions.ts — groups the dropdown options
  *   web/src/pages/Chat.tsx:2356/2458 — testId="chat-header-model-select"
  */
-import { test, expect, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "@playwright/test";
 import { bootstrapAuthedApp } from "./_bootstrap";
 
 // The full provider catalog has many models; the allowlist restricts to these two.
@@ -33,7 +33,7 @@ const ALL_OR_MODELS = [
   "google/gemini-2.0-flash-001",
 ];
 
-async function stubCommon(page: Parameters<Parameters<typeof test["beforeEach"]>[0]>[0]) {
+async function stubCommon(page: Page) {
   // Authed as an admin — bootstrap covers array/object defaults; this
   // spec is already signed in on cold load.
   await bootstrapAuthedApp(page, { isAdmin: true, username: "admin" });
@@ -67,7 +67,7 @@ function makeModel(id: string, provider: string, displayName: string) {
 
 /** Stub a minimal chat so the chat-detail page renders with the top bar. */
 async function stubChat(
-  page: Parameters<Parameters<typeof test["beforeEach"]>[0]>[0],
+  page: Page,
   chatId: number,
 ) {
   await page.route("**/api/chats**", async (route: Route) => {

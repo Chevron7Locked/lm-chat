@@ -11,7 +11,7 @@
  *
  * Route-stubbed; auth bypassed via probe/me stubs (no login page).
  */
-import { test, expect, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "@playwright/test";
 import { bootstrapAuthedApp } from "./_bootstrap";
 
 const AUTH_ME = {
@@ -38,7 +38,7 @@ function buildSubSse(rid: string): string {
 }
 
 async function stubCommon(
-  page: Parameters<Parameters<typeof test["beforeEach"]>[0]>[0],
+  page: Page,
   chatId: number,
 ) {
   // Authed chat-page bootstrap defaults (probe hydration + correctly-typed

@@ -20,7 +20,7 @@
  *   web/src/hooks/usePresetModels.ts  — PUT /api/settings/preset-models
  *   web/src/lib/presets.ts            — PRESET_LIST ids ("research", "coder"…)
  */
-import { test, expect, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "@playwright/test";
 import { bootstrapAuthedApp } from "./_bootstrap";
 
 const PRESET_MODEL_ID = "openai/gpt-4o-mini";
@@ -37,7 +37,7 @@ function buildSse(rid: string): string {
 }
 
 async function stubCommon(
-  page: Parameters<Parameters<typeof test["beforeEach"]>[0]>[0],
+  page: Page,
   chatId: number,
   presetModelsMap: Record<string, { provider: string; model_id: string }>,
 ) {

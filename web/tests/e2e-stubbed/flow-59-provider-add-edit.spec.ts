@@ -15,7 +15,7 @@
  *   web/src/components/ProvidersSection.tsx
  *   web/src/hooks/useProviders.ts  — PUT /api/admin/providers/{provider}
  */
-import { test, expect, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "@playwright/test";
 import { bootstrapAuthedApp } from "./_bootstrap";
 
 const PROBE_MODELS = [
@@ -24,7 +24,7 @@ const PROBE_MODELS = [
   "meta-llama/llama-3.3-70b-instruct",
 ];
 
-async function stubCommon(page: Parameters<Parameters<typeof test["beforeEach"]>[0]>[0]) {
+async function stubCommon(page: Page) {
   // Authed as an admin — bootstrap covers array/object defaults; this
   // spec is already signed in on cold load.
   await bootstrapAuthedApp(page, { isAdmin: true, username: "admin" });
