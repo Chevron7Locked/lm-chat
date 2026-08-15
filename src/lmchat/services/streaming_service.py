@@ -981,6 +981,23 @@ async def _salvage_aborted_row(
     and durable sub-sessions (``sub_session_messages``), mirroring
     :func:`_release_stuck_draft_impl` / :func:`_finalize_message_impl`.
 
+    Deliberately does NOT run ``resolve_terminal_content``'s empty-answer
+    fold (substance_fold.py) the way ``_release_stuck_draft_impl`` does:
+    content/reasoning/tool_calls are written as three independent columns,
+    so a reasoning-only turn (model parked everything in reasoning_content,
+    never emitted answer text) that then disconnects keeps `content` empty
+    here. Checked, not assumed (2026-08-14): this does NOT produce a blank
+    bubble. ChatMessage.tsx's phantom-row guard only suppresses rendering
+    when BOTH content AND reasoning_content are empty; ProcessStream.tsx
+    renders a "Reasoning" toggle (collapsed, expandable) off `hasReasoning`
+    alone, independent of `hasAnswer` — so the user sees the reasoning
+    trace via that affordance instead of an empty message. Folding it into
+    `content` here would duplicate substance_fold's already-corrected
+    empty-only semantics in a second place instead of reusing them, for a
+    case the FE already renders correctly without it. If this ever needs to
+    change, reuse ``resolve_terminal_content``/``substance_fold`` rather
+    than writing a second folding rule.
+
     Safe against shrinking an already-persisted row: every value here comes
     from the SAME in-memory accumulator the coalesce flush itself draws
     from (mirrored into the caller's ``_state``/``_pstate`` dict on every
@@ -3733,6 +3750,13 @@ class StreamingService:
                 # only fires if the body misses within _STALL_GRACE_SEC.
                 "stall": None,
                 "stall_handled": False,
+                # Set by _watch_disconnect the instant it observes
+                # http.disconnect — BEFORE its own shielded safe_abort_draft
+                # await, so a lost race (teardown reaches the finally first)
+                # can't lose the fact that a client disconnect, not a terminal
+                # error, is why this turn is ending. The outer finally reads
+                # this to decide FINAL vs ABORTED_BY_CLIENT — see its comment.
+                "disconnected": False,
             }
 
             # Lives outside _state (not dict-friendly). The persist generator
@@ -4659,11 +4683,19 @@ class StreamingService:
 
                     if _msg is not None and _msg.get("type") == "http.disconnect":
                         log.info("stream.disconnected", msg_id=msg_id)
+                        # Record the CAUSE before the await below, not after —
+                        # a synchronous dict write can't be lost to a lost
+                        # race the way an awaited UPDATE can. The outer
+                        # finally reads this to salvage toward
+                        # ABORTED_BY_CLIENT instead of FINAL regardless of
+                        # which of the two writers actually wins the
+                        # draft-row race (see that finally's comment).
+                        _state["disconnected"] = True
                         # shield(): the TaskGroup cancels this watcher the
                         # instant the persist task tears down on disconnect,
                         # which could cancel this UPDATE mid-flight. Belt-and-
                         # suspenders — the real guarantee is the shielded
-                        # _release_stuck_draft in stream_chat's finally.
+                        # abort-or-release in stream_chat's finally.
                         aborted = await asyncio.shield(
                             safe_abort_draft(engine=self._engine, message_id=msg_id)
                         )
@@ -5405,46 +5437,82 @@ class StreamingService:
             _acc_reasoning = _state.get("acc_reasoning")
             _acc_tools = _state.get("acc_tool_calls")
             _acc_rounds = _state.get("acc_tool_rounds", 0)
-            try:
-                # Salvages the buffer the persist generator mirrored into
-                # _state: a no-op on a graceful terminal (row already FINAL,
-                # WHERE state='draft' matches 0 rows); persists the partial
-                # answer + folded reasoning on a non-graceful terminal.
-                await asyncio.shield(
-                    self._release_stuck_draft(
-                        msg_id=msg_id,
-                        chat_id=chat_id,
-                        reason="stream_lifecycle_teardown",
-                        salvage_content=(
-                            _acc_content if isinstance(_acc_content, str) else None
-                        ),
-                        salvage_reasoning=(
-                            _acc_reasoning if isinstance(_acc_reasoning, str) else None
-                        ),
-                        salvage_tool_calls=(
-                            _acc_tools if isinstance(_acc_tools, list) else None
-                        ),
-                        had_tool_calls=bool(_acc_tools) or bool(_acc_rounds),
-                        tool_rounds=_acc_rounds if isinstance(_acc_rounds, int) else 0,
+            # The CAUSE of this teardown decides the target state, not a race
+            # between two writers that both only check WHERE state='draft'.
+            # Before this fix, _release_stuck_draft (FINAL) and the
+            # watcher's own safe_abort_draft (ABORTED_BY_CLIENT) raced on
+            # every disconnect, so a turn the user walked away from could
+            # settle as either — indistinguishable from a genuinely
+            # completed turn when FINAL won (live-dogfood-confirmed,
+            # 2026-08-14 J11, same run: one scenario landed FINAL, the other
+            # ABORTED_BY_CLIENT, for the identical disconnect mechanism).
+            # `_state["disconnected"]` is set by the watcher BEFORE its own
+            # await (see _watch_disconnect), so it can't be lost to that
+            # race even when this finally reaches the row first.
+            _disconnected = bool(_state.get("disconnected"))
+            if _disconnected:
+                # Force ABORTED_BY_CLIENT regardless of which writer gets
+                # there first — a no-op if the watcher's own safe_abort_draft
+                # already won (WHERE state='draft' matches 0 rows either
+                # way). aborted_by_client was ALREADY a possible outcome of
+                # every disconnect (whenever the watcher won); this removes
+                # the coin flip on which of the two outcomes a given
+                # disconnect lands on, it introduces no new state to any
+                # downstream reader.
+                try:
+                    await asyncio.shield(
+                        safe_abort_draft(engine=self._engine, message_id=msg_id)
                     )
-                )
-            except asyncio.CancelledError:
-                # The shielded release still ran to completion; only the
-                # outer await was cancelled. Swallow — no caller is left to
-                # propagate to in this terminal teardown.
-                pass
+                except asyncio.CancelledError:
+                    pass
+            else:
+                try:
+                    # Salvages the buffer the persist generator mirrored into
+                    # _state: a no-op on a graceful terminal (row already
+                    # FINAL, WHERE state='draft' matches 0 rows); persists
+                    # the partial answer + folded reasoning on a genuine
+                    # terminal error/stall/loop-cap — those keep today's
+                    # FINAL-with-salvage behavior unchanged. Disconnects
+                    # never reach this branch (see the `if` above).
+                    await asyncio.shield(
+                        self._release_stuck_draft(
+                            msg_id=msg_id,
+                            chat_id=chat_id,
+                            reason="stream_lifecycle_teardown",
+                            salvage_content=(
+                                _acc_content if isinstance(_acc_content, str) else None
+                            ),
+                            salvage_reasoning=(
+                                _acc_reasoning
+                                if isinstance(_acc_reasoning, str)
+                                else None
+                            ),
+                            salvage_tool_calls=(
+                                _acc_tools if isinstance(_acc_tools, list) else None
+                            ),
+                            had_tool_calls=bool(_acc_tools) or bool(_acc_rounds),
+                            tool_rounds=(
+                                _acc_rounds if isinstance(_acc_rounds, int) else 0
+                            ),
+                        )
+                    )
+                except asyncio.CancelledError:
+                    # The shielded release still ran to completion; only the
+                    # outer await was cancelled. Swallow — no caller is left
+                    # to propagate to in this terminal teardown.
+                    pass
 
-            # Disconnect salvage: if the row was moved to aborted_by_client
-            # (the disconnect watcher's safe_abort_draft), _release_stuck_draft
-            # above (WHERE draft) no-op'd, so persist the full accumulated
-            # content/reasoning/tool_calls onto the aborted row here —
-            # otherwise a reloaded disconnected chat loses reasoning +
-            # tool_calls, keeping only whatever the (state-guarded) coalesce
-            # flush persisted before the abort (strong seat, P2 review
-            # 2026-08-12 caught this for sub-sessions via
-            # _salvage_aborted_row; the main chat shared the same gap — see
-            # the disconnect dogfood, 2026-08-14). No-op on any non-aborted
-            # row (WHERE state='aborted_by_client').
+            # Disconnect salvage: backfills the full accumulated
+            # content/reasoning/tool_calls onto an ABORTED_BY_CLIENT row —
+            # whether it got there via the watcher's own safe_abort_draft or
+            # the explicit abort in the branch above. Otherwise a reloaded
+            # disconnected chat loses reasoning + tool_calls, keeping only
+            # whatever the (state-guarded) coalesce flush persisted before
+            # the abort (strong seat, P2 review 2026-08-12, caught this for
+            # sub-sessions via _salvage_aborted_row; the main chat shared the
+            # same gap — see the disconnect dogfood, 2026-08-14). No-op on
+            # any non-aborted row (WHERE state='aborted_by_client') — the
+            # `else` branch above never produces one.
             try:
                 await asyncio.shield(
                     _salvage_aborted_row(

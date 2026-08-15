@@ -547,6 +547,14 @@ async def test_streaming_disconnect_salvages_reasoning_and_tool_calls(
     """Disconnect after reasoning + a completed tool round: both survive on the
     aborted_by_client row, on top of whatever content the coalesce flush
     already wrote — not a fixed sleep race, gated on observable state.
+
+    This is also the WATCHER-WINS half of the two-branch state-race proof
+    (2026-08-14): `ready_to_disconnect` fires and _watch_disconnect's own
+    safe_abort_draft runs to completion well before the test's outer 3s
+    timeout ever forces the teardown to run, so the watcher's own abort is
+    what lands aborted_by_client here. See
+    test_streaming_disconnect_teardown_wins_still_lands_aborted below for the
+    other branch — the one that used to land 'final'.
     """
     ready_to_disconnect = asyncio.Event()
 
@@ -665,6 +673,204 @@ async def test_streaming_disconnect_salvages_reasoning_and_tool_calls(
             "result": "LM Studio is a desktop application.",
         }
     ], f"RED-ON-REVERT: tool_calls lost on disconnect — got {row[3]!r}"
+
+
+# ---------------------------------------------------------------------------
+# Test 2b3: the OTHER half of the two-branch state-race proof — the teardown
+#           wins the draft-row race instead of the watcher.
+#
+# RED-ON-REVERT (2026-08-14, correction of the earlier "let it race" call):
+# before this fix, `stream_chat`'s outer finally always called
+# `_release_stuck_draft` (WHERE state='draft' -> FINAL) on any non-graceful
+# terminal, disconnect included. Whichever of that call and the watcher's own
+# `safe_abort_draft` (WHERE state='draft' -> ABORTED_BY_CLIENT) reached the
+# row FIRST decided the resting state — live-dogfood-confirmed (2026-08-14
+# J11, one run): the SAME disconnect mechanism landed FINAL in one scenario
+# and ABORTED_BY_CLIENT in the other. A turn the user walked away from,
+# landing FINAL, is indistinguishable from one that genuinely completed.
+#
+# The fix: `_state["disconnected"]` is set by the watcher BEFORE its own
+# await (so a lost race can't lose the fact), and the finally now branches on
+# it — when set, it performs the SAME abort itself instead of calling
+# `_release_stuck_draft`, so the row lands ABORTED_BY_CLIENT regardless of
+# which of the two writers' UPDATE actually commits first.
+#
+# Forcing "teardown wins" deterministically: both call sites resolve
+# `safe_abort_draft` from the SAME module namespace
+# (`lmchat.services.streaming_service.safe_abort_draft`), so patching that
+# name intercepts both. The watcher's call is always the FIRST of the two
+# chronologically (it must have already fired to set `_state["disconnected"]`
+# before the finally can even see it), so a call-counter reliably identifies
+# it. The patched watcher call blocks on an `asyncio.Event`; the test only
+# forces the teardown to run (via `task.cancel()`) once
+# `watcher_call_started` confirms that block is actually in effect — an
+# observable-state gate, not a sleep. `await task` cannot return until the
+# finally's OWN shielded abort has completed (the same shield discipline the
+# rest of this file already relies on for exactly this reason), so by the
+# time the test queries the row, the teardown's abort has provably already
+# won — the watcher's call is still blocked and hasn't touched the DB.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_streaming_disconnect_teardown_wins_still_lands_aborted(
+    engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Force the teardown's OWN abort to win the draft-row race — the exact
+    branch that used to land FINAL before the fix. Must still land
+    aborted_by_client with reasoning + tool_calls intact.
+    """
+    from lmchat.services import streaming_service as streaming_service_module
+
+    watcher_call_started = asyncio.Event()
+    release_watcher_call = asyncio.Event()
+    call_count = {"n": 0}
+    real_safe_abort_draft = streaming_service_module.safe_abort_draft
+
+    async def _patched_safe_abort_draft(**kwargs: Any) -> bool:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # The watcher's own call — block until the test explicitly
+            # releases it, AFTER confirming the teardown's call (below,
+            # call #2) has already won the race.
+            watcher_call_started.set()
+            await release_watcher_call.wait()
+        return await real_safe_abort_draft(**kwargs)
+
+    monkeypatch.setattr(
+        streaming_service_module, "safe_abort_draft", _patched_safe_abort_draft
+    )
+
+    ready_to_disconnect = asyncio.Event()
+
+    async def _slow_stream(*args: object, **kwargs: object) -> AsyncIterator[CanonicalEvent]:
+        yield CanonicalEvent(type="chat.start")
+        yield CanonicalEvent(type="message.start")
+        yield CanonicalEvent(type="reasoning.start")
+        yield CanonicalEvent(
+            type="reasoning.delta", content="Because the request died mid-turn. "
+        )
+        yield CanonicalEvent(type="reasoning.end")
+        yield _tool_call_event("tool_call.start", id="tc-2", name="", arguments={})
+        yield _tool_call_event("tool_call.name", id="tc-2", name="search_web", arguments={})
+        yield _tool_call_event(
+            "tool_call.arguments",
+            id="tc-2",
+            name="search_web",
+            arguments={"query": "teardown race"},
+        )
+        yield _tool_call_event(
+            "tool_call.success",
+            id="tc-2",
+            name="search_web",
+            arguments={"query": "teardown race"},
+            result="found it.",
+        )
+        yield CanonicalEvent(type="message.delta", content="partial answer ")
+        await asyncio.sleep(0.3)  # see the sibling test above for why this is safe
+        yield CanonicalEvent(type="message.delta", content="before the cut")
+        ready_to_disconnect.set()
+        never = asyncio.Event()
+        await never.wait()
+        yield CanonicalEvent(type="message.delta", content="never reaches here")  # pragma: no cover
+
+    async def _receive() -> dict[str, str]:
+        await ready_to_disconnect.wait()
+        return {"type": "http.disconnect"}
+
+    lm_client = MagicMock()
+    lm_client.stream = _slow_stream
+
+    from lmchat.db.schema import chats
+
+    async with engine.begin() as conn:
+        await conn.execute(chats.insert().values(user_id=1, title="test"))
+
+    svc = await _make_service(engine, lm_client=lm_client)
+    user = _mock_user(1)
+    request = AsyncMock()
+    request.receive = _receive
+    payload = _make_request_payload()
+
+    async def _drive() -> None:
+        await _drain(
+            svc.stream_chat(chat_id=1, user=user, payload=payload, request=request)
+        )
+
+    task = asyncio.create_task(_drive())
+    # Deterministic gate: wait for the WATCHER's own safe_abort_draft call to
+    # actually be in flight (and now blocked) — not for a fixed duration.
+    await asyncio.wait_for(watcher_call_started.wait(), timeout=5.0)
+
+    # Force the teardown to run NOW, while the watcher's call is still
+    # blocked. The teardown's shielded abort (this fix) — and the
+    # unconditional content/reasoning/tool_calls salvage right after it — run
+    # as part of unwinding this cancellation; `await task` cannot return
+    # until they've completed (shield discipline, same as Test 2c below).
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # PROOF the teardown won: query the row NOW. The watcher's own call
+    # (call #1) is STILL blocked on release_watcher_call — it has not
+    # touched the DB at all yet.
+    async with engine.connect() as conn:
+        row = (
+            await conn.execute(
+                select(
+                    messages.c.state,
+                    messages.c.content,
+                    messages.c.reasoning_content,
+                    messages.c.tool_calls,
+                ).where(
+                    messages.c.chat_id == 1,
+                    messages.c.role == "assistant",
+                )
+            )
+        ).fetchone()
+
+    assert row is not None
+    # The regression signal FIRST — this is the assertion a red-on-revert run
+    # must fail on, not a harness meta-check.
+    assert row[0] == PersistState.ABORTED_BY_CLIENT.value, (
+        f"RED-ON-REVERT: teardown-wins branch landed state={row[0]!r}, not "
+        "aborted_by_client — before this fix that branch landed 'final', "
+        "indistinguishable from a turn that genuinely completed"
+    )
+    assert row[1] == "partial answer before the cut", (
+        f"content lost on the teardown-wins branch — got {row[1]!r}"
+    )
+    assert row[2] == "Because the request died mid-turn. ", (
+        f"RED-ON-REVERT: reasoning_content lost on the teardown-wins branch — "
+        f"got {row[2]!r}"
+    )
+    assert row[3] == [
+        {
+            "id": "tc-2",
+            "name": "search_web",
+            "arguments": json.dumps({"query": "teardown race"}),
+            "status": "success",
+            "result": "found it.",
+        }
+    ], f"RED-ON-REVERT: tool_calls lost on the teardown-wins branch — got {row[3]!r}"
+    # Confirmatory, AFTER the real assertions above: the teardown's own
+    # safe_abort_draft call actually happened (not just the watcher's) — i.e.
+    # this test exercised the branch it claims to, not a lucky watcher-wins
+    # pass. Ordered last on purpose: on revert, the state/content/reasoning/
+    # tool_calls assertions above are the ones that must fail; this one would
+    # ALSO fail on revert (the teardown no longer calls safe_abort_draft at
+    # all), but that's not the signal being tested for here.
+    assert call_count["n"] >= 2, (
+        "the teardown's own safe_abort_draft call never happened — this test "
+        "didn't exercise the branch it claims to (harness bug, not a fix bug)"
+    )
+
+    # Cleanup: release the watcher's still-blocked call so its detached
+    # shielded coroutine can finish (a harmless no-op — WHERE state='draft'
+    # matches 0 rows now) instead of leaking into a later test.
+    release_watcher_call.set()
+    await asyncio.sleep(0.1)
 
 
 # ---------------------------------------------------------------------------
