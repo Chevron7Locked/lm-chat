@@ -960,6 +960,11 @@ class ChatService:
             return existing_title
 
         # ASC by id gives conversation order; capped at _AUTO_TITLE_MAX_HISTORY_MESSAGES.
+        # Deliberately plain state=='final', not streaming_service.py's
+        # broader _remembered_turn_state() — naming a chat from a turn the
+        # user walked away from mid-answer is the same "not settled enough"
+        # problem compaction has (see ChatService.compact's comment), even
+        # though that same turn is legitimate live conversation memory.
         async with self._engine.connect() as conn:
             result = await conn.execute(
                 select(
@@ -2317,7 +2322,13 @@ class ChatService:
         # Active, committed messages oldest-first: already-archived rows are
         # never re-selected, and only state=FINAL is eligible (a draft/
         # pending/aborted row isn't settled content and would double-count
-        # once it finalizes).
+        # once it finalizes). Deliberately plain FINAL, not the broader
+        # "does the model remember this" predicate streaming_service.py's
+        # _remembered_turn_state() uses for live history — folding a
+        # disconnect-truncated answer into a chat's PERMANENT compacted
+        # summary is exactly the failure mode 951744c's determinism fix
+        # was meant to stop, even though that same content is legitimate
+        # turn-by-turn conversation memory.
         async with self._engine.connect() as conn:
             msg_rows = (
                 await conn.execute(

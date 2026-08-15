@@ -31,9 +31,10 @@ from typing import TYPE_CHECKING, Any, Final, NamedTuple
 _LOCAL_TZ = datetime.now().astimezone().tzinfo
 
 from pydantic import BaseModel
-from sqlalchemy import Table, func, insert, select
+from sqlalchemy import Table, and_, func, insert, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.sql.elements import ColumnElement
 
 from lmchat.db.retry import with_write_retry
 from lmchat.db.schema import chats, compactions, messages, sub_session_messages, sub_sessions
@@ -693,6 +694,51 @@ class _CoalesceTimer:
 # ---------------------------------------------------------------------------
 
 
+def _remembered_turn_state(table: Table = messages) -> ColumnElement[bool]:
+    """SQLAlchemy predicate: does this row belong in the model's OWN memory
+    of the conversation?
+
+    A gracefully ``FINAL`` row always qualifies. An ``aborted_by_client``
+    row qualifies too, but ONLY when it carries real ``content`` — the
+    user already sees every non-draft row in the transcript
+    (``message_service.py``'s FE-facing query filters only ``!= draft``),
+    so the model's own context should not silently disagree with what is
+    on screen: a turn the user watched happen and can see above the input
+    box is real conversational context, not noise, even when a disconnect
+    cut it short. ``content != ''`` excludes the one case where inclusion
+    would be worse than omission — a disconnect that landed before any
+    answer text existed leaves a blank assistant turn, and feeding that
+    into history reads as the model having said nothing on purpose.
+
+    Deliberately NOT used by auto-title (``chat_service.py``'s
+    ``_maybe_generate_title`` history query) or compaction
+    (``ChatService.compact``) — those ask "is this turn SETTLED enough to
+    summarize/name the chat from," a different question than "did the
+    model produce this." 951744c's own reasoning for why compaction stays
+    ``FINAL``-only still holds: an aborted row "isn't settled content" for
+    a *permanent* summary, even though it is legitimate turn-by-turn
+    memory. Conflating the two was the actual bug — a truncated answer
+    silently becoming part of a chat's permanent compacted history when
+    a race happened to land it FINAL; keeping the two checks apart (this
+    predicate for live conversation memory, plain ``state == FINAL`` for
+    anything that gets treated as settled) is what avoids reintroducing
+    that failure mode while still fixing the model-forgets-it gap.
+
+    Args:
+        table: ``messages`` (default) or ``sub_session_messages`` — same
+               ``state``/``content`` column shape, so this is a genuine
+               table swap like the other state-machine helpers in this
+               module.
+    """
+    return or_(
+        table.c.state == PersistState.FINAL.value,
+        and_(
+            table.c.state == PersistState.ABORTED_BY_CLIENT.value,
+            table.c.content != "",
+        ),
+    )
+
+
 async def _finalize_message_impl(
     engine: AsyncEngine,
     *,
@@ -885,6 +931,30 @@ async def _assert_no_sub_session_stream_in_progress(
     ``StreamingService._assert_no_in_progress_stream`` must hold the main
     chat lock. Scoped to sub-sessions only: independent of, and never
     blocked by, an in-progress MAIN-chat stream on the same chat_id.
+
+    Known tradeoff (2026-08-15, backend review ahead of v1.0.3): the
+    per-chat lock above is released once the in-progress check + draft
+    insertion complete — it is NOT held for the duration of the stream,
+    and NOT re-acquired for finalize. ``_finalize_message_impl``'s
+    draft -> pending_finalization -> final transition is two SEPARATE
+    awaited DB round trips; a second request for the SAME chat_id can
+    land its own check + draft-creation in the (small, DB-retry-widenable)
+    gap between them, since by then the row already reads
+    ``pending_finalization``, not ``draft``. That is this function's
+    intended door for the ``/sub-session/finalize`` follow-up described
+    above — but the check has no way to tell that caller apart from a
+    genuinely new stream, so a second real stream can (rarely) start
+    on the same chat before the first one's row has actually settled to
+    ``final``. Bounded, not corrupting: ``_active_streams.py`` is already
+    refcounted for overlapping streams per chat_id, and the two turns
+    write to different row IDs — so the cost is possible contention on
+    the same local model, not data loss or a wrong write. Re-narrowing
+    back to ``draft | pending_finalization`` reintroduces the 409-against-
+    its-own-turn hang this function exists to fix. Closing the gap for
+    real needs the caller to say WHICH kind of follow-up it is (e.g. an
+    explicit "finalize this specific sub_session_id" intent that bypasses
+    the general in-progress check entirely, rather than this function
+    trying to infer intent from timing) — not a narrower/wider state list.
     """
     async with engine.connect() as conn:
         result = await conn.execute(
@@ -2536,7 +2606,13 @@ class StreamingService:
                             )
                             .where(
                                 messages.c.chat_id == chat_id,
-                                messages.c.state == PersistState.FINAL.value,
+                                # FINAL, or a disconnect-aborted turn with
+                                # real content — see _remembered_turn_state:
+                                # the model's own memory of the conversation
+                                # should match what the user already sees in
+                                # the transcript (message_service.py filters
+                                # only != draft there).
+                                _remembered_turn_state(),
                                 # Exclude the current user message (msg_id is
                                 # the draft just created; user row is msg_id-1).
                                 messages.c.id < msg_id,
@@ -3088,6 +3164,15 @@ class StreamingService:
             _orphaned_injected: list[str] = []
             try:
                 async with self._engine.connect() as _conn:
+                    # Deliberately still plain `state == FINAL`, not
+                    # _remembered_turn_state(): response_id is only ever
+                    # written by _finalize_message_impl's step 1, which
+                    # requires the row to still be `draft` at that moment —
+                    # the same row can therefore never carry BOTH a
+                    # response_id AND end up `aborted_by_client` (that
+                    # transition also requires `draft`, so step 1 landing
+                    # first forecloses it). Broadening this predicate would
+                    # be a no-op; keeping it plain says so.
                     _last_chained = await _conn.execute(
                         select(messages.c.id)
                         .where(
@@ -3111,7 +3196,17 @@ class StreamingService:
                             messages.c.role == "assistant",
                             messages.c.response_id.is_(None),
                             messages.c.id > _floor_id,
-                            messages.c.state == PersistState.FINAL.value,
+                            # FINAL (an injected message, or a gracefully-
+                            # finalized turn with no response_id — e.g. a
+                            # replay-mode provider), or a disconnect-aborted
+                            # turn with real content. Chain mode has no
+                            # OTHER mechanism to surface a salvaged-but-
+                            # aborted turn on a follow-up turn (the replay
+                            # history query above is skipped whenever
+                            # previous_response_id is set) — this relocation
+                            # IS the chain-mode equivalent of that fix. See
+                            # _remembered_turn_state.
+                            _remembered_turn_state(),
                             # An archived injected message must never be
                             # relocated back into input[0] — would leak into
                             # the model's context and defeat compaction.
@@ -5492,6 +5587,30 @@ class StreamingService:
                 for exc in eg.exceptions:
                     if isinstance(exc, _StreamStall) and _stall_exc is None:
                         _stall_exc = exc
+            except* GeneratorExit:
+                # A consumer that stops iterating (Starlette exhausting the
+                # response on client disconnect, or a test aclose()) throws
+                # GeneratorExit into whichever `yield` is suspended INSIDE
+                # the TaskGroup — asyncio.TaskGroup wraps it into a
+                # BaseExceptionGroup like any other body exception (it is
+                # not a CancelledError special case). GeneratorExit is a
+                # BaseException, not an Exception subclass, so without this
+                # clause it falls through `except* _StreamStall` and
+                # `except* Exception` unmatched and re-propagates AS a
+                # BaseExceptionGroup — which violates the async-generator
+                # close() contract (a generator must exit via GeneratorExit,
+                # StopAsyncIteration, or a genuine new exception, never a
+                # wrapping group) and surfaces as a confusing crash on
+                # teardown instead of a clean close. Swallowing it here lets
+                # execution fall through to the finally below (the same
+                # gauge-dec / draft-release-or-abort / salvage / mark_inactive
+                # teardown every other exit already runs) and then return
+                # normally — the "clean up, then close" idiom
+                # `except GeneratorExit: ...` (no re-raise) is for. Mirrors
+                # `_sub_session_sse`'s identical fix (routes/chats.py,
+                # 1243294) — this path shares the same TaskGroup shape and
+                # was missing the equivalent handler.
+                pass
             except* Exception as eg:
                 # Re-raise the first non-StreamDone, non-stall exception so
                 # the caller (StreamingResponse) surfaces it correctly.

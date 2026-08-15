@@ -872,6 +872,214 @@ async def test_streaming_disconnect_teardown_wins_still_lands_aborted(
     release_watcher_call.set()
     await asyncio.sleep(0.1)
 
+@pytest.mark.asyncio
+async def test_disconnect_salvaged_content_reaches_next_turn_history(
+    engine: AsyncEngine,
+) -> None:
+    """Red-on-revert for ``_remembered_turn_state``: disconnect mid-turn so
+    the salvaged answer lands on an ``aborted_by_client`` row, then start a
+    SECOND turn on the same chat. The model must remember producing that
+    answer — the composed history sent on the next turn must include it,
+    matching what the user already sees in the transcript
+    (``message_service.py`` shows every row ``!= draft``). Before this fix,
+    every history query filtered ``state == FINAL`` only, so a disconnected
+    turn — even one whose full answer was captured by
+    ``_salvage_aborted_row`` — was permanently invisible to the model.
+    """
+    ready_to_disconnect = asyncio.Event()
+
+    async def _first_stream(*args: object, **kwargs: object) -> AsyncIterator[CanonicalEvent]:
+        yield CanonicalEvent(type="chat.start")
+        yield CanonicalEvent(type="message.start")
+        yield CanonicalEvent(type="message.delta", content="salvaged answer")
+        ready_to_disconnect.set()
+        never = asyncio.Event()
+        await never.wait()
+        yield CanonicalEvent(type="message.delta", content="never reaches here")  # pragma: no cover
+
+    async def _receive() -> dict[str, str]:
+        await ready_to_disconnect.wait()
+        return {"type": "http.disconnect"}
+
+    lm_client = MagicMock()
+    lm_client.stream = _first_stream
+
+    from lmchat.db.schema import chats
+
+    async with engine.begin() as conn:
+        await conn.execute(chats.insert().values(user_id=1, title="test"))
+
+    svc = await _make_service(engine, lm_client=lm_client)
+    user = _mock_user(1)
+    request = AsyncMock()
+    request.receive = _receive
+    payload = _make_request_payload(chat_text="first question")
+
+    try:
+        async with asyncio.timeout(3.0):
+            await _drain(
+                svc.stream_chat(chat_id=1, user=user, payload=payload, request=request)
+            )
+    except TimeoutError:
+        pass  # acceptable — the disconnect path doesn't guarantee a clean exit
+
+    await asyncio.sleep(0.6)
+
+    # Confirm the setup: the first turn landed aborted_by_client WITH content
+    # (not the harness-bug case of an empty-content abort).
+    async with engine.connect() as conn:
+        row = (
+            await conn.execute(
+                select(messages.c.state, messages.c.content).where(
+                    messages.c.chat_id == 1,
+                    messages.c.role == "assistant",
+                )
+            )
+        ).fetchone()
+    assert row is not None
+    assert row[0] == PersistState.ABORTED_BY_CLIENT.value
+    assert row[1] == "salvaged answer"
+
+    # Second turn: capture the request handed to lm_client.stream this time
+    # — chain mode composes prior-turn history into request.system_prompt
+    # (StreamingService._load_replay_history / serialize_prior_turns) since
+    # there is no previous_response_id yet (the first turn never reached
+    # chat.end, so no response_id was ever captured).
+    captured: dict[str, Any] = {}
+
+    async def _second_stream(*args: object, **kwargs: object) -> AsyncIterator[CanonicalEvent]:
+        captured.update(kwargs)
+        yield CanonicalEvent(type="chat.start")
+        yield CanonicalEvent(type="message.start")
+        yield CanonicalEvent(type="message.delta", content="ok")
+        yield CanonicalEvent(type="message.end")
+        yield CanonicalEvent(type="chat.end", response_id="resp-2")
+
+    lm_client.stream = _second_stream
+    payload2 = _make_request_payload(chat_text="continue")
+
+    await _drain(
+        svc.stream_chat(
+            chat_id=1,
+            user=user,
+            payload=payload2,
+            request=_mock_request(disconnected=False),
+        )
+    )
+
+    wire_req = captured.get("request")
+    assert wire_req is not None, "lm_client.stream must be called with request="
+    sys_p = wire_req.system_prompt or ""
+    assert "salvaged answer" in sys_p, (
+        "RED-ON-REVERT: the model has no memory of the salvaged disconnected "
+        f"turn — expected 'salvaged answer' in the composed history, got "
+        f"system_prompt={sys_p!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_disconnect_empty_content_excluded_from_next_turn_history(
+    engine: AsyncEngine,
+) -> None:
+    """The other half of ``_remembered_turn_state``: an ``aborted_by_client``
+    row with NO content (disconnect landed before any answer text existed)
+    must stay excluded from the next turn's history — feeding a blank
+    assistant turn into context is worse than omitting it.
+    """
+    ready_to_disconnect = asyncio.Event()
+
+    async def _first_stream(*args: object, **kwargs: object) -> AsyncIterator[CanonicalEvent]:
+        yield CanonicalEvent(type="chat.start")
+        yield CanonicalEvent(type="message.start")
+        ready_to_disconnect.set()
+        # Block forever — the sibling watcher task completing does NOT
+        # cancel this task (only the TaskGroup itself exiting does), so
+        # this must never resume on its own or it would emit content and
+        # invalidate this test's empty-content setup. The outer
+        # asyncio.timeout below is what actually tears this down.
+        never = asyncio.Event()
+        await never.wait()
+        yield CanonicalEvent(type="message.delta", content="never reaches here")  # pragma: no cover
+
+    async def _receive() -> dict[str, str]:
+        await ready_to_disconnect.wait()
+        return {"type": "http.disconnect"}
+
+    lm_client = MagicMock()
+    lm_client.stream = _first_stream
+
+    from lmchat.db.schema import chats
+
+    async with engine.begin() as conn:
+        await conn.execute(chats.insert().values(user_id=1, title="test"))
+
+    svc = await _make_service(engine, lm_client=lm_client)
+    user = _mock_user(1)
+    request = AsyncMock()
+    request.receive = _receive
+    payload = _make_request_payload(chat_text="first question")
+
+    try:
+        async with asyncio.timeout(3.0):
+            await _drain(
+                svc.stream_chat(chat_id=1, user=user, payload=payload, request=request)
+            )
+    except TimeoutError:
+        pass
+
+    await asyncio.sleep(0.6)
+
+    async with engine.connect() as conn:
+        row = (
+            await conn.execute(
+                select(messages.c.state, messages.c.content).where(
+                    messages.c.chat_id == 1,
+                    messages.c.role == "assistant",
+                )
+            )
+        ).fetchone()
+    assert row is not None
+    assert row[0] == PersistState.ABORTED_BY_CLIENT.value
+    assert row[1] == "", f"expected an empty-content abort for this test's setup, got {row[1]!r}"
+
+    captured: dict[str, Any] = {}
+
+    async def _second_stream(*args: object, **kwargs: object) -> AsyncIterator[CanonicalEvent]:
+        captured.update(kwargs)
+        yield CanonicalEvent(type="chat.start")
+        yield CanonicalEvent(type="message.start")
+        yield CanonicalEvent(type="message.delta", content="ok")
+        yield CanonicalEvent(type="message.end")
+        yield CanonicalEvent(type="chat.end", response_id="resp-2")
+
+    lm_client.stream = _second_stream
+    payload2 = _make_request_payload(chat_text="continue")
+
+    await _drain(
+        svc.stream_chat(
+            chat_id=1,
+            user=user,
+            payload=payload2,
+            request=_mock_request(disconnected=False),
+        )
+    )
+
+    wire_req = captured.get("request")
+    assert wire_req is not None, "lm_client.stream must be called with request="
+    sys_p = wire_req.system_prompt or ""
+    # Positive control: the mechanism under test actually ran and composed
+    # history (the user's own first-turn question is legitimate, always-
+    # included context) — proves the negative assertion below isn't passing
+    # because history composition silently no-op'd altogether.
+    assert "user: first question" in sys_p, (
+        f"history composition did not run as expected — got system_prompt={sys_p!r}"
+    )
+    assert "\nassistant: " not in sys_p, (
+        "RED-ON-REVERT: an empty-content aborted_by_client row was fed into "
+        f"the next turn's history as a blank assistant line — got "
+        f"system_prompt={sys_p!r}"
+    )
+
 
 # ---------------------------------------------------------------------------
 # Test 2c: the draft release survives a cancellation delivered DURING the
