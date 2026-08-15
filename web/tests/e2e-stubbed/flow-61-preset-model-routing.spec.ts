@@ -22,6 +22,7 @@
  */
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { bootstrapAuthedApp } from "./_bootstrap";
+import type { PresetModelsMap } from "@/hooks/usePresetModels";
 
 const PRESET_MODEL_ID = "openai/gpt-4o-mini";
 const PRESET_PROVIDER = "openrouter";
@@ -216,7 +217,7 @@ test.describe("Flow 61 — Preset model routing", () => {
     // Start with no preset-models configured.
     await stubCommon(page, chatId, {});
 
-    let capturedPutBody: string | null = null;
+    const capturedPutBody: { value: string | null } = { value: null };
     // Override the preset-models PUT to capture the body.
     await page.route("**/api/settings/preset-models", (route: Route) => {
       const method = route.request().method();
@@ -228,11 +229,11 @@ test.describe("Flow 61 — Preset model routing", () => {
         });
       }
       if (method === "PUT") {
-        capturedPutBody = route.request().postData() ?? "";
+        capturedPutBody.value = route.request().postData() ?? "";
         return route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: capturedPutBody,
+          body: capturedPutBody.value,
         });
       }
       return route.fallback();
@@ -256,13 +257,11 @@ test.describe("Flow 61 — Preset model routing", () => {
 
     // The PUT should fire immediately (no save button — per-row auto-save).
     await expect
-      .poll(() => capturedPutBody !== null, { timeout: 8_000 })
+      .poll(() => capturedPutBody.value !== null, { timeout: 8_000 })
       .toBe(true);
 
-    const body = JSON.parse(capturedPutBody as string) as Record<
-      string,
-      { provider: string; model_id: string }
-    >;
+    if (capturedPutBody.value === null) throw new Error("expected capturedPutBody to be captured");
+    const body: PresetModelsMap = JSON.parse(capturedPutBody.value);
     expect(body["research"]).toBeDefined();
     // Guaranteed non-null by the toBeDefined() check just above.
     expect(body["research"]!.provider).toBe(PRESET_PROVIDER);
@@ -278,10 +277,10 @@ test.describe("Flow 61 — Preset model routing", () => {
       research: { provider: PRESET_PROVIDER, model_id: PRESET_MODEL_ID },
     });
 
-    let subBody: string | null = null;
+    const subBody: { value: string | null } = { value: null };
     await page.route("**/api/chats/*/sub-session/stream", (route: Route) => {
       if (route.request().method() !== "POST") return route.fallback();
-      subBody = route.request().postData() ?? "";
+      subBody.value = route.request().postData() ?? "";
       return route.fulfill({
         status: 200,
         contentType: "text/event-stream",
@@ -309,10 +308,11 @@ test.describe("Flow 61 — Preset model routing", () => {
     await composer.press("Control+Enter");
 
     await expect
-      .poll(() => subBody !== null, { timeout: 10_000 })
+      .poll(() => subBody.value !== null, { timeout: 10_000 })
       .toBe(true);
 
-    const raw = subBody as string;
+    if (subBody.value === null) throw new Error("expected subBody to be captured");
+    const raw = subBody.value;
     // The sub-session form body must carry the assigned provider + model_id.
     expect(raw).toContain(PRESET_PROVIDER);
     expect(raw).toContain(PRESET_MODEL_ID);

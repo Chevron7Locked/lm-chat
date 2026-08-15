@@ -17,6 +17,7 @@
  */
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { bootstrapAuthedApp } from "./_bootstrap";
+import type { UpsertProviderBody } from "@/hooks/useProviders";
 
 const PROBE_MODELS = [
   "openai/gpt-4o",
@@ -83,11 +84,11 @@ test.describe("Flow 59 — Provider add/edit", () => {
     });
 
     // Capture the PUT body for assertion.
-    let capturedPutBody: string | null = null;
+    const capturedPutBody: { value: string | null } = { value: null };
     await page.route("**/api/admin/providers/openrouter", (route: Route) => {
       const method = route.request().method();
       if (method === "PUT") {
-        capturedPutBody = route.request().postData() ?? "";
+        capturedPutBody.value = route.request().postData() ?? "";
         return route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -129,10 +130,11 @@ test.describe("Flow 59 — Provider add/edit", () => {
 
     // Assert the PUT body was captured and contains the expected fields.
     await expect
-      .poll(() => capturedPutBody !== null, { timeout: 8_000 })
+      .poll(() => capturedPutBody.value !== null, { timeout: 8_000 })
       .toBe(true);
 
-    const body = JSON.parse(capturedPutBody as string) as Record<string, unknown>;
+    if (capturedPutBody.value === null) throw new Error("expected capturedPutBody to be captured");
+    const body: UpsertProviderBody = JSON.parse(capturedPutBody.value);
     expect(body["base_url"]).toBe("https://openrouter.ai/api");
     expect(body["enabled"]).toBe(true);
     expect(body["api_key"]).toBe("sk-or-test-key-123");

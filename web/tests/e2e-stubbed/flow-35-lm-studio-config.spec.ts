@@ -34,7 +34,7 @@ test.describe("Flow 35 — LM Studio config UI (P13g)", () => {
     // spec is already signed in on cold load.
     await bootstrapAuthedApp(page, { isAdmin: true, username: "admin" });
 
-    let lastProbeBody: Record<string, unknown> | null = null;
+    const lastProbeBody: { value: Record<string, unknown> | null } = { value: null };
     let lastModelPutBody: Record<string, unknown> | null = null;
     let lastAdminPatchBody: Record<string, unknown> | null = null;
     let resolved = {
@@ -97,7 +97,7 @@ test.describe("Flow 35 — LM Studio config UI (P13g)", () => {
     });
 
     await page.route("**/api/settings/lmstudio/test", (route) => {
-      lastProbeBody = JSON.parse(
+      lastProbeBody.value = JSON.parse(
         route.request().postData() ?? "{}",
       ) as Record<string, unknown>;
       return route.fulfill({
@@ -130,8 +130,9 @@ test.describe("Flow 35 — LM Studio config UI (P13g)", () => {
     await expect(page.getByTestId("lmstudio-test-result")).toContainText(
       "Connected — 4 models reachable",
     );
-    expect(lastProbeBody).not.toBeNull();
-    expect(lastProbeBody?.base_url).toBe("http://probe-target.example:1234");
+    expect(lastProbeBody.value).not.toBeNull();
+    if (lastProbeBody.value === null) throw new Error("expected lastProbeBody to be captured");
+    expect(lastProbeBody.value.base_url).toBe("http://probe-target.example:1234");
 
     // Save.
     await page.getByTestId("lmstudio-save").click();

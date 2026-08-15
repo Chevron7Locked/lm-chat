@@ -17,6 +17,7 @@
  */
 import { test, expect, type Request } from "@playwright/test";
 import { bootstrapAuthedApp } from "./_bootstrap";
+import type { ChatStreamPayload } from "@/hooks/useSSE";
 
 // ─── SSE helper ──────────────────────────────────────────────────────────────
 
@@ -143,12 +144,12 @@ test.describe("Flow 37 — P13h MCP integrations picker", () => {
     });
 
     // ── Stream capture: capture the POST body, then fulfill an SSE ─────
-    let capturedStreamBody: Record<string, unknown> | null = null;
+    const capturedStreamBody: { value: Record<string, unknown> | null } = { value: null };
     await page.route("**/api/chat/stream", async (route, request: Request) => {
       try {
         const raw = request.postData();
         if (raw !== null) {
-          capturedStreamBody = JSON.parse(raw);
+          capturedStreamBody.value = JSON.parse(raw);
         }
       } catch {
         // ignore
@@ -185,11 +186,12 @@ test.describe("Flow 37 — P13h MCP integrations picker", () => {
 
     // Wait for the stream to be initiated.
     await page.waitForFunction(() => true, { timeout: 2000 }).catch(() => undefined);
-    await expect.poll(() => capturedStreamBody !== null, { timeout: 5000 }).toBe(true);
+    await expect.poll(() => capturedStreamBody.value !== null, { timeout: 5000 }).toBe(true);
 
     // ── Assert the outbound payload carries BOTH integrations ──────────
-    expect(capturedStreamBody).not.toBeNull();
-    const body = capturedStreamBody as { payload?: { integrations?: string[] } };
+    expect(capturedStreamBody.value).not.toBeNull();
+    if (capturedStreamBody.value === null) throw new Error("expected capturedStreamBody to be captured");
+    const body = capturedStreamBody.value as { payload?: ChatStreamPayload };
     expect(body.payload?.integrations).toEqual([
       "mcp/searxng",
       "mcp/filesystem",

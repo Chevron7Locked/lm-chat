@@ -90,7 +90,7 @@ export function useStoppedStreamReconciliation({
     // cleanup below live entirely within this single effect invocation, so
     // there's no cross-render state to preserve.
     let cancelled = false;
-    let timerId: ReturnType<typeof window.setTimeout> | null = null;
+    let timerId: number | null = null;
 
     const finalize = (patch: string | null): void => {
       if (cancelled) return;

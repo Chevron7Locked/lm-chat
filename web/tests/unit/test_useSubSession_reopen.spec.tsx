@@ -313,15 +313,16 @@ describe("useSubSession — P4 history + reopen + continue", () => {
       wrapper: makeWrapper(),
     });
 
-    let started: SubSessionState | null = null;
+    const started: { value: SubSessionState | null } = { value: null };
     act(() => {
-      started = result.current.startSubSession("coder");
+      started.value = result.current.startSubSession("coder");
     });
-    expect(started).not.toBeNull();
-    expect(started?.subSessionId).toBeNull();
+    expect(started.value).not.toBeNull();
+    if (started.value === null) throw new Error("expected started to be non-null");
+    expect(started.value.subSessionId).toBeNull();
 
     act(() => {
-      result.current.maybeRouteSubmit(42, { input: [] }, "hello", started);
+      result.current.maybeRouteSubmit(42, { input: [] }, "hello", started.value);
     });
 
     await waitFor(() => {

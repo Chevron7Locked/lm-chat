@@ -52,30 +52,19 @@
     "tests/_manual-live"
   ]
   // ---------------------------------------------------------------------
-  // KNOWN, ACCEPTED ARTIFACT (do not "fix" by editing src/) —
-  // src/hooks/useStoppedStreamReconciliation.ts(122,7): error TS2322:
-  // Type 'number' is not assignable to type 'Timeout'.
+  // Note on `types` above being program-wide, not per-file: @types/node's
+  // global `setTimeout`/`Timeout` declarations can collide with DOM lib's
+  // number-returning `Window.setTimeout` in src/ files this project reaches
+  // (~93 tests/unit/*.spec.tsx import *something* from src/, so most of
+  // src/ is in view here, not just the files under test).
   //
-  // Mechanism: `types` above is program-wide, not per-file. @types/node's
-  // global `setTimeout`/`Timeout` declarations collide with DOM lib's
-  // `Window.setTimeout` (number-returning) ONLY for this hook's specific
-  // `ReturnType<typeof window.setTimeout>` pattern — 5 other src files use
-  // the same bare `ReturnType<typeof setTimeout>` idiom without colliding.
-  // The hook is reached because test_useStoppedStreamReconciliation_backoff
-  // .spec.ts imports it directly — true of ~93 tests/unit/*.spec.tsx files
-  // importing *something* from src/, so this isn't specific to this one
-  // import path.
+  // If that collision resurfaces, annotate the src/ declaration with the
+  // type `window.setTimeout` actually returns (`number`) rather than the
+  // ambiguous `ReturnType<typeof setTimeout>`. That is type-only, costs no
+  // runtime behaviour, and satisfies tsconfig.app.json and this project
+  // alike — the fix applied to useStoppedStreamReconciliation.ts.
   //
-  // tsconfig.app.json — the file's ACTUAL build target — still typechecks
-  // it clean; this is a false positive of tsconfig.tests.json's view, not
-  // a real bug.
-  //
-  // Considered and rejected: a browser-context/node-context project split
-  // (no `types:["node"]` for files that reach src/, a separate project
-  // with it for the ~21 files that use `global`/`fs`/`path`/`process`)
-  // would remove it cleanly, but costs a 4th tsc invocation plus a
-  // hand-maintained file-classification list forever, to silence one known
-  // false positive. Not worth it (decided 2026-08-15) — accept the one
-  // artifact instead. Do NOT annotate src/hooks/useStoppedStreamReconciliation.ts
-  // to satisfy this project; that file doesn't belong to it.
+  // A browser-context/node-context project split would also remove it, but
+  // costs a 4th tsc invocation plus a hand-maintained file-classification
+  // list forever. Not worth it for a collision the annotation already fixes.
 }
