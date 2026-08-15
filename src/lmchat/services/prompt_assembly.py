@@ -230,6 +230,85 @@ def relocate_per_turn_layers(
     )
 
 
+def format_tools_unavailable_line(dropped: Sequence[str]) -> str:
+    """Render the tools-unavailable corrective naming the dropped integrations.
+
+    Companion to :func:`apply_tools_unavailable_corrective` — see that
+    function's docstring for why this corrective exists (the capability
+    legend's "Tools you can call directly" section is built from the raw
+    pre-gate integrations list, before ``_resolve_model_and_integrations_gate``
+    in streaming_service.py can drop or trim it).
+    """
+    names = ", ".join(dropped)
+    return (
+        "[Runtime update: despite being listed above, the following "
+        f"tool(s) are NOT available this turn: {names}. Do not attempt "
+        "to call them — answer using only the tools you actually have.]"
+    )
+
+
+def apply_tools_unavailable_corrective(
+    payload: CanonicalChatRequest, dropped: Sequence[str]
+) -> CanonicalChatRequest:
+    """Tell the model which previously-advertised tools it does NOT have this turn.
+
+    The capability legend's "Tools you can call directly" section
+    (``streaming_service._assemble_system_prompt``) is built from the RAW
+    requested integrations, BEFORE ``_resolve_model_and_integrations_gate``
+    runs — that gate can drop every integration (Layer 1: the resolved
+    model isn't trained for tool use) or trim a subset (Layer 2: context-
+    budget overflow). Both cases leave the legend advertising tools the
+    wire request no longer carries. A model that believes it still has a
+    dropped tool emits the call as literal JSON text in its answer instead
+    of a real ``tool_call`` — reproduced live while probing this bug.
+
+    This is a corrective, not a rewrite: it does NOT edit the legend text
+    that already mentions the tool (that text is chain-persistent and, on
+    follow-ups, already off the wire by the time this runs — see below).
+    It appends a short note the model reads AFTER the legend, the same
+    "runtime update" framing :data:`TOOLS_NOW_AVAILABLE_LINE` and
+    :func:`format_per_turn_date_line` already use for the opposite
+    direction (a fact stated earlier in the chain-persistent prompt is
+    stale for THIS turn).
+
+    Deliberately separate from :func:`relocate_per_turn_layers`: that
+    function runs INSIDE ``_assemble_system_prompt``, before the gate —
+    the dropped/trimmed set genuinely isn't known yet at that point in the
+    pipeline (see that function's own docstring). This one is called from
+    ``stream_chat`` immediately after the gate resolves, once real.
+
+    Turn 1 (``previous_response_id is None``): appended directly to
+    ``system_prompt`` — the same vehicle the (already-stale) legend rode
+    in on, and the only one that reaches the wire this turn.
+
+    Follow-up turn: prepended as its own per-turn ``input`` block, mirroring
+    how ``relocate_per_turn_layers`` already routes RAG / tools-now-available
+    / date correctives there instead — ``encode_native`` drops
+    ``system_prompt`` on every follow-up, so a corrective placed there would
+    never reach the model.
+
+    Args:
+        payload: The request as it stands right after the gate's mutation
+                 (``integrations`` already updated to the kept set).
+        dropped: Integration ids the gate removed this turn. Empty is a
+                 no-op — returns *payload* unchanged (identity, not a
+                 copy) so callers can invoke this unconditionally.
+
+    Returns:
+        The (possibly) modified request — immutable ``model_copy`` update;
+        *payload* is never mutated.
+    """
+    if not dropped:
+        return payload
+    line = format_tools_unavailable_line(dropped)
+    if payload.previous_response_id is None:
+        existing = payload.system_prompt or ""
+        new_system = f"{existing}\n\n{line}" if existing else line
+        return payload.model_copy(update={"system_prompt": new_system})
+    per_turn_block = CanonicalInputBlock(type="text", content=f"{line}\n\n")
+    return payload.model_copy(update={"input": [per_turn_block, *payload.input]})
+
+
 def serialize_prior_turns(turns: Sequence[tuple[str, str]]) -> str:
     """Render prior-turn history as the shared ``## Prior turns`` suffix.
 

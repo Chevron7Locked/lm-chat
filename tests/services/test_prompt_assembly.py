@@ -45,7 +45,9 @@ from lmchat.services.prompt_assembly import (
     RAG_HARDENING_CLAUSE,
     RAG_OPEN_MARKER,
     TOOLS_NOW_AVAILABLE_LINE,
+    apply_tools_unavailable_corrective,
     format_per_turn_date_line,
+    format_tools_unavailable_line,
     relocate_per_turn_layers,
     serialize_prior_turns,
 )
@@ -151,6 +153,68 @@ def test_followup_nothing_to_relocate_is_a_noop() -> None:
         payload, rag_block=None, tools_now_available=False
     )
     assert out is payload
+
+
+# ─── Tools-unavailable corrective (post-gate, separate from
+# relocate_per_turn_layers — see apply_tools_unavailable_corrective's
+# docstring for why it can't run through that function: the dropped/
+# trimmed set isn't known until AFTER the integrations gate, which runs
+# later than relocate_per_turn_layers' own call site) ──────────────────
+
+
+def test_format_tools_unavailable_line_names_every_dropped_tool() -> None:
+    line = format_tools_unavailable_line(["mcp/searxng", "mcp/filesystem"])
+    assert "mcp/searxng" in line
+    assert "mcp/filesystem" in line
+    assert "NOT available this turn" in line
+
+
+def test_tools_unavailable_corrective_empty_dropped_is_noop() -> None:
+    payload = _req(previous_response_id=None)
+    out = apply_tools_unavailable_corrective(payload, [])
+    assert out is payload
+    out2 = apply_tools_unavailable_corrective(payload, [])
+    assert out2 is payload
+
+
+def test_tools_unavailable_corrective_appends_to_system_prompt_on_turn1() -> None:
+    """Turn 1: system_prompt is the only vehicle that reaches the wire —
+    the corrective is appended there, alongside the (already-stale)
+    legend text it corrects."""
+    payload = _req(previous_response_id=None, system_prompt=CHAT_MARKER)
+    out = apply_tools_unavailable_corrective(payload, ["mcp/searxng"])
+    assert out is not payload
+    assert out.system_prompt is not None
+    assert CHAT_MARKER in out.system_prompt
+    assert "mcp/searxng" in out.system_prompt
+    assert "NOT available this turn" in out.system_prompt
+    # Immutability: inbound payload untouched.
+    assert payload.system_prompt == CHAT_MARKER
+
+
+def test_tools_unavailable_corrective_handles_empty_system_prompt_on_turn1() -> None:
+    payload = _req(previous_response_id=None, system_prompt=None)
+    out = apply_tools_unavailable_corrective(payload, ["mcp/searxng"])
+    assert out.system_prompt is not None
+    assert "mcp/searxng" in out.system_prompt
+
+
+def test_tools_unavailable_corrective_prepends_input_block_on_followup() -> None:
+    """Follow-up turn: encode_native drops system_prompt entirely, so the
+    corrective must ride input[0] instead — mirroring how
+    relocate_per_turn_layers already routes RAG/tools-now-available/date
+    correctives there for the identical reason."""
+    payload = _req(previous_response_id="resp-prev")
+    out = apply_tools_unavailable_corrective(payload, ["mcp/searxng"])
+    assert out is not payload
+    content = out.input[0].content or ""
+    assert "mcp/searxng" in content
+    assert "NOT available this turn" in content
+    # System_prompt is untouched by this corrective (it never reaches the
+    # wire on a follow-up turn anyway).
+    assert out.system_prompt == payload.system_prompt
+    # Original input is preserved after the new per-turn block.
+    assert out.input[-1].content == "ping"
 
 
 def test_wire_body_shape_through_encode_native() -> None:

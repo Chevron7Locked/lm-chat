@@ -2328,6 +2328,227 @@ async def test_context_overflow_trims_then_warns(engine: AsyncEngine) -> None:
     assert chat_end_frames, "Stream must complete normally after trim"
 
 
+# ---------------------------------------------------------------------------
+# Tools-unavailable corrective — the capability legend (built from the raw
+# pre-gate request in _assemble_system_prompt, BEFORE this gate runs) can
+# advertise tools the gate then drops/trims. Without a corrective the model
+# believes it still has a dropped tool and emits the call as literal JSON
+# text instead of a real tool_call — reproduced live while probing this bug.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_drop_all_emits_tools_unavailable_corrective(engine: AsyncEngine) -> None:
+    """Non-tool-trained model drops every integration (Layer 1). The legend
+    still lists the dropped tool (documented here as the actual design —
+    a corrective, not a legend rewrite); the corrective must name it and
+    tell the model not to call it.
+
+    RED-ON-REVERT: remove the apply_tools_unavailable_corrective call from
+    the drop_all branch of stream_chat and the corrective assertions fail
+    — the legend keeps advertising mcp/searxng with no correction.
+    """
+    streamed_payloads: list[Any] = []
+
+    async def _capture_then_complete(
+        request: Any, **kwargs: Any
+    ) -> AsyncIterator[CanonicalEvent]:
+        streamed_payloads.append(request)
+        yield CanonicalEvent(type="chat.start")
+        yield CanonicalEvent(type="message.delta", content="ok")
+        yield CanonicalEvent(type="message.end")
+        yield CanonicalEvent(type="chat.end", response_id="rid-drop-all-1")
+
+    lm_client = MagicMock()
+    lm_client.stream = _capture_then_complete
+
+    memory_mock = AsyncMock()
+    memory_mock.index_message = AsyncMock(return_value=None)
+
+    from lmchat.db.schema import chats
+    async with engine.begin() as conn:
+        await conn.execute(chats.insert().values(user_id=1, title="drop-all-corrective-test"))
+
+    svc = await _make_service(
+        engine,
+        lm_client=lm_client,
+        memory_service=memory_mock,
+        models_service=_make_models_service_mock(trained_for_tool_use=False),
+    )
+    user = _mock_user(1)
+    request = _mock_request(disconnected=False)
+
+    payload = ChatStreamRequest(
+        chat_id=1,
+        payload=CanonicalChatRequest(
+            model="qwen3-vl-8b-instruct",
+            input=[CanonicalInputBlock(type="text", content="search something")],
+            integrations=["mcp/searxng"],
+        ),
+    )
+
+    frames = []
+    async for f in svc.stream_chat(chat_id=1, user=user, payload=payload, request=request):
+        frames.append(f)
+
+    assert len(streamed_payloads) == 1
+    sent = streamed_payloads[0]
+    sys_p = sent.system_prompt or ""
+    # The legend was built BEFORE the gate ran and still lists the tool —
+    # the fix is a corrective, not an edit to already-rendered legend text.
+    assert "- searxng —" in sys_p, "legend should still list the pre-gate tool"
+    assert "mcp/searxng" in sys_p, f"corrective must name the dropped tool: {sys_p!r}"
+    assert "NOT available this turn" in sys_p
+    assert sent.integrations == []
+
+
+@pytest.mark.asyncio
+async def test_context_overflow_trim_emits_tools_unavailable_corrective(
+    engine: AsyncEngine,
+) -> None:
+    """Companion to test_context_overflow_trims_then_warns: the trimmed
+    tool (Layer 2) gets the same corrective as drop_all — same stale-
+    legend root cause, different gate layer."""
+    streamed_payloads: list[Any] = []
+
+    async def _capture_then_complete(
+        request: Any, **kwargs: Any
+    ) -> AsyncIterator[CanonicalEvent]:
+        streamed_payloads.append(request)
+        yield CanonicalEvent(type="chat.start")
+        yield CanonicalEvent(type="message.delta", content="ok")
+        yield CanonicalEvent(type="message.end")
+        yield CanonicalEvent(type="chat.end", response_id="rid-trim-corrective-1")
+
+    lm_client = MagicMock()
+    lm_client.stream = _capture_then_complete
+
+    memory_mock = AsyncMock()
+    memory_mock.index_message = AsyncMock(return_value=None)
+
+    from lmchat.db.schema import chats
+    async with engine.begin() as conn:
+        await conn.execute(chats.insert().values(user_id=1, title="trim-corrective-test"))
+
+    svc = await _make_service(
+        engine,
+        lm_client=lm_client,
+        memory_service=memory_mock,
+        models_service=_make_models_service_mock(
+            trained_for_tool_use=True, max_context_length=16_384
+        ),
+    )
+    user = _mock_user(1)
+    request = _mock_request(disconnected=False)
+
+    nine_mcps = [
+        "mcp/context7", "mcp/deepwiki", "mcp/firecrawl", "mcp/searxng",
+        "mcp/playwright", "mcp/wolfram", "mcp/paper-search-mcp",
+        "mcp/sequential-thinking", "mcp/filesystem",
+    ]
+    payload = ChatStreamRequest(
+        chat_id=1,
+        payload=CanonicalChatRequest(
+            model="qwen3-vl-8b-instruct",
+            system_prompt="x" * 8_000,
+            input=[CanonicalInputBlock(type="text", content="short message")],
+            integrations=nine_mcps,
+        ),
+    )
+
+    frames = []
+    async for f in svc.stream_chat(chat_id=1, user=user, payload=payload, request=request):
+        frames.append(f)
+
+    assert len(streamed_payloads) == 1
+    sent = streamed_payloads[0]
+    sys_p = sent.system_prompt or ""
+    assert "mcp/filesystem" not in sent.integrations
+    assert "mcp/filesystem" in sys_p, f"corrective must name the trimmed tool: {sys_p!r}"
+    assert "NOT available this turn" in sys_p
+
+
+@pytest.mark.asyncio
+async def test_drop_all_corrective_lands_in_input_on_followup_turn(
+    engine: AsyncEngine,
+) -> None:
+    """On a follow-up turn (previous_response_id set) encode_native drops
+    system_prompt entirely — the corrective must ride input[0] instead,
+    mirroring how relocate_per_turn_layers already routes the RAG /
+    tools-now-available / date correctives there for the identical reason.
+    """
+    streamed_payloads: list[Any] = []
+
+    async def _capture_then_complete(
+        request: Any, **kwargs: Any
+    ) -> AsyncIterator[CanonicalEvent]:
+        streamed_payloads.append(request)
+        yield CanonicalEvent(type="chat.start")
+        yield CanonicalEvent(type="message.delta", content="ok")
+        yield CanonicalEvent(type="message.end")
+        yield CanonicalEvent(type="chat.end", response_id="rid-drop-all-followup-1")
+
+    lm_client = MagicMock()
+    lm_client.stream = _capture_then_complete
+
+    memory_mock = AsyncMock()
+    memory_mock.index_message = AsyncMock(return_value=None)
+
+    from lmchat.db.schema import chats, messages
+    async with engine.begin() as conn:
+        await conn.execute(
+            chats.insert().values(user_id=1, title="drop-all-followup-corrective-test")
+        )
+        # Hybrid compaction's chain-reset backstop cross-checks the incoming
+        # previous_response_id against a real message row before honouring
+        # it — an unbacked rid is treated as unknown and silently reset to
+        # None (see stream.compaction_chain_reset_backstop), which would
+        # make this look like a turn-1 request instead of the follow-up
+        # this test needs. Seed the prior assistant turn that "produced"
+        # this rid, mirroring test_prompt_assembly.py's _run_stream helper.
+        await conn.execute(
+            messages.insert().values(
+                chat_id=1,
+                role="assistant",
+                content="prior turn",
+                state="final",
+                response_id="resp-prev-drop-all",
+            )
+        )
+
+    svc = await _make_service(
+        engine,
+        lm_client=lm_client,
+        memory_service=memory_mock,
+        models_service=_make_models_service_mock(trained_for_tool_use=False),
+    )
+    user = _mock_user(1)
+    request = _mock_request(disconnected=False)
+
+    payload = ChatStreamRequest(
+        chat_id=1,
+        payload=CanonicalChatRequest(
+            model="qwen3-vl-8b-instruct",
+            previous_response_id="resp-prev-drop-all",
+            input=[CanonicalInputBlock(type="text", content="search something")],
+            integrations=["mcp/searxng"],
+        ),
+    )
+
+    frames = []
+    async for f in svc.stream_chat(chat_id=1, user=user, payload=payload, request=request):
+        frames.append(f)
+
+    assert len(streamed_payloads) == 1
+    sent = streamed_payloads[0]
+    input_text = " ".join(blk.content or "" for blk in sent.input)
+    assert "mcp/searxng" in input_text, (
+        f"corrective must land in input[0] on a follow-up turn: {input_text!r}"
+    )
+    assert "NOT available this turn" in input_text
+    assert sent.integrations == []
+
+
 @pytest.mark.asyncio
 async def test_context_overflow_fails_fast_when_unsalvageable(engine: AsyncEngine) -> None:
     """When system_prompt + input ALONE overflow the context window, the
