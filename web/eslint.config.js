@@ -199,6 +199,16 @@ export default [
         ...globals.node,
         ...globals.vitest,
         ...globals.es2024,
+        // @types/react and @types/node both ship an `export as namespace X`
+        // UMD global declaration — `React.KeyboardEvent<...>`,
+        // `NodeJS.ProcessEnv`, etc. are valid TYPE references with no value
+        // import required. no-undef (a core, non-type-aware rule) doesn't
+        // know that, and neither `globals.browser` nor `globals.node` (the
+        // `globals` npm package's presets) carries these names. Declared
+        // read-only, not imported as values — nothing in the test tree
+        // reaches for React/NodeJS at runtime, only in type position.
+        React: "readonly",
+        NodeJS: "readonly",
       },
     },
     plugins: {
@@ -211,6 +221,44 @@ export default [
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/no-unsafe-call": "off",
+
+      // no-unnecessary-type-assertion contradicts tsc (6.0.3, inside
+      // typescript-eslint's own declared >=4.8.4 <6.1.0 support range — not
+      // version skew) on a generic type parameter with a default. Repro:
+      //   declare function q<T extends HTMLElement = HTMLElement>(id: string): T;
+      //   const el = q("x") as HTMLInputElement;  // eslint: "unnecessary"
+      //   const el2 = q("x");                      // tsc, with the cast gone:
+      //   el2.value;                                // Property 'value' does not
+      //                                              // exist on type 'HTMLElement'
+      // Mechanism: for a type query on an overloaded/defaulted generic, the
+      // rule's type-equality check resolves T to its default (HTMLElement)
+      // instead of the call-site-inferred type, so it can't see that the
+      // assertion is real narrowing. screen.getByTestId/getByLabelText and
+      // container.querySelector all return exactly this generic-with-default
+      // shape, so every DOM-element cast on their result is a false
+      // positive. typesToIgnore matches the asserted type's exact source
+      // text (see @typescript-eslint/eslint-plugin's
+      // no-unnecessary-type-assertion.js), so this lists only the DOM
+      // element types actually cast to in tests/** — do not widen it beyond
+      // that. Unrelated assertions (Request, RequestInit, literal-narrowing
+      // casts like `false as false`, double casts through `unknown`, etc.)
+      // are genuine judgement calls and must keep firing.
+      "@typescript-eslint/no-unnecessary-type-assertion": [
+        "error",
+        {
+          typesToIgnore: [
+            "HTMLInputElement",
+            "HTMLInputElement | null",
+            "HTMLSelectElement",
+            "HTMLTextAreaElement",
+            "HTMLButtonElement",
+            "HTMLButtonElement | null",
+            "HTMLElement",
+            "HTMLOptionElement",
+            "HTMLAnchorElement",
+          ],
+        },
+      ],
     },
   },
 ];
