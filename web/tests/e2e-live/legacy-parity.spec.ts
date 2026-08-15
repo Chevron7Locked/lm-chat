@@ -219,24 +219,24 @@ test.describe("Orphan stream recovery (v0.5.x audit finding #2)", () => {
       // Use SPA navigation to avoid cold-boot auth redirect.
       // Then inject the orphan localStorage key before navigating.
       await page.evaluate(
-        ([cId]: [number]) => {
+        (cId: number) => {
           try {
             localStorage.setItem(`lmchat:sse:${cId}:msg_id`, "99999");
           } catch {
             // ignore
           }
         },
-        [chatId]
+        chatId
       );
 
       // Navigate to the chat via SPA (keeping React Router in-SPA after
       // loginAndWait already authenticated us).
       await page.evaluate(
-        ([cId]: [number]) => {
+        (cId: number) => {
           window.history.pushState({}, "", `/chats/${cId}`);
           window.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
         },
-        [chatId]
+        chatId
       );
 
       // Wait for the chat view to render.

@@ -370,7 +370,13 @@ function seedTestUserViaDb(
 // Fixture types
 // ---------------------------------------------------------------------------
 
-type LiveBackendFixture = {
+// Split test-scoped vs worker-scoped fixtures: Playwright's extend<T, W>
+// takes two separate type parameters, and every fixture below except
+// cleanState is registered with `{ scope: "worker" }` — declaring them all
+// under one type parameter (as this file used to) types every fixture as
+// test-scoped, which doesn't match the { scope: "worker" } passed at each
+// registration site below.
+type LiveBackendWorkerFixtures = {
   /** The base URL for the live FastAPI backend (e.g. http://127.0.0.1:59123). */
   backendURL: string;
   /** Absolute path to the ephemeral SQLite DB for the worker. */
@@ -398,6 +404,9 @@ type LiveBackendFixture = {
   adminUsername: string;
   /** Pre-registered admin test password. */
   adminPassword: string;
+};
+
+type LiveBackendTestFixtures = {
   /**
    * Auto-fixture: truncates per-test transient tables (chats, sub_sessions,
    * sub_session_messages, messages, documents, pinned_insights, shares,
@@ -416,7 +425,7 @@ type LiveBackendFixture = {
 // Fixture implementation
 // ---------------------------------------------------------------------------
 
-export const test = base.extend<LiveBackendFixture>({
+export const test = base.extend<LiveBackendTestFixtures, LiveBackendWorkerFixtures>({
   // eslint-disable-next-line no-empty-pattern
   backendURL: [
     async ({}, use) => {

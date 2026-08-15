@@ -15,9 +15,15 @@
  *     interrupted conversation — it stays queued, discoverable via the
  *     queue row's "Send now" (manual flush) and remove controls.
  */
+import type { ComponentProps } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { Composer } from "@/components/Composer";
+
+// Real onSubmit signature (not hand-duplicated) — a bare vi.fn() types
+// .mock.calls[0] ambiguously, which fails destructuring it under
+// noUncheckedIndexedAccess.
+type OnSubmitFn = ComponentProps<typeof Composer>["onSubmit"];
 
 // ─── Mocks (same set as test_Composer_integrations_picker.spec.tsx) ─────────
 
@@ -130,7 +136,7 @@ describe("Composer message queue (streaming submit)", () => {
   });
 
   it("enqueues on submit while streaming instead of calling onSubmit, and shows a queued indicator", () => {
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<OnSubmitFn>();
     render(<Composer {...baseProps} streaming onSubmit={onSubmit} />);
     const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
 
@@ -150,7 +156,7 @@ describe("Composer message queue (streaming submit)", () => {
   });
 
   it("supports at least one queued message via a small FIFO queue (two messages queue in order)", () => {
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<OnSubmitFn>();
     render(<Composer {...baseProps} streaming onSubmit={onSubmit} />);
     const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
 
@@ -167,7 +173,7 @@ describe("Composer message queue (streaming submit)", () => {
   });
 
   it("auto-sends the queued message exactly once when the current stream finishes naturally", () => {
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<OnSubmitFn>();
     const { rerender } = render(
       <Composer {...baseProps} streaming onSubmit={onSubmit} />,
     );
@@ -180,7 +186,7 @@ describe("Composer message queue (streaming submit)", () => {
     rerender(<Composer {...baseProps} streaming={false} onSubmit={onSubmit} />);
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [sentChatId, sentPayload, sentUserText] = onSubmit.mock.calls[0];
+    const [sentChatId, sentPayload, sentUserText] = onSubmit.mock.calls[0]!;
     expect(sentChatId).toBe(1);
     expect(sentUserText).toBe("queued message");
     expect(sentPayload.input).toEqual([{ type: "text", content: "queued message" }]);
@@ -192,7 +198,7 @@ describe("Composer message queue (streaming submit)", () => {
   });
 
   it("does NOT auto-fire a queued message when the stream ends via Stop (abort) — it stays queued", () => {
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<OnSubmitFn>();
     const onStop = vi.fn();
     const { rerender } = render(
       <Composer {...baseProps} streaming onSubmit={onSubmit} onStop={onStop} />,
@@ -219,7 +225,7 @@ describe("Composer message queue (streaming submit)", () => {
   });
 
   it("lets the user manually flush a stranded (post-abort) queued message via Send now", () => {
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<OnSubmitFn>();
     const onStop = vi.fn();
     const { rerender } = render(
       <Composer {...baseProps} streaming onSubmit={onSubmit} onStop={onStop} />,
@@ -237,13 +243,13 @@ describe("Composer message queue (streaming submit)", () => {
     fireEvent.click(screen.getByTestId("composer-queue-send-now"));
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, , sentUserText] = onSubmit.mock.calls[0];
+    const [, , sentUserText] = onSubmit.mock.calls[0]!;
     expect(sentUserText).toBe("stranded message");
     expect(screen.queryByTestId("composer-queue")).toBeNull();
   });
 
   it("removes a queued message without sending it", () => {
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<OnSubmitFn>();
     render(<Composer {...baseProps} streaming onSubmit={onSubmit} />);
     const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "will be removed" } });
