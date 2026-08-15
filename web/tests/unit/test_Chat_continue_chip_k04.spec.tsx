@@ -22,6 +22,7 @@ import { createElement } from "react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ChatMessageData } from "@/components/ChatMessage";
+import type { StreamState } from "@/hooks/useSSE";
 
 if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function (): void {
@@ -73,23 +74,11 @@ vi.mock("@/hooks/useKeyboardShortcuts", () => ({
   },
 }));
 
-interface MockSSEState {
-  status: "idle" | "streaming" | "complete" | "error" | "stopped";
-  messageId: number | null;
-  responseId: string | null;
-  contentDeltas: string[];
-  reasoningDeltas: string[];
-  toolCalls: unknown[];
-  error: { code: string; message: string } | null;
-  stats: { tokensPerSecond: number | null; ttftSeconds: number | null; outputTokens: number };
-  loadPhase: null;
-  truncated_without_terminal: boolean;
-  stop_reason: string | null;
-  showContinue: boolean;
-  warnings: { code: string; message: string }[];
-}
-
-const idleSSEState: MockSSEState = {
+// Real StreamState import (added near the top) — not a hand-rolled shadow.
+// This local mirror was missing `followups`, `memorySaved`, and `modeAdopt`
+// (C3 role-adoption, shipped 08-14) — invisible until now because a
+// vi.mock factory's return value isn't checked against the real hook's type.
+const idleSSEState: StreamState = {
   status: "idle",
   messageId: null,
   responseId: null,
@@ -103,9 +92,12 @@ const idleSSEState: MockSSEState = {
   stop_reason: null,
   showContinue: false,
   warnings: [],
+  followups: [],
+  memorySaved: undefined,
+  modeAdopt: undefined,
 };
 
-let mockSSEState: MockSSEState = { ...idleSSEState };
+let mockSSEState: StreamState = { ...idleSSEState };
 
 vi.mock("@/hooks/useSSE", () => ({
   useSSE: () => ({

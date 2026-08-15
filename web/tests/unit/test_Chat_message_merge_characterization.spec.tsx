@@ -39,6 +39,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
+import type { StreamState } from "@/hooks/useSSE";
 import { createElement, useState, useEffect } from "react";
 import type { ChangeEvent } from "react";
 import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
@@ -98,24 +99,12 @@ vi.mock("@/hooks/useKeyboardShortcuts", () => ({
 //     _k04.spec.tsx's pattern). Includes the FULL StreamState shape (unlike
 //     test_Chat.spec.tsx's slimmer type) since several scenarios below need
 //     showContinue / stop_reason / followups.
-interface MockSSEState {
-  status: "idle" | "streaming" | "complete" | "error" | "stopped";
-  messageId: number | null;
-  responseId: string | null;
-  contentDeltas: string[];
-  reasoningDeltas: string[];
-  toolCalls: unknown[];
-  error: { code: string; message: string } | null;
-  stats: { tokensPerSecond: number | null; ttftSeconds: number | null; outputTokens: number };
-  loadPhase: null;
-  truncated_without_terminal: boolean;
-  stop_reason: string | null;
-  showContinue: boolean;
-  warnings: { code: string; message: string }[];
-  followups: string[];
-}
-
-const idleSSEState: MockSSEState = {
+// Real StreamState import (added near the top) — not a hand-rolled shadow.
+// This local mirror was already kept closer to date than its siblings (see
+// the comment above) but still missed `memorySaved` and `modeAdopt` (C3
+// role-adoption, shipped 08-14) — invisible until now because a vi.mock
+// factory's return value isn't checked against the real hook's type.
+const idleSSEState: StreamState = {
   status: "idle",
   messageId: null,
   responseId: null,
@@ -130,9 +119,11 @@ const idleSSEState: MockSSEState = {
   showContinue: false,
   warnings: [],
   followups: [],
+  memorySaved: undefined,
+  modeAdopt: undefined,
 };
 
-let mockSSEState: MockSSEState = { ...idleSSEState };
+let mockSSEState: StreamState = { ...idleSSEState };
 
 // Stable function identities across renders (mirrors real react-query /
 // useCallback-memoized hook returns). A FRESH `vi.fn()` on every call would

@@ -35,6 +35,7 @@ import {
 } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { __resetChatScopedMemoryForTests } from "@/hooks/useChatScopedState";
+import type { StreamState } from "@/hooks/useSSE";
 
 // jsdom doesn't implement scrollIntoView; Chat's auto-scroll effect crashes
 // without this stub.
@@ -87,21 +88,12 @@ vi.mock("@/hooks/useKeyboardShortcuts", () => ({
 // (assigned before render; no mid-render transitions needed, since a
 // mount-time value plus a chatId-only navigate is enough to isolate the
 // switch-triggered reset from the mount-time one).
-interface MockSSEState {
-  status: "idle" | "streaming" | "complete" | "error" | "stopped";
-  messageId: number | null;
-  responseId: string | null;
-  contentDeltas: string[];
-  reasoningDeltas: string[];
-  toolCalls: unknown[];
-  error: { code: string; message: string } | null;
-  stats: { tokensPerSecond: number | null; ttftSeconds: number | null; outputTokens: number };
-  loadPhase: null;
-  followups: string[];
-  warnings: { code: string; message: string }[];
-}
-
-const idleSSEState: MockSSEState = {
+// Real StreamState import above — not a hand-rolled shadow. A local mirror
+// of this shape (the previous `MockSSEState`) was missing five fields the
+// real type has gained over time, including `modeAdopt` (C3 role-adoption,
+// shipped 08-14) — invisible until now because a vi.mock factory's return
+// value isn't checked against the real hook's type.
+const idleSSEState: StreamState = {
   status: "idle",
   messageId: null,
   responseId: null,
@@ -111,11 +103,16 @@ const idleSSEState: MockSSEState = {
   error: null,
   stats: { tokensPerSecond: null, ttftSeconds: null, outputTokens: 0 },
   loadPhase: null,
+  truncated_without_terminal: false,
+  stop_reason: null,
+  showContinue: false,
   followups: [],
   warnings: [],
+  memorySaved: undefined,
+  modeAdopt: undefined,
 };
 
-let mockSSEState: MockSSEState = { ...idleSSEState };
+let mockSSEState: StreamState = { ...idleSSEState };
 const resetStreamSpy = vi.fn();
 
 vi.mock("@/hooks/useSSE", () => ({

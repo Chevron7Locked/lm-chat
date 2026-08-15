@@ -18,20 +18,15 @@
  */
 import { test, expect } from "@playwright/test";
 import { bootstrapAuthedApp } from "./_bootstrap";
-
-interface ChatRow {
-  id: number;
-  title: string;
-  folder: string | null;
-  pinned: boolean;
-  updated_at: string;
-  model_id: string | null;
-  display_order: number;
-  settings: Record<string, unknown>;
-}
+// Real ChatSummary import — not a hand-rolled shadow. A local mirror of
+// this shape (the previous `ChatRow`) was missing `tags`/`archived_at`,
+// required on the real type since tags/archive shipped (08-13) — invisible
+// until now because this array is just JSON.stringify'd into a route
+// stub body, never checked against the real type.
+import type { ChatSummary } from "@/hooks/useChats";
 
 test.describe("Flow 66 — move a chat into a folder via the menu", () => {
-  let chats: ChatRow[] = [];
+  let chats: ChatSummary[] = [];
   let folders: string[] = [];
   let lastReorderBody: string | null = null;
 
@@ -48,6 +43,8 @@ test.describe("Flow 66 — move a chat into a folder via the menu", () => {
         model_id: "qwen3",
         display_order: 0,
         settings: {},
+        tags: [],
+        archived_at: null,
       },
       {
         id: 2,
@@ -58,6 +55,8 @@ test.describe("Flow 66 — move a chat into a folder via the menu", () => {
         model_id: "qwen3",
         display_order: 1,
         settings: {},
+        tags: [],
+        archived_at: null,
       },
     ];
 
