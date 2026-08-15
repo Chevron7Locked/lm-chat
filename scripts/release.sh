@@ -16,8 +16,9 @@
 #   <version>      e.g. 1.0.3 or v1.0.3 (the 'v' is optional on input; the
 #                  tag is always created as v<version>).
 #   --dry-run      Run every check, print what would happen, touch nothing.
-#   --skip-gates   Skip `make gates` / `make security-scan` / the frontend
-#                  suite. Prints a loud warning. See "Why gates run" below.
+#   --skip-gates   Skip `make gates` (backend statics + pytest + the routine
+#                  frontend suite) / `make security-scan`. Prints a loud
+#                  warning. See "Why gates run" below.
 #   --message MSG  Override the annotated tag message (default: derived from
 #                  the matching CHANGELOG.md section).
 #
@@ -36,11 +37,13 @@
 #   suite, pyright, or the frontend typecheck/lint/vitest suite on push —
 #   only security/SAST scans (codeql, security-static, container-scan,
 #   scorecard) and a stubbed Playwright job that's PR-only. CONTRIBUTING.md's
-#   "must be green before a PR" bar (`make gates`, `make security-scan`, the
-#   frontend suite) is otherwise enforced by nobody but the person running it
-#   by hand. For a release — the one moment a bad build becomes a public
-#   image — this script is the last real gate, not a redundant one, so it
-#   runs the same three command-groups CONTRIBUTING.md documents. It
+#   "must be green before a PR" bar (`make gates`, `make security-scan`) is
+#   otherwise enforced by nobody but the person running it by hand. For a
+#   release — the one moment a bad build becomes a public image — this script
+#   is the last real gate, not a redundant one, so it runs what
+#   CONTRIBUTING.md documents. The frontend suite is NOT a separate step here:
+#   `make gates` runs `web-suite` itself, so invoking it again would run
+#   install + typecheck + lint + vitest twice per release. It
 #   deliberately does NOT run `make dogfood-live` (10-20 min, needs a live
 #   LM Studio with specific models loaded — explicitly "on-demand only" per
 #   the Makefile) or `make production-gate` (~10-12 min, Docker+DAST+stress).
@@ -76,7 +79,7 @@ Usage: scripts/release.sh <version> [--dry-run] [--skip-gates] [--message MSG]
 
   <version>      e.g. 1.0.3 or v1.0.3
   --dry-run      Run every check, print the plan, change nothing.
-  --skip-gates   Skip make gates / make security-scan / the frontend suite.
+  --skip-gates   Skip make gates (includes the frontend suite) / make security-scan.
   --message MSG  Override the annotated tag message.
 EOF
 }
@@ -287,14 +290,12 @@ note "pyproject.toml / __init__.py / package.json all say $VERSION: OK"
 # --- gates -----------------------------------------------------------------------
 
 if [ "$SKIP_GATES" -eq 1 ]; then
-  warn "--skip-gates set — make gates / make security-scan / the frontend suite will NOT run. This tag is going out unverified by this script."
+  warn "--skip-gates set — make gates (includes the frontend suite) / make security-scan will NOT run. This tag is going out unverified by this script."
 else
-  note "running make gates (pyright + ruff + bandit + pytest + doc/spec checks)..."
+  note "running make gates (pyright + ruff + bandit + frontend suite + pytest + doc/spec checks)..."
   make gates
   note "running make security-scan (bandit + pip-audit + secrets scan)..."
   make security-scan
-  note "running frontend suite (typecheck + lint + vitest)..."
-  (cd web && pnpm typecheck && pnpm lint && pnpm test:unit --run)
   note "gates: ALL GREEN"
 fi
 

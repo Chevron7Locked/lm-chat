@@ -3,7 +3,7 @@
 # the validate-openapi target
 # is the CI gate for the hand-draft openapi.yaml.
 
-.PHONY: help validate-openapi check-adr-consistency check-pyproject-floors check-no-lmstudio-fs check-commit-hygiene install-hooks gates test emit-openapi check-openapi-drift web-codegen web-gates e2e e2e-stubbed e2e-live dogfood-live security-scan reprobe-surface validate-deploy stress-baseline stress-test stress-postgres-up stress-postgres-down stress-migrate production-gate production-gate-quick soak-test target/gates/.L8-auth-passed mutation-baseline coverage-merged test-flake-scan mutation-gate visual-baseline visual-test
+.PHONY: help validate-openapi check-adr-consistency check-pyproject-floors check-no-lmstudio-fs check-commit-hygiene install-hooks gates test emit-openapi check-openapi-drift web-codegen web-suite web-gates e2e e2e-stubbed e2e-live dogfood-live security-scan reprobe-surface validate-deploy stress-baseline stress-test stress-postgres-up stress-postgres-down stress-migrate production-gate production-gate-quick soak-test target/gates/.L8-auth-passed mutation-baseline coverage-merged test-flake-scan mutation-gate visual-baseline visual-test
 
 mutation-baseline:
 	@echo "[mutation] running cosmic-ray baseline for streaming_client + native + chats"
@@ -11,7 +11,7 @@ mutation-baseline:
 
 help:
 	@echo "lm-chat make targets:"
-	@echo "  gates                     run pyright + ruff + bandit + pytest"
+	@echo "  gates                     run pyright + ruff + bandit + web-suite + pytest + adr/floors/hygiene/openapi checks"
 	@echo "  test                      pytest with coverage"
 	@echo "  validate-openapi          run openapi-spec-validator against docs/api/openapi.yaml"
 	@echo "  check-adr-consistency     verify all ADRs have a valid Status line"
@@ -21,7 +21,8 @@ help:
 	@echo "  emit-openapi              regenerate docs/api/openapi.yaml from live FastAPI app"
 	@echo "  check-openapi-drift       diff committed openapi.yaml vs live emit (CI gate)"
 	@echo "  web-codegen               regenerate web/src/types/api.ts from openapi.yaml"
-	@echo "  web-gates                 web/ typecheck + lint + vitest + build + e2e-stubbed"
+	@echo "  web-suite                 web/ typecheck + lint + vitest (routine FE gate — no build, no e2e)"
+	@echo "  web-gates                 web-suite + build + e2e-stubbed"
 	@echo "  e2e-stubbed               Playwright offline suite (mocked BE, 4 projects)"
 	@echo "  e2e-live                  Playwright live suite (needs running app)"
 	@echo "  e2e                       e2e-stubbed + e2e-live (§3.2)"
@@ -60,6 +61,10 @@ gates:
 	# noise (B101 assert_used, B110 try_except_pass) that the real gate
 	# ignores. See the security-scan target below.
 	uv run bandit -r src/lmchat -ll -ii -q
+	# Routine FE suite (typecheck + lint + vitest) runs here — after the fast
+	# backend static checks, before the ~9-minute pytest run — so a broken
+	# frontend fails in seconds, not after the longest step in the gate.
+	$(MAKE) web-suite
 	uv run pytest --cov=lmchat --cov-fail-under=75 -q
 	uv run python tools/check_adr_consistency.py
 	uv run python tools/check_pyproject_floors.py
@@ -85,8 +90,30 @@ test:
 web-codegen:
 	cd web && pnpm codegen
 
+# web-suite is the ONE definition of "the routine frontend gate" — typecheck
+# + lint + unit tests, nothing slower. scripts/release.sh calls this target
+# instead of inlining the command sequence so the two can't drift apart
+# again (see release.sh's "Why gates run" comment for the incident this
+# fixes: `make gates` passed, then release.sh failed on 7 typecheck errors
+# and 750 lint errors no local gate had ever run).
+#
+# `pnpm install --frozen-lockfile` runs first: unlike `uv run` (which
+# self-heals a stale venv), pnpm scripts do nothing to fix a missing/stale
+# node_modules — on a fresh checkout this target would otherwise fail with
+# a bare "command not found" instead of a real error. --frozen-lockfile
+# keeps this a verification, not a mutation: it fails loudly if
+# pnpm-lock.yaml disagrees with package.json rather than silently rewriting
+# the lockfile. On an already-current node_modules this is a fast no-op.
+web-suite:
+	cd web && pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm test:unit --run
+
+# e2e-stubbed builds the SPA and runs Playwright across 4 browser projects —
+# too slow to belong in the routine path (see release.sh's "Why gates run"
+# comment: folding slow suites into the everyday gate is how gates start
+# getting skipped). web-gates is the deliberately-heavier target for when
+# that cost is worth paying.
 web-gates:
-	cd web && pnpm typecheck && pnpm lint && pnpm test:unit --run
+	$(MAKE) web-suite
 	$(MAKE) e2e-stubbed
 
 # Playwright e2e gates.

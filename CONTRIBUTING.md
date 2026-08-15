@@ -31,13 +31,20 @@ regenerate them: `make emit-openapi && (cd web && pnpm codegen)`.
 Run these locally:
 
 ```bash
-make gates          # backend: ruff + pyright + pytest (≥75% cov) + doc/spec checks
+make gates          # ruff + pyright + pytest (≥75% cov) + doc/spec checks, AND
+                     # the routine frontend suite (web/ typecheck + lint + vitest)
 make security-scan  # bandit + pip-audit + secret scan
-cd web && pnpm typecheck && pnpm lint && pnpm test   # frontend
 ```
 
-Both suites must be green. New behaviour needs a test; a fix needs a
-regression test that fails on the un-fixed code.
+Both must be green. `make gates` runs the frontend suite via `make
+web-suite` — run `make web-suite` on its own for a fast frontend-only check
+while iterating. `make web-gates` (`web-suite` plus a build and the offline
+Playwright suite across 4 browsers) is heavier and not required per-PR — CI
+already runs it on PRs; run it locally when you've touched a user-facing
+flow and want to see it before pushing.
+
+New behaviour needs a test; a fix needs a regression test that fails on the
+un-fixed code.
 
 ## Sign-off (DCO)
 
