@@ -60,7 +60,7 @@ from lmchat.services.streaming_service import (
     _grammar_degrade_eligible,
     _grammar_degrade_warning,
     _release_stuck_draft_impl,
-    _salvage_aborted_sub_session_row,
+    _salvage_aborted_row,
     _transition_sub_session_status,
 )
 
@@ -2720,12 +2720,13 @@ async def _sub_session_sse(
         # non-aborted row (WHERE state='aborted_by_client').
         try:
             await asyncio.shield(
-                _salvage_aborted_sub_session_row(
+                _salvage_aborted_row(
                     engine,
                     msg_id,
                     content=(_acc_content if isinstance(_acc_content, str) else None),
                     reasoning=(_acc_reasoning if isinstance(_acc_reasoning, str) else None),
                     tool_calls=(_acc_tools if isinstance(_acc_tools, list) else None),
+                    table=sub_session_messages,
                 )
             )
         except asyncio.CancelledError:

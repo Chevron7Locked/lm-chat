@@ -953,26 +953,42 @@ async def _append_turn_to_sub_session(
     return sub_session_id, msg_id
 
 
-async def _salvage_aborted_sub_session_row(
+async def _salvage_aborted_row(
     engine: AsyncEngine,
     msg_id: int,
     *,
     content: str | None,
     reasoning: str | None,
     tool_calls: list[dict[str, object]] | None,
+    table: Table = messages,
 ) -> None:
     """Persist the full accumulated turn state onto a disconnect-aborted row.
 
     On client disconnect ``safe_abort_draft`` moves the row
     draft -> aborted_by_client WITHOUT writing the accumulated
     reasoning/tool_calls, and ``_release_stuck_draft_impl`` only touches
-    ``draft`` rows — so a reopened disconnected sub-session would otherwise show
-    only whatever the (state-guarded) coalesce flush persisted before the abort,
-    losing reasoning_content + tool_calls (and any content streamed after the
-    abort but before the core tore down). Write the full accumulated state here,
-    KEEPING the ``aborted_by_client`` state — the turn was interrupted, this is
-    NOT a finalize. ``WHERE state='aborted_by_client'`` so a graceful/final row
-    is never clobbered. (strong seat, P2 review 2026-08-12.)
+    ``draft`` rows — so whichever of those two writers wins the race, a
+    reopened disconnected turn would otherwise show only whatever the
+    (state-guarded) coalesce flush persisted before the abort, losing
+    reasoning_content + tool_calls (and any content streamed after the last
+    flush but before the core tore down — up to one ``_COALESCE_INTERVAL_SEC``
+    window). Write the full accumulated state here, KEEPING the
+    ``aborted_by_client`` state — the turn was interrupted, this is NOT a
+    finalize. ``WHERE state='aborted_by_client'`` so a graceful/final row is
+    never clobbered.
+
+    ``table`` (default ``messages``) parameterizes this over the main chat
+    and durable sub-sessions (``sub_session_messages``), mirroring
+    :func:`_release_stuck_draft_impl` / :func:`_finalize_message_impl`.
+
+    Safe against shrinking an already-persisted row: every value here comes
+    from the SAME in-memory accumulator the coalesce flush itself draws
+    from (mirrored into the caller's ``_state``/``_pstate`` dict on every
+    delta), so it is always a superset of — never shorter than — whatever
+    the last flush wrote; and each field is only included in the UPDATE when
+    truthy (``tool_calls``) or non-None (``content``/``reasoning``), so a
+    field the caller never captured is left untouched rather than blanked.
+    (strong seat, P2 review 2026-08-12.)
     """
     values: dict[str, object] = {}
     if content is not None:
@@ -987,11 +1003,10 @@ async def _salvage_aborted_sub_session_row(
     async def _do_update() -> None:
         async with engine.begin() as conn:
             await conn.execute(
-                sub_session_messages.update()
+                table.update()
                 .where(
-                    sub_session_messages.c.id == msg_id,
-                    sub_session_messages.c.state
-                    == PersistState.ABORTED_BY_CLIENT.value,
+                    table.c.id == msg_id,
+                    table.c.state == PersistState.ABORTED_BY_CLIENT.value,
                 )
                 .values(**values)
             )
@@ -1000,7 +1015,10 @@ async def _salvage_aborted_sub_session_row(
         await with_write_retry(_do_update)
     except Exception as exc:  # noqa: BLE001
         log.warning(
-            "sub_session.aborted_salvage_failed", msg_id=msg_id, error=str(exc)
+            "stream.aborted_salvage_failed",
+            msg_id=msg_id,
+            table=table.name,
+            error=str(exc),
         )
 
 
@@ -5379,15 +5397,19 @@ class StreamingService:
             # raise CancelledError (caught below) but the row is released by
             # then. The gauge dec + mark_inactive stay un-shielded since they
             # don't await and can't be cancelled.
+            # Read once, outside the try below, so both salvage calls in this
+            # finally (the draft-release AND the aborted-row backfill) see the
+            # same snapshot and neither reads a possibly-unbound name if the
+            # first one raises something other than CancelledError.
+            _acc_content = _state.get("acc_content")
+            _acc_reasoning = _state.get("acc_reasoning")
+            _acc_tools = _state.get("acc_tool_calls")
+            _acc_rounds = _state.get("acc_tool_rounds", 0)
             try:
                 # Salvages the buffer the persist generator mirrored into
                 # _state: a no-op on a graceful terminal (row already FINAL,
                 # WHERE state='draft' matches 0 rows); persists the partial
                 # answer + folded reasoning on a non-graceful terminal.
-                _acc_content = _state.get("acc_content")
-                _acc_reasoning = _state.get("acc_reasoning")
-                _acc_tools = _state.get("acc_tool_calls")
-                _acc_rounds = _state.get("acc_tool_rounds", 0)
                 await asyncio.shield(
                     self._release_stuck_draft(
                         msg_id=msg_id,
@@ -5410,5 +5432,35 @@ class StreamingService:
                 # The shielded release still ran to completion; only the
                 # outer await was cancelled. Swallow — no caller is left to
                 # propagate to in this terminal teardown.
+                pass
+
+            # Disconnect salvage: if the row was moved to aborted_by_client
+            # (the disconnect watcher's safe_abort_draft), _release_stuck_draft
+            # above (WHERE draft) no-op'd, so persist the full accumulated
+            # content/reasoning/tool_calls onto the aborted row here —
+            # otherwise a reloaded disconnected chat loses reasoning +
+            # tool_calls, keeping only whatever the (state-guarded) coalesce
+            # flush persisted before the abort (strong seat, P2 review
+            # 2026-08-12 caught this for sub-sessions via
+            # _salvage_aborted_row; the main chat shared the same gap — see
+            # the disconnect dogfood, 2026-08-14). No-op on any non-aborted
+            # row (WHERE state='aborted_by_client').
+            try:
+                await asyncio.shield(
+                    _salvage_aborted_row(
+                        self._engine,
+                        msg_id,
+                        content=(
+                            _acc_content if isinstance(_acc_content, str) else None
+                        ),
+                        reasoning=(
+                            _acc_reasoning if isinstance(_acc_reasoning, str) else None
+                        ),
+                        tool_calls=(
+                            _acc_tools if isinstance(_acc_tools, list) else None
+                        ),
+                    )
+                )
+            except asyncio.CancelledError:
                 pass
             mark_inactive(chat_id)

@@ -498,6 +498,176 @@ async def test_streaming_receive_disconnect_aborts_draft_and_balances_gauge(
 
 
 # ---------------------------------------------------------------------------
+# Test 2b2: disconnect salvage backfills reasoning + tool_calls, not just
+#           whatever the content-only _CoalesceTimer flush already wrote.
+#
+# RED-ON-REVERT for the main-chat half of the disconnect-salvage fix
+# (2026-08-14 disconnect dogfood, J11): _CoalesceTimer.flush() persists
+# `content` ONLY — never `reasoning_content` or `tool_calls`. When the
+# disconnect watcher's `safe_abort_draft` wins the race (draft ->
+# aborted_by_client, state-only, no content write), the outer teardown's
+# `_release_stuck_draft` (WHERE state='draft') no-ops, so — before this fix
+# — the accumulated reasoning + tool_calls that only ever lived in `_state`
+# were silently dropped. Mirrors the sub-session equivalent,
+# test_sub_session_stream_disconnect_salvages_draft
+# (tests/routes/test_sub_session_durable.py), which is why sub-sessions
+# never had this gap: `_salvage_aborted_row` (formerly
+# `_salvage_aborted_sub_session_row`) already ran there. This test proves
+# the SAME call now runs in stream_chat's own teardown.
+#
+# Ordering is DETERMINISTIC, not temporal (2026-08-14 fix, after a
+# load-sensitive first version): a fixed `asyncio.sleep` gap between "the
+# events were emitted" and "the disconnect fires" is a coin flip once the
+# machine is busy — an event-mocked `request.receive()` can resolve
+# essentially synchronously, so it can win the race against the persist loop
+# before it has processed ANYTHING. Instead, the fake stream's OWN generator
+# body is the sequencing authority: the async-generator hand-off protocol
+# guarantees the persist loop has FULLY processed one yielded event
+# (including any `await coalesce.flush()` that event triggered) before the
+# generator can resume past that `yield` — a consumer only calls
+# `__anext__()` again once its own loop-body processing of the previous
+# value has finished. `request.receive()` explicitly BLOCKS on
+# `ready_to_disconnect`, an `asyncio.Event` the fake stream sets only AFTER
+# that hand-off has happened for the LAST synthetic event (reasoning,
+# tool_call round, and both content deltas) — so the disconnect cannot fire
+# before every one of them is in `_state`, regardless of scheduler load.
+# The 300ms sleep between the two content deltas is NOT part of that race —
+# it only needs to give `_CoalesceTimer`'s 250ms interval a chance to elapse
+# before the SECOND delta re-checks `should_flush()` (flush is delta-
+# triggered only, never on an independent timer), so real coalesce content
+# is on disk before the salvage runs too, exercising the "salvage must not
+# shrink an already-persisted row" case — not just the in-memory-only one.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_streaming_disconnect_salvages_reasoning_and_tool_calls(
+    engine: AsyncEngine,
+) -> None:
+    """Disconnect after reasoning + a completed tool round: both survive on the
+    aborted_by_client row, on top of whatever content the coalesce flush
+    already wrote — not a fixed sleep race, gated on observable state.
+    """
+    ready_to_disconnect = asyncio.Event()
+
+    async def _slow_stream(*args: object, **kwargs: object) -> AsyncIterator[CanonicalEvent]:
+        yield CanonicalEvent(type="chat.start")
+        yield CanonicalEvent(type="message.start")
+        yield CanonicalEvent(type="reasoning.start")
+        yield CanonicalEvent(type="reasoning.delta", content="Let me think this through. ")
+        yield CanonicalEvent(
+            type="reasoning.delta", content="The answer depends on several factors."
+        )
+        yield CanonicalEvent(type="reasoning.end")
+        yield _tool_call_event("tool_call.start", id="tc-1", name="", arguments={})
+        yield _tool_call_event("tool_call.name", id="tc-1", name="search_web", arguments={})
+        yield _tool_call_event(
+            "tool_call.arguments", id="tc-1", name="search_web", arguments={"query": "lm studio"}
+        )
+        yield _tool_call_event(
+            "tool_call.success",
+            id="tc-1",
+            name="search_web",
+            arguments={"query": "lm studio"},
+            result="LM Studio is a desktop application.",
+        )
+        yield CanonicalEvent(type="message.delta", content="first chunk ")
+        # Not a race: nothing downstream depends on THIS specific duration —
+        # the disconnect can only fire after ready_to_disconnect.set() below,
+        # which cannot run until "second chunk" has been handed off to (and
+        # fully processed by) the consumer. This sleep only needs to outlast
+        # _COALESCE_INTERVAL_SEC (250ms) so should_flush() trips on the NEXT
+        # delta, regardless of how long the machine actually takes to honor it.
+        await asyncio.sleep(0.3)
+        yield CanonicalEvent(type="message.delta", content="second chunk")
+        # By the time this line runs, "second chunk" — and the coalesce flush
+        # it triggered — has already been fully consumed by the persist loop
+        # (async-generator hand-off protocol: the generator only resumes past
+        # a yield once the consumer's own processing of that value, including
+        # its awaits, has completed and __anext__() is called again).
+        ready_to_disconnect.set()
+        never = asyncio.Event()
+        await never.wait()  # block until the test's outer timeout tears this down
+        yield CanonicalEvent(type="message.delta", content="never reaches here")  # pragma: no cover
+
+    async def _receive() -> dict[str, str]:
+        # The disconnect watcher's SOLE consumer of receive() — block until
+        # every synthetic event above is guaranteed processed, then fire.
+        await ready_to_disconnect.wait()
+        return {"type": "http.disconnect"}
+
+    lm_client = MagicMock()
+    lm_client.stream = _slow_stream
+
+    from lmchat.db.schema import chats
+
+    async with engine.begin() as conn:
+        await conn.execute(chats.insert().values(user_id=1, title="test"))
+
+    svc = await _make_service(engine, lm_client=lm_client)
+    user = _mock_user(1)
+    request = AsyncMock()
+    request.receive = _receive
+    payload = _make_request_payload()
+
+    try:
+        # 3.0s matches the sibling disconnect tests above — the persist loop
+        # blocks forever on `never.wait()` once the disconnect fires (nothing
+        # about the disconnect itself cancels it; only this outer bound does,
+        # mirroring production where the ACTUAL teardown trigger is the
+        # request being torn down, not the watcher's abort alone), so this is
+        # purely how long the test waits to force that teardown, not a race
+        # any assertion depends on winning.
+        async with asyncio.timeout(3.0):
+            await _drain(
+                svc.stream_chat(chat_id=1, user=user, payload=payload, request=request)
+            )
+    except TimeoutError:
+        pass  # acceptable — the disconnect path doesn't guarantee a clean exit
+
+    # Let the disconnect watcher + outer finally settle (unchanged from the
+    # sibling disconnect tests in this file — this is the POST-cancellation
+    # detached-teardown window, not the pre-disconnect race that was flaky).
+    await asyncio.sleep(0.6)
+
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            select(
+                messages.c.state,
+                messages.c.content,
+                messages.c.reasoning_content,
+                messages.c.tool_calls,
+            ).where(
+                messages.c.chat_id == 1,
+                messages.c.role == "assistant",
+            )
+        )
+        row = result.fetchone()
+
+    assert row is not None
+    assert row[0] == PersistState.ABORTED_BY_CLIENT.value, (
+        f"expected aborted_by_client, got {row[0]!r} — the resting STATE must "
+        "not change; this fix is about not losing what was generated, not "
+        "about relabelling an interrupted turn as finished"
+    )
+    assert row[1] == "first chunk second chunk", f"content lost on disconnect — got {row[1]!r}"
+    assert row[2] == "Let me think this through. The answer depends on several factors.", (
+        f"RED-ON-REVERT: reasoning_content lost on disconnect — got {row[2]!r}. "
+        "_CoalesceTimer.flush() never persists reasoning; only the "
+        "_salvage_aborted_row backfill (WHERE state='aborted_by_client') does."
+    )
+    assert row[3] == [
+        {
+            "id": "tc-1",
+            "name": "search_web",
+            "arguments": json.dumps({"query": "lm studio"}),
+            "status": "success",
+            "result": "LM Studio is a desktop application.",
+        }
+    ], f"RED-ON-REVERT: tool_calls lost on disconnect — got {row[3]!r}"
+
+
+# ---------------------------------------------------------------------------
 # Test 2c: the draft release survives a cancellation delivered DURING the
 #          finally's release await — the exact production disconnect mechanism.
 #
