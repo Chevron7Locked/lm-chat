@@ -20,6 +20,7 @@ LM Chat is a self-hosted chat application, built around LM Studio and meant to r
 - [Providers and models](#providers-and-models)
 - [Security](#security)
 - [Documentation](#documentation)
+- [Changelog](CHANGELOG.md)
 - [License](#license)
 
 ## Built around LM Studio
@@ -33,15 +34,15 @@ LM Chat also handles the ways LM Studio behaves in practice: it re-probes which 
 
 ## What you get
 
-- **Chat and reasoning.** Tokens stream as they arrive, reasoning shows in collapsible blocks that Cmd/Ctrl+J folds all at once, tool calls render as cards, sources come back as inline citations, and a meter tracks how much of the context window you have spent.
-- **Personas and sub-agent modes.** Six personas are built in, for general chat, coding, creative work, research, analysis, and architecture, alongside a raw `None`. Beside those, `/research`, `/code`, `/write`, `/analyze`, and `/architect` open a clean-context thread that runs without loading the chat's history or writing anything until it resolves, and then hands the result back.
+- **Chat and reasoning.** Tokens stream as they arrive, reasoning shows in collapsible blocks that Cmd/Ctrl+J folds all at once, tool calls render as cards, sources come back as inline citations, and a meter tracks how much of the context window you have spent. You can keep typing and send while a response is still streaming — it queues and sends automatically once the turn finishes — and a reversible full-screen focus mode (Cmd/Ctrl+.) hides everything but the conversation.
+- **Personas and sub-agent modes.** Six personas are built in, for general chat, coding, creative work, research, analysis, and architecture, alongside a raw `None`. Beside those, `/research`, `/code`, `/write`, `/analyze`, and `/architect` open a clean-context thread that runs without loading the chat's history or writing anything until it resolves, and then hands the result back. Sub-agent runs persist to the database, so a reload no longer loses one in progress — reopen and continue any past run from the chat's Sub-session history. Set `LM_CHAT_MODE_ADOPTION_ENABLED=1` (opt-in, off by default) to let the model adopt one of the six personas for its own next turn, instead of only suggesting a slash command for you to run.
 - **Tools (MCP).** Two MCP systems sit side by side, and the chat's endpoint decides which one runs. On the native LM Studio endpoint, LM Studio hosts its own `mcp.json` servers and makes the tool calls itself — LM Chat reads that file to list them in the composer and names the ones you enable in the request; it never runs them. On the OpenAI-compatible and cloud providers, LM Chat runs its own MCP Store instead: 23 servers that install in a click and execute inside the app's own container, where each stdio process is confined by a Landlock ruleset so a tool server can never read the database or the app's secrets. The composer only shows the active system's servers, and a Store server can also run client-side against a native local model when you want a tool LM Studio isn't hosting. Servers can be local (stdio) or remote (SSE or HTTP with bearer auth), tools can be allowed or denied per server, and any credentials they need are encrypted at rest.
 - **Documents and RAG.** Upload `txt`, `md`, `html`, `pdf`, `epub`, and `docx`; retrieval fuses FTS5 keyword search with vector search using reciprocal rank fusion, then a dependency-free diversity re-rank (MMR) drops near-duplicate chunks, in inline, hybrid, or focused modes, with the embedding model pinned per project.
 - **Projects.** A project gathers a system prompt, a document knowledge base, and its chats, and new chats inherit all of it. You can archive a project, export it as a bundle, give it its own default model and retrieval threshold, or promote an existing chat into a fresh project, which carries the history over and lets you bring specific documents along.
 - **Memory.** Pin insights yourself, or let a background pass distill the durable facts out of a conversation after each turn, and refine or restore them later.
 - **Prompt library.** Save prompts and drop them into any chat with `/prompt`.
 - **Quality modes.** For answers worth the extra tokens, self-consistency samples several attempts and reconciles them, and chain-of-verification has the model draft, interrogate its own draft, and revise.
-- **Organizing.** Group chats into folders by dragging or with the keyboard, keep the important ones pinned in a band of their own, or run a chat in incognito, which writes nothing to memory, refuses to be shared, and purges itself after an hour.
+- **Organizing.** Group chats into folders by dragging or with the keyboard, keep the important ones pinned in a band of their own, tag chats and archive the ones you're done with, or run a chat in incognito, which writes nothing to memory, refuses to be shared, and purges itself after an hour. Fork a copy of any chat from any assistant message to branch the conversation without disturbing the original.
 - **Sharing and export.** Share a conversation as a read-only link you can revoke at any time, or export the whole thing to Markdown or JSON.
 - **A/B compare.** `/compare` streams two models side by side so you can watch them diverge.
 - **Compaction.** When a conversation outgrows the window, `/compact` summarizes its oldest stretch with a local model and folds it into a recall tab. Nothing is deleted; you can open the tab and read the originals.
@@ -95,6 +96,8 @@ cd web && pnpm install && pnpm dev                     # frontend, proxies /api 
 
 LM Studio is configured per user over an admin-set default, in whichever endpoint mode you prefer. The cloud providers live under Settings, where OpenAI, OpenRouter, Groq, and any custom OpenAI-compatible endpoint each come with a test-connection probe and a per-provider model allowlist. There is no built-in Anthropic provider; if you want Claude, reach it through OpenRouter or an OpenAI-compatible gateway.
 
+A chat's model picker shows "Auto" until you pick a model for that chat specifically. Auto resolves to your configured default, and picking a model sets a per-chat override that "Auto" clears.
+
 ## Security
 
 LM Chat is meant to be hosted by you, on your own network, and the defaults are set for that.
@@ -103,7 +106,7 @@ Provider and LM Studio API keys are encrypted at rest with AES-256-GCM in a vers
 
 ## Documentation
 
-The full user guide ships inside the app, in a `/docs` reader that covers the quickstart, a walk through each feature, an architecture overview, and an API reference. The same pages sit in the repository as Markdown under [`guide/`](guide/) if you would rather read them there.
+The full user guide ships inside the app, in a `/docs` reader that covers the quickstart, a walk through each feature, an architecture overview, and an API reference. The same pages sit in the repository as Markdown under [`guide/`](guide/) if you would rather read them there. Release notes for every version are in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 
