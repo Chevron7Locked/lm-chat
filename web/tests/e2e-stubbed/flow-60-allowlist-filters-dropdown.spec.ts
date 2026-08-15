@@ -17,7 +17,7 @@
  *   web/src/hooks/useChatModelOptions.ts — groups the dropdown options
  *   web/src/pages/Chat.tsx:2356/2458 — testId="chat-header-model-select"
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type Route } from "@playwright/test";
 import { bootstrapAuthedApp } from "./_bootstrap";
 
 // The full provider catalog has many models; the allowlist restricts to these two.
@@ -38,7 +38,7 @@ async function stubCommon(page: Parameters<Parameters<typeof test["beforeEach"]>
   // spec is already signed in on cold load.
   await bootstrapAuthedApp(page, { isAdmin: true, username: "admin" });
 
-  await page.route("**/api/providers/status", (route) =>
+  await page.route("**/api/providers/status", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
 }
@@ -70,7 +70,7 @@ async function stubChat(
   page: Parameters<Parameters<typeof test["beforeEach"]>[0]>[0],
   chatId: number,
 ) {
-  await page.route("**/api/chats**", async (route) => {
+  await page.route("**/api/chats**", async (route: Route) => {
     const method = route.request().method();
     const path = new URL(route.request().url()).pathname;
     if (method === "GET" && path === "/api/chats") {
@@ -122,7 +122,7 @@ test.describe("Flow 60 — Allowlist filters chat model dropdown", () => {
 
     // Provider config has an allowlist — the BE returns only allowed models.
     // Stub /api/models to simulate the filtered response from the backend.
-    await page.route("**/api/models", (route) => {
+    await page.route("**/api/models", (route: Route) => {
       if (route.request().method() !== "GET") return route.fallback();
       const allowedModels = ALLOWED_OR_MODELS.map((id) =>
         makeModel(id, "openrouter", id.split("/").pop() ?? id),
@@ -171,7 +171,7 @@ test.describe("Flow 60 — Allowlist filters chat model dropdown", () => {
     await stubChat(page, chatId);
 
     // No allowlist — /api/models returns the full catalog.
-    await page.route("**/api/models", (route) => {
+    await page.route("**/api/models", (route: Route) => {
       if (route.request().method() !== "GET") return route.fallback();
       return route.fulfill({
         status: 200,
@@ -207,7 +207,7 @@ test.describe("Flow 60 — Allowlist filters chat model dropdown", () => {
   }) => {
     await stubCommon(page);
 
-    await page.route("**/api/admin/providers", (route) => {
+    await page.route("**/api/admin/providers", (route: Route) => {
       if (route.request().method() === "GET") {
         return route.fulfill({
           status: 200,
@@ -217,7 +217,7 @@ test.describe("Flow 60 — Allowlist filters chat model dropdown", () => {
       }
       return route.fallback();
     });
-    await page.route("**/api/models", (route) => {
+    await page.route("**/api/models", (route: Route) => {
       if (route.request().method() !== "GET") return route.fallback();
       return route.fulfill({
         status: 200,
@@ -227,7 +227,7 @@ test.describe("Flow 60 — Allowlist filters chat model dropdown", () => {
     });
 
     // Test probe returns all OR models so the allowlist picker is populated.
-    await page.route("**/api/admin/providers/openrouter/test", (route) => {
+    await page.route("**/api/admin/providers/openrouter/test", (route: Route) => {
       if (route.request().method() !== "POST") return route.fallback();
       return route.fulfill({
         status: 200,

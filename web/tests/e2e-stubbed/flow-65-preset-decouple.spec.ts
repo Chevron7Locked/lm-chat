@@ -11,7 +11,7 @@
  *
  * Route-stubbed; auth bypassed via probe/me stubs (no login page).
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type Route } from "@playwright/test";
 import { bootstrapAuthedApp } from "./_bootstrap";
 
 const AUTH_ME = {
@@ -45,14 +45,14 @@ async function stubCommon(
   // list/object endpoints). Replaces the old `**/api/**` → {} catch-all,
   // which shadowed array endpoints (e.g. /api/documents) and crashed the page.
   await bootstrapAuthedApp(page);
-  await page.route("**/api/chats/*/rag_mode", (route) =>
+  await page.route("**/api/chats/*/rag_mode", (route: Route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ mode: "inline", source: "default", project_id: null }),
     }),
   );
-  await page.route("**/api/auth/me/probe", (route) =>
+  await page.route("**/api/auth/me/probe", (route: Route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -66,21 +66,21 @@ async function stubCommon(
       }),
     }),
   );
-  await page.route("**/api/auth/setup_status", (route) =>
+  await page.route("**/api/auth/setup_status", (route: Route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ needs_setup: false }),
     }),
   );
-  await page.route("**/api/auth/me", (route) =>
+  await page.route("**/api/auth/me", (route: Route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(AUTH_ME),
     }),
   );
-  await page.route("**/api/settings/lmstudio", (route) =>
+  await page.route("**/api/settings/lmstudio", (route: Route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -96,13 +96,13 @@ async function stubCommon(
       }),
     }),
   );
-  await page.route("**/api/folders", (route) =>
+  await page.route("**/api/folders", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
-  await page.route("**/api/projects", (route) =>
+  await page.route("**/api/projects", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
-  await page.route("**/api/quotas/me", (route) =>
+  await page.route("**/api/quotas/me", (route: Route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -115,16 +115,16 @@ async function stubCommon(
       }),
     }),
   );
-  await page.route("**/api/prompts", (route) =>
+  await page.route("**/api/prompts", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
-  await page.route("**/api/integrations/available", (route) =>
+  await page.route("**/api/integrations/available", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
-  await page.route("**/api/memory/pins", (route) =>
+  await page.route("**/api/memory/pins", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
-  await page.route("**/api/models", (route) => {
+  await page.route("**/api/models", (route: Route) => {
     if (route.request().method() !== "GET") return route.fallback();
     return route.fulfill({
       status: 200,
@@ -146,7 +146,7 @@ async function stubCommon(
       ]),
     });
   });
-  await page.route("**/api/chats**", async (route) => {
+  await page.route("**/api/chats**", async (route: Route) => {
     const method = route.request().method();
     const path = new URL(route.request().url()).pathname;
 
@@ -202,14 +202,14 @@ test.describe("Flow 65 — Preset/mode decoupling", () => {
 
       // Capture any PATCH to chats/:id to verify active_preset is NOT written.
       const patchBodies: string[] = [];
-      await page.route(`**/api/chats/${String(chatId)}`, async (route) => {
+      await page.route(`**/api/chats/${String(chatId)}`, async (route: Route) => {
         if (route.request().method() === "PATCH") {
           patchBodies.push(route.request().postData() ?? "");
         }
         return route.fallback();
       });
 
-      await page.route("**/api/chats/*/sub-session/stream", (route) => {
+      await page.route("**/api/chats/*/sub-session/stream", (route: Route) => {
         if (route.request().method() !== "POST") return route.fallback();
         return route.fulfill({
           status: 200,
@@ -255,7 +255,7 @@ test.describe("Flow 65 — Preset/mode decoupling", () => {
 
       // Capture each /api/chat/stream body so we can assert system_prompt.
       let lastStreamBody: unknown = null;
-      await page.route("**/api/chat/stream", async (route) => {
+      await page.route("**/api/chat/stream", async (route: Route) => {
         try {
           lastStreamBody = JSON.parse(route.request().postData() ?? "{}");
         } catch {
@@ -270,7 +270,7 @@ test.describe("Flow 65 — Preset/mode decoupling", () => {
 
       // Track PATCH active_preset calls so we can assert it fired.
       let patchedPreset: string | null = null;
-      await page.route(`**/api/chats/${String(chatId)}`, async (route) => {
+      await page.route(`**/api/chats/${String(chatId)}`, async (route: Route) => {
         if (route.request().method() === "PATCH") {
           const params = new URLSearchParams(route.request().postData() ?? "");
           const ap = params.get("active_preset");

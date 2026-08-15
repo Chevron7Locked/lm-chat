@@ -29,7 +29,7 @@
  *     (the real transmitted contract) rather than a temperature that is not
  *     sent on the sub-session path.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type Route } from "@playwright/test";
 import { bootstrapAuthedApp } from "./_bootstrap";
 
 /** Build a minimal SSE turn (start → delta → end). */
@@ -56,7 +56,7 @@ async function stubCommon(
   // useChatsDirect issues.  (A bare "**/api/chats" would NOT match a URL
   // with a query string and the list would fall through to bootstrap's
   // default [], breaking currentChat resolution.)
-  await page.route("**/api/chats**", async (route) => {
+  await page.route("**/api/chats**", async (route: Route) => {
     const method = route.request().method();
     const path = new URL(route.request().url()).pathname;
     if (method === "PATCH" && path === `/api/chats/${String(chatId)}`) {
@@ -144,7 +144,7 @@ test.describe("Flow 53 — Preset payload verification", () => {
     await stubCommon(page, chatId);
 
     let subBody: string | null = null;
-    await page.route("**/api/chats/*/sub-session/stream", (route) => {
+    await page.route("**/api/chats/*/sub-session/stream", (route: Route) => {
       if (route.request().method() !== "POST") return route.fallback();
       subBody = route.request().postData() ?? "";
       return route.fulfill({
@@ -191,7 +191,7 @@ test.describe("Flow 53 — Preset payload verification", () => {
     await stubCommon(page, chatId);
 
     let subBody: string | null = null;
-    await page.route("**/api/chats/*/sub-session/stream", (route) => {
+    await page.route("**/api/chats/*/sub-session/stream", (route: Route) => {
       if (route.request().method() !== "POST") return route.fallback();
       subBody = route.request().postData() ?? "";
       return route.fulfill({

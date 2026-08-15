@@ -20,7 +20,7 @@
  *   web/src/hooks/usePresetModels.ts  — PUT /api/settings/preset-models
  *   web/src/lib/presets.ts            — PRESET_LIST ids ("research", "coder"…)
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type Route } from "@playwright/test";
 import { bootstrapAuthedApp } from "./_bootstrap";
 
 const PRESET_MODEL_ID = "openai/gpt-4o-mini";
@@ -45,11 +45,11 @@ async function stubCommon(
   // spec is already signed in on cold load.
   await bootstrapAuthedApp(page, { isAdmin: true, username: "admin" });
 
-  await page.route("**/api/providers/status", (route) =>
+  await page.route("**/api/providers/status", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
 
-  await page.route("**/api/settings/preset-models", (route) => {
+  await page.route("**/api/settings/preset-models", (route: Route) => {
     const method = route.request().method();
     if (method === "GET") {
       return route.fulfill({
@@ -70,13 +70,13 @@ async function stubCommon(
     return route.fallback();
   });
 
-  await page.route("**/api/folders", (route) =>
+  await page.route("**/api/folders", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
-  await page.route("**/api/projects", (route) =>
+  await page.route("**/api/projects", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
-  await page.route("**/api/quotas/me", (route) =>
+  await page.route("**/api/quotas/me", (route: Route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -89,20 +89,20 @@ async function stubCommon(
       }),
     }),
   );
-  await page.route("**/api/prompts", (route) =>
+  await page.route("**/api/prompts", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
-  await page.route("**/api/integrations/available", (route) =>
+  await page.route("**/api/integrations/available", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
-  await page.route("**/api/memory/pins", (route) =>
+  await page.route("**/api/memory/pins", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
-  await page.route("**/api/providers/status", (route) =>
+  await page.route("**/api/providers/status", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
 
-  await page.route("**/api/models", (route) => {
+  await page.route("**/api/models", (route: Route) => {
     if (route.request().method() !== "GET") return route.fallback();
     return route.fulfill({
       status: 200,
@@ -148,7 +148,7 @@ async function stubCommon(
     });
   });
 
-  await page.route("**/api/chats**", async (route) => {
+  await page.route("**/api/chats**", async (route: Route) => {
     const method = route.request().method();
     const path = new URL(route.request().url()).pathname;
 
@@ -218,7 +218,7 @@ test.describe("Flow 61 — Preset model routing", () => {
 
     let capturedPutBody: string | null = null;
     // Override the preset-models PUT to capture the body.
-    await page.route("**/api/settings/preset-models", (route) => {
+    await page.route("**/api/settings/preset-models", (route: Route) => {
       const method = route.request().method();
       if (method === "GET") {
         return route.fulfill({
@@ -278,7 +278,7 @@ test.describe("Flow 61 — Preset model routing", () => {
     });
 
     let subBody: string | null = null;
-    await page.route("**/api/chats/*/sub-session/stream", (route) => {
+    await page.route("**/api/chats/*/sub-session/stream", (route: Route) => {
       if (route.request().method() !== "POST") return route.fallback();
       subBody = route.request().postData() ?? "";
       return route.fulfill({

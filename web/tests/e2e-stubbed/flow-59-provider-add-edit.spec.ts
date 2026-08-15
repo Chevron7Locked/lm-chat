@@ -15,7 +15,7 @@
  *   web/src/components/ProvidersSection.tsx
  *   web/src/hooks/useProviders.ts  — PUT /api/admin/providers/{provider}
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type Route } from "@playwright/test";
 import { bootstrapAuthedApp } from "./_bootstrap";
 
 const PROBE_MODELS = [
@@ -29,7 +29,7 @@ async function stubCommon(page: Parameters<Parameters<typeof test["beforeEach"]>
   // spec is already signed in on cold load.
   await bootstrapAuthedApp(page, { isAdmin: true, username: "admin" });
 
-  await page.route("**/api/providers/status", (route) =>
+  await page.route("**/api/providers/status", (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   );
 }
@@ -41,7 +41,7 @@ test.describe("Flow 59 — Provider add/edit", () => {
     await stubCommon(page);
 
     // Initially no providers configured.
-    await page.route("**/api/admin/providers", (route) => {
+    await page.route("**/api/admin/providers", (route: Route) => {
       const method = route.request().method();
       if (method === "GET") {
         return route.fulfill({
@@ -54,7 +54,7 @@ test.describe("Flow 59 — Provider add/edit", () => {
     });
 
     // Models list — LM Studio only before provider is added.
-    await page.route("**/api/models", (route) => {
+    await page.route("**/api/models", (route: Route) => {
       if (route.request().method() !== "GET") return route.fallback();
       return route.fulfill({
         status: 200,
@@ -84,7 +84,7 @@ test.describe("Flow 59 — Provider add/edit", () => {
 
     // Capture the PUT body for assertion.
     let capturedPutBody: string | null = null;
-    await page.route("**/api/admin/providers/openrouter", (route) => {
+    await page.route("**/api/admin/providers/openrouter", (route: Route) => {
       const method = route.request().method();
       if (method === "PUT") {
         capturedPutBody = route.request().postData() ?? "";
@@ -141,7 +141,7 @@ test.describe("Flow 59 — Provider add/edit", () => {
 
     // After save the form closes — providers list is re-fetched.
     // Re-stub to return the newly saved provider.
-    await page.route("**/api/admin/providers", (route) => {
+    await page.route("**/api/admin/providers", (route: Route) => {
       if (route.request().method() === "GET") {
         return route.fulfill({
           status: 200,
@@ -162,7 +162,7 @@ test.describe("Flow 59 — Provider add/edit", () => {
       return route.fallback();
     });
     // After the provider is added, models includes OpenRouter entries.
-    await page.route("**/api/models", (route) => {
+    await page.route("**/api/models", (route: Route) => {
       if (route.request().method() !== "GET") return route.fallback();
       return route.fulfill({
         status: 200,
@@ -243,7 +243,7 @@ test.describe("Flow 59 — Provider add/edit", () => {
   }) => {
     await stubCommon(page);
 
-    await page.route("**/api/admin/providers", (route) => {
+    await page.route("**/api/admin/providers", (route: Route) => {
       if (route.request().method() === "GET") {
         return route.fulfill({
           status: 200,
@@ -253,7 +253,7 @@ test.describe("Flow 59 — Provider add/edit", () => {
       }
       return route.fallback();
     });
-    await page.route("**/api/models", (route) => {
+    await page.route("**/api/models", (route: Route) => {
       if (route.request().method() !== "GET") return route.fallback();
       return route.fulfill({
         status: 200,
@@ -263,7 +263,7 @@ test.describe("Flow 59 — Provider add/edit", () => {
     });
 
     // Test-probe endpoint returns a list of model ids.
-    await page.route("**/api/admin/providers/openrouter/test", (route) => {
+    await page.route("**/api/admin/providers/openrouter/test", (route: Route) => {
       if (route.request().method() !== "POST") return route.fallback();
       return route.fulfill({
         status: 200,
