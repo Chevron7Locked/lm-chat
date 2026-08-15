@@ -39,22 +39,63 @@
  *      this is the one measurement in this file that can show whether that
  *      fix is actually reaching production, not just passing in the unit
  *      suite. content length alone cannot show this.
+ *   7. a PRE-CUT reasoning baseline, so a post-disconnect reading of 0 is a
+ *      comparison ("nothing arrived before the cut either" vs "reasoning
+ *      streamed in but wasn't persisted"), not a bare number with no
+ *      reference point. See "Pre-cut reasoning baseline" below for how.
  *
- * DOM reasoning-block logging — SKIPPED, not attempted. ProcessStream.tsx
- * renders reasoning through two DIFFERENT DOM shapes depending on phase:
- * `[data-testid="process-reasoning-live"]` while streaming BEFORE the answer
- * starts, vs. a togglable collapsed body (className-only, no testid, shares
- * `.lmchat-process-reasoning__text` with the live variant) once the answer is
- * flowing — which is already the case by the time this journey's own
- * "streaming confirmed started" checkpoint fires (it waits for the content
- * caret, which only appears once `message.content !== ""`, i.e. AFTER
- * ProcessStream's own state machine has already auto-collapsed reasoning per
- * its docstring's phase (c)). Reading the collapsed body's text without a
- * dedicated testid means either coupling to a CSS class name or subtracting
- * the toggle button's own "Reasoning" label text out of a container read —
- * both couple this journey to FE implementation detail it doesn't otherwise
- * touch, for a measurement the API-sourced reasoning_content field above
- * already covers authoritatively. Not logged; API is the source of truth here.
+ * DOM reasoning-block logging — SKIPPED, not attempted for the POST-cut
+ * value. ProcessStream.tsx renders reasoning through two DIFFERENT DOM
+ * shapes depending on phase: `[data-testid="process-reasoning-live"]` while
+ * streaming BEFORE the answer starts, vs. a togglable collapsed body
+ * (className-only, no testid, shares `.lmchat-process-reasoning__text` with
+ * the live variant) once the answer is flowing — which is already the case
+ * by the time this journey's own "streaming confirmed started" checkpoint
+ * fires (it waits for the content caret, which only appears once
+ * `message.content !== ""`, i.e. AFTER ProcessStream's own state machine has
+ * already auto-collapsed reasoning per its docstring's phase (c)). Reading
+ * the collapsed body's text without a dedicated testid means either coupling
+ * to a CSS class name or subtracting the toggle button's own "Reasoning"
+ * label text out of a container read — both couple this journey to FE
+ * implementation detail it doesn't otherwise touch, for a measurement the
+ * API-sourced reasoning_content field above already covers authoritatively
+ * for the POST-cut side. Not logged; API is the source of truth there.
+ *
+ * Pre-cut reasoning baseline — HOW, and why not the two options considered
+ * first:
+ *   - Sampling `reasoning_content` from GET /api/chats/{id} WHILE still
+ *     streaming: CONFIRMED IMPOSSIBLE, not assumed. The row is `state='draft'`
+ *     for the entire duration it's still streaming, and
+ *     message_service.py's `list_for_chat` (the query this endpoint's
+ *     `ChatWithMessagesResponse` is built from) excludes `draft` rows
+ *     entirely (`WHERE state != 'draft'`) — confirmed by reading that query;
+ *     there is no other GET-by-id endpoint that bypasses it
+ *     (`routes/messages.py` only exposes PATCH/DELETE by id). A draft row is
+ *     simply not visible through this API at all.
+ *   - The DOM (`[data-testid="process-reasoning-live"]`): a real, stable
+ *     testid DOES exist for the LIVE (pre-answer) reasoning block, unlike
+ *     the collapsed one above — but by construction this journey's
+ *     "streaming started" checkpoint only fires once content begins (the
+ *     stream caret needs `message.content !== ""`), which is exactly when
+ *     ProcessStream auto-collapses reasoning out of the live testid's reach.
+ *     Sampling it EARLIER (before waiting for content) would work for models
+ *     that reason before answering, but ties the measurement to a second,
+ *     narrower timing window this journey doesn't otherwise need — skipped
+ *     in favor of the more direct option below.
+ *   - What's actually used: `installReasoningTee()` (below) wraps
+ *     `window.fetch` (via `page.addInitScript`, so it's in place before any
+ *     page script runs, across every navigation including reload) to
+ *     intercept ONLY the `/api/chat/stream` POST, `ReadableStream.tee()` its
+ *     body, hand the app one branch completely unmodified (byte-for-byte —
+ *     the app's own consumption is unaffected), and independently parse SSE
+ *     frames off the other branch for `reasoning.delta` events, matching the
+ *     wire contract `routes/streaming.py`'s own docstring documents
+ *     (`event: <type>\ndata: {"type":...,"content":...}`) and
+ *     `_format_sse_frame`'s actual serialization. This observes the literal
+ *     bytes the page received — not a DOM read, not a proxy, not an
+ *     assumption about FE state — so a pre-cut baseline of "0 chars, never
+ *     saw a reasoning.delta frame" is real evidence the model emitted none,
+ *     and "saw N chars" against a post-cut null is real evidence of loss.
  *
  * Code-reading finding worth flagging up front (see the report, not just
  * this file): the resting state is a RACE between two independent writers —
@@ -237,6 +278,135 @@ function logGrowthVerdict(samples: GrowthSample[], label: string): void {
   );
 }
 
+interface ReasoningTeeSnapshot {
+  /** Ever saw a non-empty reasoning.delta content field on this fetch. */
+  sawAny: boolean;
+  /** Sum of all reasoning.delta content lengths observed so far. */
+  chars: number;
+}
+
+/**
+ * Install the SSE-tee described in the file docstring's "Pre-cut reasoning
+ * baseline" section. MUST be called before the first `page.goto` of a
+ * scenario whose pre-cut reasoning this journey wants to measure —
+ * `page.addInitScript` re-injects on every navigation for the rest of this
+ * page's lifetime (reload included), so one call up front covers both
+ * scenarios and both disconnect mechanisms.
+ */
+async function installReasoningTee(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as typeof window & {
+      __j11Reasoning?: { sawAny: boolean; chars: number };
+    };
+    const capture = { sawAny: false, chars: 0 };
+    w.__j11Reasoning = capture;
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const resp = await originalFetch(input, init);
+      const url = input instanceof Request ? input.url : String(input);
+      if (!url.includes("/api/chat/stream") || resp.body === null) {
+        return resp;
+      }
+      // Tee: the app gets one branch, byte-for-byte identical to an
+      // untouched fetch — this observer never alters what useSSE.ts
+      // consumes. The other branch is read independently, below.
+      const [appStream, obsStream] = resp.body.tee();
+      void (async () => {
+        const reader = obsStream.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            // {stream:true}: don't corrupt a multi-byte UTF-8 char split
+            // across two chunks.
+            buf += decoder.decode(value, { stream: true });
+            // SSE frames are "\n\n"-terminated (routes/streaming.py /
+            // _format_sse_frame) — an embedded newline in a data field is
+            // JSON-escaped ("\\n"), never a literal byte, so this split is
+            // exact, matching the app's own readSseStream.ts framing.
+            const frames = buf.split("\n\n");
+            buf = frames.pop() ?? "";
+            for (const frame of frames) {
+              if (!frame.includes("reasoning.delta")) continue;
+              const m = /data: (.*)/.exec(frame);
+              if (m === null || m[1] === undefined) continue;
+              try {
+                const obj = JSON.parse(m[1]) as { content?: unknown };
+                if (typeof obj.content === "string" && obj.content !== "") {
+                  capture.sawAny = true;
+                  capture.chars += obj.content.length;
+                }
+              } catch {
+                /* malformed/partial frame — skip, best-effort observer only */
+              }
+            }
+          }
+        } catch {
+          /* observer stream errored (e.g. the context went offline) —
+             best-effort only; never throw into the app's own fetch path. */
+        }
+      })();
+      return new Response(appStream, {
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: resp.headers,
+      });
+    }) as typeof window.fetch;
+  });
+}
+
+/** Read the current pre-cut reasoning snapshot captured by installReasoningTee. */
+async function readReasoningTeeSnapshot(
+  page: Page,
+): Promise<ReasoningTeeSnapshot> {
+  return page.evaluate(() => {
+    const w = window as typeof window & {
+      __j11Reasoning?: { sawAny: boolean; chars: number };
+    };
+    return w.__j11Reasoning ?? { sawAny: false, chars: 0 };
+  });
+}
+
+/**
+ * Compare the pre-cut SSE-observed reasoning baseline against the post-
+ * disconnect persisted value and log an unambiguous verdict — a bare
+ * post-cut number has no reference point; this makes it a comparison.
+ */
+function logReasoningComparison(
+  label: string,
+  preCut: ReasoningTeeSnapshot,
+  postCutLen: number,
+  postCutIsNull: boolean,
+): void {
+  let verdict: string;
+  if (!preCut.sawAny) {
+    verdict =
+      "no reasoning.delta observed before the cut — the model most likely " +
+      "emitted none this turn (NOT evidence of a salvage failure)";
+  } else if (postCutIsNull || postCutLen === 0) {
+    verdict =
+      "REASONING WAS OBSERVED PRE-CUT BUT IS ABSENT POST-DISCONNECT — " +
+      "possible salvage failure, investigate";
+  } else if (postCutLen < preCut.chars) {
+    verdict =
+      "reasoning observed pre-cut AND persisted post-disconnect, but SHORTER " +
+      "than what was observed streaming in — check for partial loss";
+  } else {
+    verdict =
+      "reasoning observed pre-cut and persisted post-disconnect — consistent";
+  }
+  console.log(
+    `J11 RESULT [${label}]: reasoning pre-cut(SSE-observed)=${String(preCut.chars)} chars ` +
+      `(sawAny=${String(preCut.sawAny)}) → post-disconnect(persisted)=${String(postCutLen)} ` +
+      `chars (null=${String(postCutIsNull)}) → ${verdict}`,
+  );
+}
+
 async function waitForModelSelector(page: Page): Promise<void> {
   await page.waitForFunction(
     () => {
@@ -277,6 +447,9 @@ test(
     await loginAndWait(page, backendURL, adminUsername, adminPassword);
     const fleet = await classifyFleet(page, backendURL);
     await configureLmStudio(page, backendURL, fleet.fastId);
+    // Installed ONCE — persists across every navigation on this page for the
+    // rest of the test, both scenarios' reloads included.
+    await installReasoningTee(page);
 
     // -----------------------------------------------------------------
     // Scenario "offline" — context.setOffline(true): network drop while
@@ -301,6 +474,16 @@ test(
     console.log(
       `J11 DIAG [offline]: streaming confirmed started; approx DOM content ` +
         `chars before cut=${String(domLenBeforeOffline)}`,
+    );
+
+    // Snapshot BEFORE the cut — setOffline(true) doesn't destroy the page
+    // context, but the reasoning tee stops accumulating the instant the
+    // fetch errors, so this is the last point where "pre-cut" is unambiguous.
+    const preCutReasoningOffline = await readReasoningTeeSnapshot(page);
+    console.log(
+      `J11 DIAG [offline]: pre-cut reasoning (SSE-observed)=` +
+        `${String(preCutReasoningOffline.chars)} chars (sawAny=` +
+        `${String(preCutReasoningOffline.sawAny)})`,
     );
 
     await page.context().setOffline(true);
@@ -384,6 +567,12 @@ test(
         `stream caret gone=${String(caretGoneOffline)} | ` +
         `assistant bubble rendered=${String(bubbleVisibleOffline)}`,
     );
+    logReasoningComparison(
+      "offline",
+      preCutReasoningOffline,
+      postReloadOffline!.reasoningLen,
+      postReloadOffline!.reasoningIsNull,
+    );
 
     const postReloadSamplesOffline = await sampleGrowth(
       page,
@@ -420,6 +609,15 @@ test(
     console.log(
       `J11 DIAG [reload]: streaming confirmed started; approx DOM content ` +
         `chars before cut=${String(domLenBeforeReload)}`,
+    );
+
+    // Snapshot BEFORE the cut — page.reload() destroys the page context (and
+    // the tee's accumulated state with it), so this MUST happen first.
+    const preCutReasoningReload = await readReasoningTeeSnapshot(page);
+    console.log(
+      `J11 DIAG [reload]: pre-cut reasoning (SSE-observed)=` +
+        `${String(preCutReasoningReload.chars)} chars (sawAny=` +
+        `${String(preCutReasoningReload.sawAny)})`,
     );
 
     await page.reload();
@@ -469,6 +667,12 @@ test(
         `(null=${String(postReloadReload!.toolCallsIsNull)}) | ` +
         `stream caret gone=${String(caretGoneReload)} | ` +
         `assistant bubble rendered=${String(bubbleVisibleReload)}`,
+    );
+    logReasoningComparison(
+      "reload",
+      preCutReasoningReload,
+      postReloadReload!.reasoningLen,
+      postReloadReload!.reasoningIsNull,
     );
 
     const postReloadSamplesReload = await sampleGrowth(
