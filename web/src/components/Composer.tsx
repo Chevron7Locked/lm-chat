@@ -445,11 +445,17 @@ export function Composer({
     handleAttachFiles,
   } = useComposerAttachments(isVision, push);
 
-  // Per-chat active preset (sticky-mode lock-in).
-  // - A preset slash command (``/code`` etc.) sets ``activePreset``; the next
-  //   non-slash user message ships with the preset's system_prompt + temp.
-  // - A plain (non-slash) user message clears the preset on submit, matching
-  //   v0.5.x ``app.js:4345-4380`` ``meta._activePreset`` semantics.
+  // Per-chat active preset. CURRENT semantics (see useChatPreset.ts's module
+  // docstring for the full account, including the stale v0.5.x rule this
+  // comment used to wrongly describe):
+  // - ``active_preset`` is persistent — it stays active on every plain
+  //   message until the user changes it via the rail picker (or the model
+  //   adopts a different one out-of-band; see C3 / adoptModelPreset).
+  // - Preset slash commands (``/code`` etc.) do NOT set ``activePreset`` —
+  //   they launch a transient sub-agent sub-session instead (see
+  //   ``dispatchSlashCommand`` below and ``PRESET_BY_SLASH_CMD``'s callers).
+  //   Whatever preset is already active keeps shipping with the next plain
+  //   message regardless of any slash command run in between.
   const { preset } = useChatPreset(chatId);
 
   // STT (transcript appended to composer text) — extracted; see

@@ -13,7 +13,7 @@ Algorithm
 4. **Reciprocal Rank Fusion (RRF)**: combine keyword and vector ranks.
    Score = Σ 1/(k + rank_i) with canonical k=60 (env-overridable via
    ``LM_CHAT_RRF_K``).
-5. **Optional rerank** (``LM_CHAT_RAG_RERANK_MODE``, default "off"):
+5. **Optional rerank** (``LM_CHAT_RAG_RERANK_MODE``, default "mmr"):
    see "Rerank stage" below.
 6. Return top-k chunks with document metadata.
 
@@ -31,11 +31,13 @@ adding either):
   ``pyproject.toml``; adding one would be a new heavy runtime
   dependency + a reranker model the app doesn't ship.
 
-Instead, ``LM_CHAT_RAG_RERANK_MODE=mmr`` opts into a dependency-free
-Maximal Marginal Relevance diversity rerank (:func:`_mmr_rerank`) over an
+Instead, ``LM_CHAT_RAG_RERANK_MODE`` controls a dependency-free Maximal
+Marginal Relevance diversity rerank (:func:`_mmr_rerank`) over an
 oversampled RRF pool, using only the embeddings already loaded for the
 vector stage — no new model, no new library, no extra network round
-trip. Default stays "off": the plain-RRF order is returned unchanged.
+trip. Default is ``"mmr"`` (applied automatically, flipped on 2026-08-13
+after validation); set ``LM_CHAT_RAG_RERANK_MODE=off`` to disable it and
+get the plain-RRF order unchanged.
 
 Tenant isolation
 ----------------
@@ -231,8 +233,8 @@ def _mmr_rerank(
     dropped, only left unaffected by the diversity term.
 
     ``lambda_mult >= 1.0`` degenerates to pure-relevance order — identical
-    to skipping MMR entirely (used as the escape hatch for the default
-    "off" mode's exact-match guarantee at the caller).
+    to skipping MMR entirely (used as the escape hatch for the "off"
+    mode's exact-match guarantee at the caller).
 
     Reference: Carbonell & Goldstein (1998), "The Use of MMR,
     Diversity-Based Reranking for Reordering Documents and Producing
@@ -571,9 +573,13 @@ async def retrieve(
     settings = get_settings()
     rrf_k: int = getattr(settings, "lm_chat_rrf_k", _DEFAULT_RRF_K)
     # Optional post-fusion rerank stage — see the module docstring's
-    # "Rerank stage" section. Default "off" is a strict no-op: the plain
-    # RRF order below is untouched.
-    rerank_mode: str = getattr(settings, "lm_chat_rag_rerank_mode", "off")
+    # "Rerank stage" section. Default "mmr" (validated 2026-08-13);
+    # explicit "off" is a strict no-op: the plain RRF order below is
+    # untouched. The getattr fallback mirrors config.py's Field default —
+    # only matters if `settings` ever lacked the field entirely (never
+    # true for a real Settings instance) — kept in sync deliberately so
+    # this fallback can't silently disagree with the real default.
+    rerank_mode: str = getattr(settings, "lm_chat_rag_rerank_mode", "mmr")
     rerank_lambda: float = getattr(settings, "lm_chat_rag_rerank_mmr_lambda", 0.5)
 
     # Read-time embedding-model resolution. Resolution order with NULL
@@ -838,7 +844,7 @@ async def retrieve(
     ranked_ids = sorted(rrf_scores, key=lambda cid: rrf_scores[cid], reverse=True)
 
     # ------------------------------------------------------------------
-    # Step 3b — Optional MMR rerank (default "off" → identical top_k slice)
+    # Step 3b — Optional MMR rerank (default "mmr"; "off" → identical top_k slice)
     # ------------------------------------------------------------------
     if rerank_mode == "mmr":
         # Same 4x oversampling window already used by the FTS/vector
