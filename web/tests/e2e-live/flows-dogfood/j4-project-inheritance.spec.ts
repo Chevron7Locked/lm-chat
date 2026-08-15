@@ -85,10 +85,11 @@ test(
       if (sel === null) return 1;
       const rank = (s: string): number => {
         const t = s.toLowerCase();
+        // Group 1 is mandatory in each pattern — always captured on a match.
         const a = /a(\d+(?:\.\d+)?)b(?![a-z0-9])/.exec(t);
-        if (a) return Number.parseFloat(a[1]);
+        if (a) return Number.parseFloat(a[1]!);
         const n = /(\d+(?:\.\d+)?)b(?![a-z0-9])/.exec(t);
-        if (n) return Number.parseFloat(n[1]);
+        if (n) return Number.parseFloat(n[1]!);
         return Number.POSITIVE_INFINITY;
       };
       let best = 1;

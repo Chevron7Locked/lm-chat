@@ -146,7 +146,8 @@ export async function pinBackgroundModel(
 export async function setWebSearchProvider(
   page: Page,
   backendURL: string,
-  provider: "searxng" | "ddg",
+  // Real 4-way validation set — app_settings_routes.py:200.
+  provider: "searxng" | "ddg" | "brave" | "brave_llm",
 ): Promise<void> {
   const resp = await page.request.patch(`${backendURL}/api/settings/app`, {
     data: { web_search_provider: provider },

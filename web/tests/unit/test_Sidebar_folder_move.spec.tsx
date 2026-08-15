@@ -15,6 +15,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import type { ChatSummary } from "@/hooks/useChats";
+import type { DropTargetContext } from "@/components/Sidebar";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -121,21 +123,18 @@ describe("MoveToFolderMenu (BUG 4 — menu path)", () => {
 
 // ─── resolveDropTarget (pure helper) ────────────────────────────────────────
 
-interface TestChat {
-  id: number;
-  title: string;
-  folder: string | null;
-  pinned: boolean;
-  updated_at: string;
-  model_id: string | null;
-  display_order: number;
-}
-
+// Real ChatSummary import above — NOT a hand-rolled shadow. A local mirror
+// of this type (the previous `TestChat`) silently drifted out of sync when
+// tags/archive shipped (08-13) and stopped structurally matching the type
+// resolveDropTarget's real DropTargetContext actually carries; the drift
+// was invisible until the test tree got typecheck coverage (08-15). Import
+// the source of truth instead — it fails loudly if a field is renamed or
+// removed, rather than silently going stale again.
 function makeChat(
   id: number,
   folder: string | null,
   display_order: number,
-): TestChat {
+): ChatSummary {
   return {
     id,
     title: `chat ${String(id)}`,
@@ -143,6 +142,10 @@ function makeChat(
     pinned: false,
     updated_at: "2026-01-01T00:00:00Z",
     model_id: null,
+    // Sensible defaults for fields resolveDropTarget doesn't read (it only
+    // ever touches `.id` — see Sidebar.tsx) but ChatSummary requires.
+    tags: [],
+    archived_at: null,
     display_order,
   };
 }
@@ -153,9 +156,9 @@ describe("resolveDropTarget (pure helper — BUG 4 drag path)", () => {
       "@/components/Sidebar"
     );
 
-    const ctx = {
+    const ctx: DropTargetContext = {
       pinned: [],
-      folderMap: new Map<string | null, TestChat[]>([["Empty", []]]),
+      folderMap: new Map<string | null, ChatSummary[]>([["Empty", []]]),
     };
 
     expect(resolveDropTarget(folderContainerId("Empty"), ctx)).toEqual({
@@ -169,7 +172,7 @@ describe("resolveDropTarget (pure helper — BUG 4 drag path)", () => {
       "@/components/Sidebar"
     );
 
-    const ctx = { pinned: [], folderMap: new Map<string | null, TestChat[]>() };
+    const ctx: DropTargetContext = { pinned: [], folderMap: new Map<string | null, ChatSummary[]>() };
     expect(resolveDropTarget(folderContainerId(null), ctx)).toEqual({
       folder: null,
       display_order: 0,
@@ -181,7 +184,7 @@ describe("resolveDropTarget (pure helper — BUG 4 drag path)", () => {
       "@/components/Sidebar"
     );
 
-    const ctx = { pinned: [], folderMap: new Map<string | null, TestChat[]>() };
+    const ctx: DropTargetContext = { pinned: [], folderMap: new Map<string | null, ChatSummary[]>() };
     expect(resolveDropTarget(PINNED_CONTAINER_ID, ctx)).toEqual({
       folder: null,
       display_order: 0,
@@ -191,9 +194,9 @@ describe("resolveDropTarget (pure helper — BUG 4 drag path)", () => {
   it("over = a chat id in another folder → that folder + correct index", async () => {
     const { resolveDropTarget } = await import("@/components/Sidebar");
 
-    const ctx = {
+    const ctx: DropTargetContext = {
       pinned: [],
-      folderMap: new Map<string | null, TestChat[]>([
+      folderMap: new Map<string | null, ChatSummary[]>([
         [null, [makeChat(1, null, 0)]],
         ["Work", [makeChat(2, "Work", 0), makeChat(3, "Work", 1)]],
       ]),
@@ -212,9 +215,9 @@ describe("resolveDropTarget (pure helper — BUG 4 drag path)", () => {
   it("over = a pinned chat id → { folder: null, display_order: pinned index }", async () => {
     const { resolveDropTarget } = await import("@/components/Sidebar");
 
-    const ctx = {
+    const ctx: DropTargetContext = {
       pinned: [makeChat(10, null, 0), makeChat(11, "Work", 1)],
-      folderMap: new Map<string | null, TestChat[]>(),
+      folderMap: new Map<string | null, ChatSummary[]>(),
     };
 
     expect(resolveDropTarget(11, ctx)).toEqual({
@@ -226,7 +229,7 @@ describe("resolveDropTarget (pure helper — BUG 4 drag path)", () => {
   it("over = an unresolvable id → null (drop cancelled)", async () => {
     const { resolveDropTarget } = await import("@/components/Sidebar");
 
-    const ctx = { pinned: [], folderMap: new Map<string | null, TestChat[]>() };
+    const ctx: DropTargetContext = { pinned: [], folderMap: new Map<string | null, ChatSummary[]>() };
     expect(resolveDropTarget(999, ctx)).toBeNull();
     expect(resolveDropTarget("not-a-real-container-id", ctx)).toBeNull();
   });

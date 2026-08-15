@@ -99,13 +99,14 @@ describe("focus mode CSS — every referenced token is defined", () => {
     const defined = new Set<string>();
     for (const src of [css, globalsCss]) {
       for (const m of src.matchAll(/(--[a-z0-9-]+)\s*:/g)) {
-        defined.add(m[1]);
+        // Group 1 is mandatory in the pattern — always captured on a match.
+        defined.add(m[1]!);
       }
     }
 
     const used = new Set<string>();
     for (const m of focusCss.matchAll(/var\((--[a-z0-9-]+)/g)) {
-      used.add(m[1]);
+      used.add(m[1]!);
     }
 
     const undef = [...used].filter((t) => !defined.has(t)).sort();

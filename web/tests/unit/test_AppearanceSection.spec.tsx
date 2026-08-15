@@ -188,7 +188,7 @@ describe("AppearanceSection — click Text size", () => {
     renderSection(AppearanceSection);
     // The first button named "Compact" belongs to the Text size group.
     const compactBtns = screen.getAllByRole("button", { name: "Compact" });
-    fireEvent.click(compactBtns[0]);
+    fireEvent.click(compactBtns[0]!);
     // setTextSize should be called (the first Compact is text-size=sm).
     expect(mockSetTextSize).toHaveBeenCalledWith("sm");
   });
@@ -210,7 +210,7 @@ describe("AppearanceSection — click Density", () => {
     // "Compact" appears in both Text size and Density. The Density one is index 1.
     const compactBtns = screen.getAllByRole("button", { name: "Compact" });
     // Click the last "Compact" button — it's in the Density group.
-    fireEvent.click(compactBtns[compactBtns.length - 1]);
+    fireEvent.click(compactBtns[compactBtns.length - 1]!);
     expect(mockSetDensity).toHaveBeenCalledWith("compact");
   });
 });

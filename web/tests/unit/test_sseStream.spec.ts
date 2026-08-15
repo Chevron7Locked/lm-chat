@@ -19,9 +19,9 @@ const encoder = new TextEncoder();
 
 /** Build a ReadableStream that yields the given string chunks in order, one
  *  read() per chunk, then closes. */
-function chunkedStream(chunks: string[]): ReadableStream<Uint8Array> {
+function chunkedStream(chunks: string[]): ReadableStream<Uint8Array<ArrayBuffer>> {
   let idx = 0;
-  return new ReadableStream<Uint8Array>({
+  return new ReadableStream<Uint8Array<ArrayBuffer>>({
     pull(controller) {
       if (idx < chunks.length) {
         controller.enqueue(encoder.encode(chunks[idx++]!));
@@ -180,7 +180,7 @@ describe("readSseStream — property: never crashes, never drops/duplicates well
 
     return fc.assert(
       fc.asyncProperty(arb_chunks, async (chunks) => {
-        const stream = new ReadableStream<Uint8Array>({
+        const stream = new ReadableStream<Uint8Array<ArrayBuffer>>({
           start(controller) {
             for (const c of chunks) controller.enqueue(new Uint8Array(c));
             controller.close();
@@ -221,7 +221,7 @@ describe("readSseStream — property: never crashes, never drops/duplicates well
           ),
         ].sort((a, b) => a - b);
 
-        const chunks: Uint8Array[] = [];
+        const chunks: Uint8Array<ArrayBuffer>[] = [];
         let prev = 0;
         for (const pos of positions) {
           if (pos > prev) chunks.push(bytes.slice(prev, pos));
@@ -230,7 +230,7 @@ describe("readSseStream — property: never crashes, never drops/duplicates well
         if (prev < bytes.length) chunks.push(bytes.slice(prev));
         if (chunks.length === 0) chunks.push(bytes);
 
-        const stream = new ReadableStream<Uint8Array>({
+        const stream = new ReadableStream<Uint8Array<ArrayBuffer>>({
           start(controller) {
             for (const c of chunks) controller.enqueue(c);
             controller.close();

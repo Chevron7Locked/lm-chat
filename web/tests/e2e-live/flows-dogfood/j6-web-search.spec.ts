@@ -76,7 +76,18 @@ test(
     // Pin the web-search backend. Defaults to the keyless `ddgs` path (no
     // setup); override with LMCHAT_DOGFOOD_SEARCH_PROVIDER=brave (needs
     // LM_CHAT_BRAVE_API_KEY) for a deterministic, rate-limit-free run.
-    const searchProvider = process.env["LMCHAT_DOGFOOD_SEARCH_PROVIDER"] ?? "ddg";
+    // An env var is an unvalidated raw string at compile time — narrow it
+    // for real rather than casting, so a typo falls back to "ddg" instead
+    // of silently reaching the backend's own 400 (app_settings_routes.py:200).
+    const _rawSearchProvider =
+      process.env["LMCHAT_DOGFOOD_SEARCH_PROVIDER"] ?? "ddg";
+    const searchProvider: "searxng" | "ddg" | "brave" | "brave_llm" =
+      _rawSearchProvider === "searxng" ||
+      _rawSearchProvider === "ddg" ||
+      _rawSearchProvider === "brave" ||
+      _rawSearchProvider === "brave_llm"
+        ? _rawSearchProvider
+        : "ddg";
     await configureLmStudio(page, backendURL, fleet.fastId);
     await setWebSearchProvider(page, backendURL, searchProvider);
 
