@@ -764,8 +764,8 @@ describe("LmStudioSection", () => {
     });
 
     // Find the PATCH call.
-    const patchCall = fetchMock.mock.calls.find(
-      ([url]: [string]) => url === "/api/settings/lmstudio/embedding-model",
+    const patchCall = (fetchMock.mock.calls as [string, RequestInit | undefined][]).find(
+      ([url]) => url === "/api/settings/lmstudio/embedding-model",
     );
     expect(patchCall).toBeTruthy();
     const patchInit = patchCall?.[1] as RequestInit | undefined;
@@ -822,8 +822,8 @@ describe("LmStudioSection", () => {
       });
     });
 
-    const patchCall = fetchMock.mock.calls.find(
-      ([url]: [string]) => url === "/api/settings/lmstudio/embedding-model",
+    const patchCall = (fetchMock.mock.calls as [string, RequestInit | undefined][]).find(
+      ([url]) => url === "/api/settings/lmstudio/embedding-model",
     );
     const body = JSON.parse((patchCall?.[1] as RequestInit)?.body as string);
     expect(body.embedding_model_id).toBeNull(); // Auto = null

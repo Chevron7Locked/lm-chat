@@ -106,9 +106,12 @@ describe("MutationCache.onError dedup — real production queryClient", () => {
     const mutationNoMeta = {
       meta: undefined,
       options: { mutationFn: async () => undefined },
-    } as unknown as Parameters<typeof cacheConfig.onError>[3];
+    } as unknown as Parameters<NonNullable<typeof cacheConfig.onError>>[3];
 
-    cacheConfig.onError!(new Error("fail"), undefined, undefined, mutationNoMeta);
+    cacheConfig.onError!(new Error("fail"), undefined, undefined, mutationNoMeta, {
+      client: queryClient,
+      meta: undefined,
+    });
 
     const afterCount = useToastStore.getState().toasts.length;
     expect(afterCount).toBeGreaterThan(initialCount);
@@ -131,9 +134,12 @@ describe("MutationCache.onError dedup — real production queryClient", () => {
     const mutationWithMeta = {
       meta: { errorHandled: true },
       options: { mutationFn: async () => undefined },
-    } as unknown as Parameters<typeof cacheConfig.onError>[3];
+    } as unknown as Parameters<NonNullable<typeof cacheConfig.onError>>[3];
 
-    cacheConfig.onError!(new Error("fail"), undefined, undefined, mutationWithMeta);
+    cacheConfig.onError!(new Error("fail"), undefined, undefined, mutationWithMeta, {
+      client: queryClient,
+      meta: undefined,
+    });
 
     expect(useToastStore.getState().toasts.length).toBe(initialCount);
   });
@@ -158,9 +164,12 @@ describe("MutationCache.onError dedup — real production queryClient", () => {
         // Hook-level onError — visible on mutation.options (admin pattern).
         onError: (_err: unknown) => { /* handles its own error toast */ },
       },
-    } as unknown as Parameters<typeof cacheConfig.onError>[3];
+    } as unknown as Parameters<NonNullable<typeof cacheConfig.onError>>[3];
 
-    cacheConfig.onError!(new Error("Admin op failed"), undefined, undefined, adminMutation);
+    cacheConfig.onError!(new Error("Admin op failed"), undefined, undefined, adminMutation, {
+      client: queryClient,
+      meta: undefined,
+    });
 
     // Global fallback must NOT fire — admin mutation handles its own error.
     expect(useToastStore.getState().toasts.length).toBe(initialCount);

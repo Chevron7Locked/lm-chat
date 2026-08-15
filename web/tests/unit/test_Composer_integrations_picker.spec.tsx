@@ -17,9 +17,15 @@
  *  - usePrompts          — irrelevant; stubbed.
  *  - SlashMenu           — irrelevant; rendered as null.
  */
+import type { ComponentProps } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { Composer, resolveChatIntegrationsField } from "@/components/Composer";
+
+// Real onSubmit signature (not hand-duplicated) — a bare vi.fn() types
+// .mock.calls[0] ambiguously, which fails the `[, payload]` destructure
+// under noUncheckedIndexedAccess.
+type OnSubmitFn = ComponentProps<typeof Composer>["onSubmit"];
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -253,7 +259,7 @@ describe("Composer integrations chip-row (P13h)", () => {
         updated_at: "2026-05-22T00:00:00Z",
       },
     ];
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<OnSubmitFn>();
     render(<Composer {...baseProps} onSubmit={onSubmit} />);
 
     // Toggle the second integration on so both are selected.
@@ -265,7 +271,7 @@ describe("Composer integrations chip-row (P13h)", () => {
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, payload] = onSubmit.mock.calls[0];
+    const [, payload] = onSubmit.mock.calls[0]!;
     expect(payload.integrations).toEqual(["mcp/searxng", "mcp/filesystem"]);
   });
 
@@ -296,13 +302,13 @@ describe("Composer integrations chip-row (P13h)", () => {
         updated_at: "2026-05-22T00:00:00Z",
       },
     ];
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<OnSubmitFn>();
     render(<Composer {...props} onSubmit={onSubmit} />);
     const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "ping" } });
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, payload] = onSubmit.mock.calls[0];
+    const [, payload] = onSubmit.mock.calls[0]!;
     // The hydrated value MUST win over the (would-have-been-empty) seed.
     expect(payload.integrations).toEqual(["mcp/firecrawl"]);
   });
@@ -379,7 +385,7 @@ describe("Composer integrations chip-row (P13h)", () => {
         updated_at: "2026-05-22T00:00:00Z",
       },
     ];
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<OnSubmitFn>();
     render(<Composer {...baseProps} chatId={99} onSubmit={onSubmit} />);
 
     const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
@@ -387,7 +393,7 @@ describe("Composer integrations chip-row (P13h)", () => {
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, payload] = onSubmit.mock.calls[0];
+    const [, payload] = onSubmit.mock.calls[0]!;
     // No stored entry + no selection (seed didn't fire — no defaults) → omit.
     // BE treats omission as "apply admin defaults server-side".
     expect(payload.integrations).toBeUndefined();
@@ -407,7 +413,7 @@ describe("Composer integrations chip-row (P13h)", () => {
         updated_at: "2026-05-22T00:00:00Z",
       },
     ];
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<OnSubmitFn>();
     render(<Composer {...baseProps} chatId={77} onSubmit={onSubmit} />);
 
     const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
@@ -415,7 +421,7 @@ describe("Composer integrations chip-row (P13h)", () => {
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, payload] = onSubmit.mock.calls[0];
+    const [, payload] = onSubmit.mock.calls[0]!;
     // Stored [] entry → field is present as [] (BE will honour it, not apply defaults).
     expect(payload.integrations).toEqual([]);
   });
@@ -451,7 +457,7 @@ describe("Composer integrations chip-row (P13h)", () => {
         updated_at: "2026-05-22T00:00:00Z",
       },
     ];
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<OnSubmitFn>();
     render(<Composer {...baseProps} onSubmit={onSubmit} />);
 
     const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
@@ -459,7 +465,7 @@ describe("Composer integrations chip-row (P13h)", () => {
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, payload] = onSubmit.mock.calls[0];
+    const [, payload] = onSubmit.mock.calls[0]!;
     expect(payload.integrations).toBeUndefined();
   });
 
@@ -550,7 +556,7 @@ describe("Composer integrations chip-row (P13h)", () => {
         updated_at: "2026-05-22T00:00:00Z",
       },
     ];
-    const onSubmit = vi.fn();
+    const onSubmit = vi.fn<OnSubmitFn>();
     render(<Composer {...baseProps} chatId={55} onSubmit={onSubmit} />);
 
     const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
@@ -558,7 +564,7 @@ describe("Composer integrations chip-row (P13h)", () => {
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [, payload] = onSubmit.mock.calls[0];
+    const [, payload] = onSubmit.mock.calls[0]!;
     // Only the same-system (lmstudio) tool ships; the Store tool is filtered out.
     expect(payload.integrations).toEqual(["mcp/searxng"]);
   });

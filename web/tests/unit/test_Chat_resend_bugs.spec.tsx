@@ -81,7 +81,11 @@ describe("Finding 1 — auto-confirm path fires startStream", () => {
     const startStream = vi.fn();
     const push = vi.fn();
     const chatId = 7;
-    const model = "test-model";
+    // Annotated `string`, not inferred as the narrower literal type — model
+    // is a mutable string in production (see the sibling "missing model"
+    // test below), and the inline guard on line 95 needs that real width to
+    // stay type-checkable as the defensive check it actually is.
+    const model: string = "test-model";
 
     // Simulate the onSuccess handler from handleRegenerateClick.
     function handleOnSuccess(result: {

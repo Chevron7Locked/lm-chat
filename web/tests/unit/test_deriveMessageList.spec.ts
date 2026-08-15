@@ -55,6 +55,8 @@ function mkSSEState(overrides: Partial<StreamState> = {}): StreamState {
     showContinue: false,
     warnings: [],
     followups: [],
+    memorySaved: undefined,
+    modeAdopt: undefined,
     ...overrides,
   };
 }

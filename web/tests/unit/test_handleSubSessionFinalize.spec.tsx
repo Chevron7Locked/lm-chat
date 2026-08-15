@@ -18,6 +18,17 @@ interface SubSession {
   messages: { role: "user" | "assistant"; content: string }[];
 }
 
+interface FinalizeArgs {
+  chatId: number;
+  modelId: string;
+  systemPrompt: string;
+  messages: SubSession["messages"];
+}
+interface ToastArgs {
+  variant: string;
+  message: string;
+}
+
 // Faithful re-implementation of the handler control flow in
 // Chat.tsx::handleSubSessionFinalize. Kept here so the guard remains
 // pinned down by an executable test.
@@ -25,8 +36,11 @@ function runFinalize(opts: {
   subSession: SubSession | null;
   chatId: number | null;
   selectedModel: string | null;
-  subSessionSSE: { finalize: ReturnType<typeof vi.fn> };
-  push: ReturnType<typeof vi.fn>;
+  // Typed generics (not bare `ReturnType<typeof vi.fn>`) so the mocks'
+  // own callable signatures actually match — an untyped vi.fn() is both
+  // callable and constructable, which doesn't satisfy a plain function type.
+  subSessionSSE: { finalize: ReturnType<typeof vi.fn<(args: FinalizeArgs) => void>> };
+  push: ReturnType<typeof vi.fn<(args: ToastArgs) => void>>;
 }): void {
   const { subSession, chatId, selectedModel, subSessionSSE, push } = opts;
   if (subSession === null || chatId === null) return;
@@ -43,16 +57,19 @@ function runFinalize(opts: {
 }
 
 describe("handleSubSessionFinalize guard", () => {
-  let push: ReturnType<typeof vi.fn>;
-  let finalize: ReturnType<typeof vi.fn>;
+  // Typed generics — same reason as runFinalize's own param types above: a
+  // bare vi.fn() is callable+constructable, which doesn't satisfy the plain
+  // function types runFinalize's opts require.
+  let push: ReturnType<typeof vi.fn<(args: ToastArgs) => void>>;
+  let finalize: ReturnType<typeof vi.fn<(args: FinalizeArgs) => void>>;
   const session: SubSession = {
     systemPrompt: "You are a deep research agent.",
     messages: [{ role: "user", content: "find me sources" }],
   };
 
   beforeEach(() => {
-    push = vi.fn();
-    finalize = vi.fn();
+    push = vi.fn<(args: ToastArgs) => void>();
+    finalize = vi.fn<(args: FinalizeArgs) => void>();
   });
 
   it("blocks finalize when selectedModel is null", () => {

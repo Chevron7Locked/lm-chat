@@ -285,7 +285,11 @@ function renderChat(initialPath: string) {
 }
 
 function persistedAssistantMessage(
-  toolCalls: MessageRecord["tool_calls"],
+  // Narrower than MessageRecord["tool_calls"] (which includes `undefined`
+  // via the optional key) — every call site below passes an array or
+  // `null`, never `undefined`, and assigning an explicit `undefined` value
+  // into an optional key is what exactOptionalPropertyTypes objects to.
+  toolCalls: NonNullable<MessageRecord["tool_calls"]> | null,
 ): MessageRecord {
   return {
     id: 42,

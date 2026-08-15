@@ -29,7 +29,7 @@ import {
   useStoppedStreamReconciliation,
   type UseStoppedStreamReconciliationArgs,
 } from "@/hooks/useStoppedStreamReconciliation";
-import type { MessageListResponse } from "@/hooks/useChats";
+import type { MessageListResponse, MessageRecord } from "@/hooks/useChats";
 import type { StreamState } from "@/hooks/useSSE";
 
 // The hook imports `chatKeys` from "@/hooks/useChats" directly (not
@@ -55,13 +55,24 @@ function idleStreamState(overrides: Partial<StreamState>): StreamState {
     showContinue: false,
     warnings: [],
     followups: [],
+    memorySaved: undefined,
+    modeAdopt: undefined,
     ...overrides,
   };
 }
 
 function messagesResponse(
-  messages: { id: number; content: string }[],
+  partials: { id: number; content: string }[],
 ): MessageListResponse {
+  // Only id/content vary across this file's cases — pad the rest with
+  // sensible assistant-row defaults rather than narrowing MessageRecord.
+  const messages: MessageRecord[] = partials.map((p) => ({
+    ...p,
+    chat_id: 1,
+    role: "assistant",
+    reasoning_content: null,
+    created_at: "2026-07-01T00:00:00Z",
+  }));
   return { messages, total: messages.length, has_more: false, oldest_id: null };
 }
 
@@ -69,7 +80,11 @@ const MSG_KEY = ["messages", 1];
 
 describe("useStoppedStreamReconciliation — backoff poll", () => {
   let qc: QueryClient;
-  let resetStream: ReturnType<typeof vi.fn>;
+  // Typed generic (not bare `ReturnType<typeof vi.fn>`) so the mock's own
+  // callable signature actually matches UseStoppedStreamReconciliationArgs
+  // — an untyped vi.fn() is both callable and constructable, which doesn't
+  // satisfy the plain `() => void` the hook's args expect.
+  let resetStream: ReturnType<typeof vi.fn<() => void>>;
   let refetchMessages: ReturnType<typeof vi.fn>;
 
   const stoppedState = idleStreamState({
@@ -81,7 +96,7 @@ describe("useStoppedStreamReconciliation — backoff poll", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     qc = new QueryClient();
-    resetStream = vi.fn();
+    resetStream = vi.fn<() => void>();
     refetchMessages = vi.fn();
   });
 

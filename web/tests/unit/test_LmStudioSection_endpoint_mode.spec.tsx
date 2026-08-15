@@ -256,8 +256,8 @@ describe("EndpointModeCard (LmStudioSection)", () => {
       });
     });
 
-    const patchCall = fetchMock.mock.calls.find(
-      ([url]: [string]) => url === "/api/settings/lmstudio/endpoint-mode",
+    const patchCall = (fetchMock.mock.calls as [string, RequestInit | undefined][]).find(
+      ([url]) => url === "/api/settings/lmstudio/endpoint-mode",
     );
     expect(patchCall).toBeTruthy();
     const init = patchCall?.[1] as RequestInit | undefined;

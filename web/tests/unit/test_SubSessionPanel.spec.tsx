@@ -46,7 +46,14 @@ function makeSession(over: Partial<SubSession> = {}): SubSession {
 }
 
 function makeState(over: Partial<SubSessionSSEState> = {}): SubSessionSSEState {
-  return { status: "idle", content: "", error: null, toolCalls: [], ...over };
+  return {
+    status: "idle",
+    content: "",
+    reasoning_content: null,
+    error: null,
+    toolCalls: [],
+    ...over,
+  };
 }
 
 // P4 — history + reopen props every render now needs; defaults matching

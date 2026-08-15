@@ -51,8 +51,15 @@ function makeChat(id: number, reasoningEffort?: string): ChatSummary {
     pinned: false,
     updated_at: "2026-07-16T00:00:00Z",
     model_id: null,
-    settings: reasoningEffort === undefined ? undefined : { reasoning_effort: reasoningEffort },
     display_order: 0,
+    tags: [],
+    archived_at: null,
+    // `settings` is optional — omit the key entirely rather than assign it
+    // an explicit `undefined` (exactOptionalPropertyTypes treats those
+    // differently; ChatSummary.settings?: never declares `| undefined`).
+    ...(reasoningEffort === undefined
+      ? {}
+      : { settings: { reasoning_effort: reasoningEffort } }),
   };
 }
 
