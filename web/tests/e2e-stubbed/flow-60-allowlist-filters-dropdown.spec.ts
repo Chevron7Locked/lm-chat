@@ -142,14 +142,21 @@ test.describe("Flow 60 — Allowlist filters chat model dropdown", () => {
     const modelSelect = page.getByTestId("chat-header-model-select").first();
     await expect(modelSelect).toBeVisible({ timeout: 10_000 });
 
-    const options = await modelSelect
-      .locator("option")
-      .evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value));
+    // ModelSelectControl renders a single disabled "Loading models…"
+    // placeholder option while /api/models is in flight — reading the
+    // option list right after toBeVisible() (which only asserts the <select>
+    // itself exists) can race that fetch and snapshot zero openrouter
+    // options (observed on firefox). toHaveCount is a web-first assertion
+    // that auto-retries until the real options land, unlike a one-shot
+    // evaluateAll + .length read.
+    const orOptionLocator = modelSelect.locator('option[value^="openrouter::"]');
+    await expect(orOptionLocator).toHaveCount(ALLOWED_OR_MODELS.length, {
+      timeout: 10_000,
+    });
+    const orOptions = await orOptionLocator.evaluateAll((os) =>
+      os.map((o) => (o as HTMLOptionElement).value),
+    );
 
-    const orOptions = options.filter((v) => v.startsWith("openrouter::"));
-
-    // Only the allowed models are present — not the full catalog.
-    expect(orOptions.length).toBe(ALLOWED_OR_MODELS.length);
     for (const allowed of ALLOWED_OR_MODELS) {
       expect(orOptions).toContain(`openrouter::${allowed}`);
     }
@@ -190,13 +197,15 @@ test.describe("Flow 60 — Allowlist filters chat model dropdown", () => {
     const modelSelect = page.getByTestId("chat-header-model-select").first();
     await expect(modelSelect).toBeVisible({ timeout: 10_000 });
 
-    const options = await modelSelect
-      .locator("option")
-      .evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value));
-
-    const orOptions = options.filter((v) => v.startsWith("openrouter::"));
-    // All five OR models should appear.
-    expect(orOptions.length).toBe(ALL_OR_MODELS.length);
+    // Same load race as the allowlisted-subset test above (see its comment)
+    // — wait for the real option count before reading values.
+    const orOptionLocator = modelSelect.locator('option[value^="openrouter::"]');
+    await expect(orOptionLocator).toHaveCount(ALL_OR_MODELS.length, {
+      timeout: 10_000,
+    });
+    const orOptions = await orOptionLocator.evaluateAll((os) =>
+      os.map((o) => (o as HTMLOptionElement).value),
+    );
     for (const id of ALL_OR_MODELS) {
       expect(orOptions).toContain(`openrouter::${id}`);
     }

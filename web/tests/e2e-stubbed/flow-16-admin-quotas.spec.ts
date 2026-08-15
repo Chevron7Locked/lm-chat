@@ -102,7 +102,16 @@ test.describe("Flow 16 — Admin quota patch + 429 enforcement", () => {
     await expect(page.getByRole("heading", { name: "Quotas" })).toBeVisible({
       timeout: 5_000,
     });
-    await page.getByRole("button", { name: "Edit" }).click();
+    // Scoped to the admin quotas table (the page's only <table>) with an
+    // exact name match — the sidebar's tags editor also renders a button
+    // whose accessible name is "Edit tags for \"…\"", which the default
+    // substring match used to catch too (strict-mode violation / timeout
+    // since 08-13). Scoping to the table additionally protects against any
+    // future non-table "Edit" control elsewhere on the page.
+    await page
+      .getByRole("table")
+      .getByRole("button", { name: "Edit", exact: true })
+      .click();
 
     // Lower the tokens-per-day to 10 (a deliberately low limit).
     const tokensInput = page.getByLabel("Tokens per day for user 2");
