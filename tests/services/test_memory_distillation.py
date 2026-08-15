@@ -992,16 +992,3 @@ def test_is_near_duplicate_requires_absolute_floor_for_short_facts() -> None:
     assert _is_near_duplicate("likes astrophysics", ["is into astrophysics"]) is True
 
 
-def test_distill_oob_parse_handles_empty_and_prose() -> None:
-    """The OOB extractor reuses the defensive followups parser: [] and prose-wrapped."""
-    from lmchat.services.streaming_service import _parse_followups_json
-
-    assert _parse_followups_json("[]") == []
-    assert _parse_followups_json(
-        'Here are the facts: ["Name is Kevin", "Likes coffee"]'
-    ) == ["Name is Kevin", "Likes coffee"]
-    # Code-fenced output is unwrapped too.
-    assert _parse_followups_json('```json\n["Into astrophysics"]\n```') == [
-        "Into astrophysics"
-    ]
-

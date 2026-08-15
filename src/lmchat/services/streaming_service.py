@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from lmchat.db.retry import with_write_retry
 from lmchat.db.schema import chats, compactions, messages, sub_session_messages, sub_sessions
-from lmchat.lmstudio.oob_text import oob_message_text
+from lmchat.lmstudio.oob_text import oob_message_text, oob_salvage
 from lmchat.lmstudio.types import CanonicalChatRequest, CanonicalEvent, CanonicalToolCall
 from lmchat.logging import get_logger
 from lmchat.metrics import STREAMS_ACTIVE, STREAMS_COMPLETED, STREAMS_FAILED, STREAMS_SALVAGED
@@ -90,6 +90,7 @@ from lmchat.services.models_service import (
     ModelsService,
     resolve_background_model_id,
 )
+from lmchat.services.preset_catalog import get_preset_definition, list_adoptable_preset_ids
 from lmchat.services.project_summary_service import (
     count_project_messages,
     refresh_project_summary,
@@ -1209,6 +1210,23 @@ def _format_followups_frame(*, followups: list[str], msg_id: int) -> bytes:
     return frame.encode("utf-8")
 
 
+def _format_mode_adopt_frame(*, preset_id: str | None, msg_id: int) -> bytes:
+    """Build a synthetic SSE ``mode_adopt`` frame.
+
+    Emitted AFTER ``chat.end`` (and after ``followups``, when both fire)
+    once the out-of-band C3 mode-adoption call (:func:`_infer_mode_oob`)
+    completes, so the answer renders immediately and the persona switch —
+    if any — applies a moment later without blocking the stream.
+    ``preset_id`` is ``None`` when the OOB call found no confident match
+    this turn (the common case — the classifier is deliberately biased
+    toward "no change") or failed outright; the FE treats ``None`` as
+    "leave the chat's current mode alone."
+    """
+    data = {"type": "mode_adopt", "msg_id": msg_id, "preset_id": preset_id}
+    frame = f"event: mode_adopt\ndata: {json.dumps(data)}\n\n"
+    return frame.encode("utf-8")
+
+
 def _format_memory_saved_frame(*, count: int, msg_id: int) -> bytes:
     """Build a synthetic SSE ``memory.saved`` frame.
 
@@ -1315,73 +1333,247 @@ async def _generate_followups_oob(
         return []
 
 
-def _parse_followups_json(raw: str) -> list[str]:
-    """Parse a followups JSON array defensively.
+# Sentinel the mode-adoption classifier is instructed to answer with when no
+# persona clearly fits the next turn. Never a valid catalog id (list_preset_ids()
+# never contains "none" — RAW_PRESET_ID on the FE is a disjoint sentinel with a
+# different meaning, "no system prompt at all", and isn't in this catalog either).
+_MODE_ADOPT_NONE = "none"
 
-    Strips triple-backtick ``json`` fences and stray prose; caps at 3 items;
-    returns ``[]`` on any parse failure — never crashes the turn. Tries the
-    whole cleaned text first, then falls back to a regex scan for the first
-    ``[...]`` span (handles prose-prefixed output from verbose models).
+# Prefix for the classifier's WIRE vocabulary (see _infer_mode_oob /
+# _last_valid_mode_id). The classifier is instructed to answer with
+# `mode_<id>` tokens (e.g. "mode_research"), never the bare preset id —
+# `general` in particular is an ordinary English word, and the salvage
+# scan (which deliberately looks anywhere in a reasoning trace, not just
+# the final token) would false-match prose like "...but in general, ..."
+# and silently drop the user out of an adopted mode back to default. The
+# prefix is purely an internal protocol between this prompt and its own
+# parser; the function's return contract stays the bare preset id.
+_MODE_TOKEN_PREFIX = "mode_"
+
+
+def _last_valid_mode_id(text: str, valid_ids: list[str]) -> str | None:
+    """Recover the LAST catalog id (or the "none" sentinel) mentioned in ``text``.
+
+    Mirrors :func:`_last_json_array_of_strings`'s "take the last, not the
+    first" shape, for the same reason: a reasoning model's salvaged
+    ``reasoning_content`` can run thousands of characters of deliberation —
+    weighing candidates, second-guessing, drafting — before stating its
+    actual conclusion, and the conclusion is what's near the END of the
+    trace, not scattered earlier mentions.
+
+    Matching is against the ``mode_``-PREFIXED wire tokens
+    (:data:`_MODE_TOKEN_PREFIX`), never the bare ids — the classifier
+    prompt is instructed to answer with those tokens exclusively (see
+    :func:`_infer_mode_oob`). Bare ids are ordinary or near-ordinary
+    English words (``general`` above all: an id AND the default persona,
+    so a false hit on the word actively wipes an adopted mode back to
+    default) and would false-match unrelated prose; a distinctive token
+    like ``mode_research`` essentially never occurs by accident. Matching
+    is still word-boundary and case-insensitive, so ``mode_researcher``
+    never matches ``mode_research`` as a substring. The prefix is stripped
+    before returning, so this function's return value is always a bare
+    id/``"none"`` — the token vocabulary never leaks past this function.
+
+    ``"none"`` is returned verbatim (not swallowed here) when
+    ``mode_none`` is the last matched token, INCLUDING when earlier text
+    mentions real mode tokens while deliberating — the caller treats a
+    returned ``"none"`` the same as "no match" (see :func:`_infer_mode_oob`).
+    This function itself never applies the none/valid-id distinction; it
+    only answers "what was the last token that looked like a decision."
+
+    Args:
+        text: The candidate reply text (bare token OR long reasoning prose).
+        valid_ids: The ids this scan should accept — for C3 mode adoption,
+                   :func:`~lmchat.services.preset_catalog.list_adoptable_preset_ids`
+                   (NOT the full :func:`~lmchat.services.preset_catalog.list_preset_ids`
+                   — the default persona is deliberately excluded from what
+                   this function can ever match; see that function's
+                   docstring for why).
+
+    Returns:
+        The last matched id/``"none"`` (lowercased, prefix stripped), or
+        ``None`` when nothing in ``text`` matches any wire token.
     """
-    import json as _json  # noqa: PLC0415
     import re as _re  # noqa: PLC0415
 
-    def _extract(parsed: object) -> list[str]:
-        if not isinstance(parsed, list):
-            return []
-        results: list[str] = []
-        for item in parsed:
-            if isinstance(item, str) and item.strip():
-                results.append(item.strip())
-            if len(results) >= 3:
-                break
-        return results
+    if not text:
+        return None
+    tokens = [f"{_MODE_TOKEN_PREFIX}{i}" for i in [*valid_ids, _MODE_ADOPT_NONE]]
+    alternation = "|".join(_re.escape(t) for t in tokens)
+    matches = _re.findall(rf"\b(?:{alternation})\b", text, flags=_re.IGNORECASE)
+    if not matches:
+        return None
+    return matches[-1].lower().removeprefix(_MODE_TOKEN_PREFIX)
 
-    text = raw.strip()
-    # Strip ```json ... ``` fences.
-    text = _re.sub(r"```(?:json)?\s*", "", text)
-    text = text.strip()
 
-    # Fast path: the whole text is a JSON array.
+async def _infer_mode_oob(
+    *,
+    lm_client: LmstudioStreamingClient,
+    model: str,
+    conversation_messages: list[dict],  # type: ignore[type-arg]
+    assistant_answer: str,
+    # Same generous budget as _generate_followups_oob — a reasoning
+    # background model can spend real time deliberating even over a
+    # one-word answer.
+    timeout_sec: float = 120.0,
+) -> str | None:
+    """C3 — ask a separate lightweight call which role preset the NEXT turn should run under.
+
+    Mirrors :func:`_generate_followups_oob` exactly: a separate
+    ``stream=False``, thinking-disabled call made AFTER the main answer has
+    already streamed to the client. This MUST stay fully out-of-band — an
+    earlier incident measured an injected followups directive riding the
+    MAIN answer's system prompt inflating local-model reasoning ~30x (193
+    -> 5867 chars, ~1470 wasted tokens/turn; see the OOB-followups
+    decoupling this mirrors). A mode-selection directive on the main
+    prompt would carry the identical risk, which is exactly why this
+    function exists as its own call instead.
+
+    The classifier is deliberately biased toward answering "none" (no
+    adoption): most turns are ordinary conversation, and churning the
+    chat's persona on every single turn would be worse for the user than
+    never adopting one automatically. Only a real ADOPTABLE catalog id
+    (:func:`~lmchat.services.preset_catalog.list_adoptable_preset_ids` —
+    NEVER the default persona; see that function's docstring for the live
+    defect that motivated excluding it) recovered by
+    :func:`_last_valid_mode_id` is ever trusted — a hallucinated id, a
+    reply with no id anywhere, an empty response, or an upstream failure
+    all resolve to ``None``. Never raises.
+
+    Returns:
+        A valid preset id, or ``None`` when no mode change is warranted or
+        the call failed in any way (never trust free text past this gate).
+    """
+    from lmchat.services.lmstudio_adapter import LmstudioAdapter  # noqa: PLC0415
+
     try:
-        parsed_whole = _json.loads(text)
-        if isinstance(parsed_whole, list):
-            return _extract(parsed_whole)
-        # It's a valid JSON object/scalar — not an array, return empty.
-        return []
-    except (_json.JSONDecodeError, ValueError):
-        pass
+        adapter = lm_client._adapter  # type: ignore[attr-defined]
+        if not isinstance(adapter, LmstudioAdapter):
+            # Replay / cloud provider path — skip OOB mode adoption for now.
+            return None
 
-    # Fallback: find the first top-level [...] span by tracking bracket
-    # depth, so an embedded array inside an object isn't mistakenly matched.
-    depth = 0
-    start = -1
-    for i, ch in enumerate(text):
-        if ch == "[":
-            if depth == 0:
-                start = i
-            depth += 1
-        elif ch == "]":
-            depth -= 1
-            if depth == 0 and start != -1:
-                candidate = text[start : i + 1]
-                try:
-                    return _extract(_json.loads(candidate))
-                except (_json.JSONDecodeError, ValueError):
-                    # Not valid JSON — keep scanning.
-                    start = -1
-    return []
+        http_client = adapter._http_client  # type: ignore[attr-defined]
+        base_url = adapter._base_url  # type: ignore[attr-defined]
+        url = f"{base_url}/v1/chat/completions"
 
+        # Same framing fix as _generate_followups_oob: ending on an
+        # `assistant` turn makes some models CONTINUE it instead of
+        # answering the classification question.
+        def _role_label(role: str) -> str:
+            return "User" if role == "user" else "Reply"
+
+        convo_lines = [
+            f"{_role_label(str(m.get('role', 'user')))}: {str(m.get('content', '')).strip()}"
+            for m in conversation_messages[-6:]
+            if str(m.get("content", "")).strip()
+        ]
+        convo_lines.append(f"Reply: {assistant_answer.strip()}")
+        convo_text = "\n".join(convo_lines)
+
+        # ADOPTABLE ids only — never the default persona. Live probing
+        # (2026-08-14) found a local model choosing "general" (the
+        # default) deterministically for a clear /research-shaped
+        # exchange: the catalog's own "general" entry reads as
+        # "general-purpose CONVERSATION", semantically adjacent to this
+        # prompt's own "reply none for general/casual conversation" line,
+        # and the model reached for that token instead of mode_none — same
+        # class of collision the classifier is supposed to resolve AS
+        # none, not as a wrong adoption. See
+        # preset_catalog.list_adoptable_preset_ids's docstring.
+        valid_ids = list_adoptable_preset_ids()
+        # Wire vocabulary: `mode_<id>` tokens, derived from
+        # list_adoptable_preset_ids() (never a hand-maintained second list
+        # — see _MODE_TOKEN_PREFIX's doc comment for why the prefix exists
+        # at all).
+        none_token = f"{_MODE_TOKEN_PREFIX}{_MODE_ADOPT_NONE}"
+        catalog_lines: list[str] = []
+        mode_tokens: list[str] = []
+        for preset_id in valid_ids:
+            preset = get_preset_definition(preset_id)
+            assert preset is not None, f"catalog id without a definition: {preset_id}"
+            token = f"{_MODE_TOKEN_PREFIX}{preset.id}"
+            mode_tokens.append(token)
+            catalog_lines.append(f"- {token}: {preset.short_description}")
+        catalog_text = "\n".join(catalog_lines)
+
+        _MODE_ADOPT_SYSTEM = (
+            "You classify a just-finished chat exchange against a fixed "
+            "set of assistant personas, to decide which persona the NEXT "
+            "turn should run under. Output ONLY the bare persona TOKEN — a "
+            "single lowercase token exactly as listed below (including its "
+            "`mode_` prefix), no punctuation, no quotes, no markdown, no "
+            "explanation — nothing else."
+        )
+        _user_instruction = (
+            f"Personas:\n{catalog_text}\n\n"
+            f"Exchange so far:\n\n{convo_text}\n\n"
+            "Which persona best fits the NEXT turn, based on what this "
+            "exchange was actually about? Only pick a specific persona "
+            "when the conversation clearly and predominantly calls for "
+            "it. If it's casual conversation, ambiguous, mixed across "
+            "several personas, or doesn't clearly call for a specialized "
+            f'one, reply exactly "{none_token}". Reply with EXACTLY one '
+            f'token: one of {mode_tokens} or "{none_token}".'
+        )
+        messages: list[dict] = [  # type: ignore[type-arg]
+            {"role": "system", "content": _MODE_ADOPT_SYSTEM},
+            {"role": "user", "content": _user_instruction},
+        ]
+
+        body = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            # A bare-word answer needs little budget, but a reasoning model
+            # still spends real tokens deliberating even over one word —
+            # same cap as the followups/distill OOB calls so it doesn't
+            # truncate into an empty response.
+            "max_tokens": 2048,
+            # Deterministic classification, not creative generation.
+            "temperature": 0.0,
+        }
+        body["thinking"] = {"type": "disabled"}  # best-effort; harmless if ignored
+
+        async with bg_aux_slot():
+            resp = await http_client.post(url, json=body, timeout=timeout_sec)
+        resp.raise_for_status()
+        result = resp.json()
+        message = result.get("choices", [{}])[0].get("message", {})
+        # Shared content -> reasoning_content salvage primitive (see
+        # lmstudio/oob_text.py's module docstring). Tries to recover the
+        # LAST valid `mode_<id>` token (or `mode_none`) from `content`
+        # FIRST; only if that EXTRACTION comes up empty does it try
+        # `reasoning_content` — not merely if `content` is empty. That
+        # distinction is load-bearing: an earlier version of this function
+        # used oob_message_text's weaker "field empty" rule directly, so a
+        # non-empty-but-tokenless `content` (e.g. "I'm not sure") never
+        # even looked at `reasoning_content`, silently dropping a mode the
+        # model had actually decided on there. See _last_valid_mode_id for
+        # the token scan itself (word-boundary, case-insensitive, last
+        # match wins — a reasoning trace can run thousands of characters
+        # before stating its conclusion).
+        candidate = oob_salvage(message, lambda t: _last_valid_mode_id(t, valid_ids))
+        if candidate is None or candidate == _MODE_ADOPT_NONE:
+            return None
+        return candidate
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "stream.mode_adopt_oob_failed", error=str(exc), error_type=type(exc).__name__
+        )
+        return None
 
 
 def _last_json_array_of_strings(raw: str) -> list[str]:
     """Extract the LAST top-level ``[...]`` array of strings from prose.
 
-    Reasoning models emit their final JSON answer inside ``reasoning_content``,
-    often after one or more DRAFT arrays. :func:`_parse_followups_json` returns
-    the FIRST array — which in reasoning text is usually a draft — so for the
-    reasoning-salvage path we scan for the LAST valid array of strings instead.
-    Returns ``[]`` on no match. Caps at 3 items (same as the followups parser).
+    Reasoning models emit their final JSON answer after one or more DRAFT
+    arrays, in either ``content`` or ``reasoning_content`` (see
+    :func:`_oob_json_array_with_reasoning_salvage`, which uses this as its
+    extractor for both fields via the shared
+    :func:`~lmchat.lmstudio.oob_text.oob_salvage` primitive) — an earlier
+    draft array is usually NOT the real answer, so scanning for the FIRST
+    match instead would often pick the draft. Returns ``[]`` on no match.
+    Caps at 3 items.
     """
     import json as _json  # noqa: PLC0415
 
@@ -1420,19 +1612,18 @@ def _oob_json_array_with_reasoning_salvage(message: dict) -> list[str]:  # type:
     A reasoning model asked for a JSON array normally emits it in
     ``content``, but when reasoning runs long the array lands in
     ``reasoning_content`` instead and ``content`` comes back empty — reading
-    ``content`` alone would then silently drop the result. Prefer
-    ``content``, then salvage the last array from ``reasoning_content``.
-    Never raises.
+    ``content`` alone would then silently drop the result.
+
+    Goes through the shared :func:`~lmchat.lmstudio.oob_text.oob_salvage`
+    primitive with :func:`_last_json_array_of_strings` as the extractor for
+    BOTH fields: try to recover the last valid array from ``content``
+    first; if that comes up empty, try ``reasoning_content``. "Last, not
+    first" matters on the reasoning side (a trace can carry draft arrays
+    before the real one) and is harmless on the content side (a clean
+    direct reply essentially never carries more than one candidate array,
+    so first-vs-last make no practical difference there). Never raises.
     """
-    content = str(message.get("content") or "")
-    if content.strip():
-        parsed = _parse_followups_json(content)
-        if parsed:
-            return parsed
-    reasoning = str(message.get("reasoning_content") or "")
-    if reasoning.strip():
-        return _last_json_array_of_strings(reasoning)
-    return []
+    return oob_salvage(message, _last_json_array_of_strings)
 
 
 # Distillation system prompt — extract durable USER facts, heavily biased
@@ -3889,6 +4080,20 @@ class StreamingService:
                 if _gate.integrations_action == "drop_all":
                     _dropped = list(wire_payload.integrations or [])
                     wire_payload = wire_payload.model_copy(update={"integrations": []})
+                    # The capability legend (already baked into
+                    # wire_payload.system_prompt by _assemble_system_prompt,
+                    # BEFORE this gate ran) still advertises the just-dropped
+                    # tools under "Tools you can call directly" — tell the
+                    # model they're gone this turn, or it emits the call as
+                    # literal JSON text instead of a real tool_call. See
+                    # apply_tools_unavailable_corrective's docstring.
+                    from lmchat.services.prompt_assembly import (  # noqa: PLC0415
+                        apply_tools_unavailable_corrective,
+                    )
+
+                    wire_payload = apply_tools_unavailable_corrective(
+                        wire_payload, _dropped
+                    )
                     log.warning(
                         "stream.integrations_dropped_for_non_tool_model",
                         chat_id=chat_id,
@@ -3931,6 +4136,16 @@ class StreamingService:
                     # lets the FE surface the change to the user.
                     wire_payload = wire_payload.model_copy(
                         update={"integrations": _gate.trimmed_kept}
+                    )
+                    # Same stale-legend correction as the drop_all branch
+                    # above — the legend was built from the full pre-trim
+                    # request and still lists the tools trimmed here.
+                    from lmchat.services.prompt_assembly import (  # noqa: PLC0415
+                        apply_tools_unavailable_corrective,
+                    )
+
+                    wire_payload = apply_tools_unavailable_corrective(
+                        wire_payload, _gate.trimmed_dropped
                     )
                     log.warning(
                         "stream.integrations_trimmed_for_context",
@@ -4980,6 +5195,62 @@ class StreamingService:
                                     )
                                     yield _format_followups_frame(
                                         followups=_followups_list,
+                                        msg_id=msg_id,
+                                    )
+                                # Out-of-band C3 mode adoption: ask a
+                                # separate lightweight call which role
+                                # preset (if any) the NEXT turn should run
+                                # under, using this just-finished exchange
+                                # as evidence. Computed independently of
+                                # the followups block above (own flag, own
+                                # resolution) so either feature can be
+                                # toggled without affecting the other. See
+                                # _infer_mode_oob's docstring for why this
+                                # MUST stay out-of-band rather than an
+                                # inline directive on the main prompt.
+                                if _settings.lm_chat_mode_adoption_enabled:
+                                    _mode_conv: list[dict] = []  # type: ignore[type-arg]
+                                    _mode_user_text = " ".join(
+                                        block.content or ""
+                                        for block in payload.payload.input
+                                        if block.type == "text" and block.content
+                                    ).strip()
+                                    if _mode_user_text:
+                                        _mode_conv.append(
+                                            {"role": "user", "content": _mode_user_text}
+                                        )
+                                    _mode_model_key = await resolve_background_model_id(
+                                        engine=self._engine,
+                                        models_service=self._models_service,
+                                        chat_model_id=model_id,
+                                    )
+                                    # Resolve catalog key to live wire-id
+                                    # (bare key 400s) — same as followups.
+                                    if self._models_service is not None:
+                                        _mode_ms = self._models_service
+                                        _mode_res = await _mode_ms.resolve_to_loaded_or_fallback(
+                                            _mode_model_key
+                                        )
+                                        _mode_wire_id = _mode_res.wire_id
+                                    else:
+                                        _mode_wire_id = _mode_model_key
+                                    if _mode_wire_id is None:
+                                        _adopted_preset_id = None  # nothing loaded
+                                    else:
+                                        _adopted_preset_id = await _infer_mode_oob(
+                                            lm_client=self._lm_client,
+                                            model=_mode_wire_id,
+                                            conversation_messages=_mode_conv,
+                                            assistant_answer=accumulated_content,
+                                            timeout_sec=self._aux_model_timeout_sec,
+                                        )
+                                    log.debug(
+                                        "stream.mode_adopt_oob_done",
+                                        msg_id=msg_id,
+                                        preset_id=_adopted_preset_id,
+                                    )
+                                    yield _format_mode_adopt_frame(
+                                        preset_id=_adopted_preset_id,
                                         msg_id=msg_id,
                                     )
                                 # Auto-memory saved indicator (independent

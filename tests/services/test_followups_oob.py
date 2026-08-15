@@ -28,7 +28,6 @@ from lmchat.services.streaming_service import (
     ChatStreamRequest,
     StreamingService,
     _format_followups_frame,
-    _parse_followups_json,
 )
 
 # ---------------------------------------------------------------------------
@@ -253,66 +252,6 @@ async def test_followups_sse_frame_absent_when_disabled(
     assert "followups" not in types, (
         f"followups frame present when disabled: {types}"
     )
-
-
-# ---------------------------------------------------------------------------
-# Test 3: _parse_followups_json — defensive parsing
-# ---------------------------------------------------------------------------
-
-
-def test_parse_followups_json_valid_array() -> None:
-    """Valid JSON array → list of strings."""
-    raw = '["How does X work?", "Why does Y matter?", "Can you explain Z?"]'
-    result = _parse_followups_json(raw)
-    assert result == [
-        "How does X work?",
-        "Why does Y matter?",
-        "Can you explain Z?",
-    ]
-
-
-def test_parse_followups_json_fenced() -> None:
-    """```json fence stripped before parsing."""
-    raw = '```json\n["How does X work?","What is Y?"]\n```'
-    result = _parse_followups_json(raw)
-    assert result == ["How does X work?", "What is Y?"]
-
-
-def test_parse_followups_json_with_prose_prefix() -> None:
-    """Stray prose before the array is ignored."""
-    raw = 'Here are some questions:\n["How?", "Why?"]'
-    result = _parse_followups_json(raw)
-    assert result == ["How?", "Why?"]
-
-
-def test_parse_followups_json_garbage_returns_empty() -> None:
-    """Unparseable input returns [] — never raises."""
-    assert _parse_followups_json("not json at all") == []
-    assert _parse_followups_json("") == []
-    assert _parse_followups_json("{no array}") == []
-
-
-def test_parse_followups_json_caps_at_three() -> None:
-    """More than 3 items in the array are capped at 3."""
-    raw = '["Q1?", "Q2?", "Q3?", "Q4?", "Q5?"]'
-    result = _parse_followups_json(raw)
-    assert len(result) == 3
-    assert result[0] == "Q1?"
-
-
-def test_parse_followups_json_filters_non_strings() -> None:
-    """Non-string items in the array are silently dropped."""
-    raw = '["Valid?", 42, null, "Also valid?"]'
-    result = _parse_followups_json(raw)
-    assert result == ["Valid?", "Also valid?"]
-
-
-def test_parse_followups_json_not_a_list() -> None:
-    """A valid JSON object (not array) returns []."""
-    raw = '{"type": "followups", "items": ["Q1?"]}'
-    result = _parse_followups_json(raw)
-    assert result == []
-
 
 
 def test_oob_reasoning_salvage_reads_reasoning_when_content_empty() -> None:
