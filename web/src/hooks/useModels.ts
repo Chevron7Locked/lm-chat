@@ -108,96 +108,35 @@ export function useModels() {
     queryFn: async () => {
       const raw = await api.request<ModelsListWire>("/api/models");
       const models: ModelInfo[] = raw.map((m) => {
-        // TODO: drop dual-shape defense once ModelInfo aliases are gone
-        // from the BE wire for a release. Then consume
-        // `components["schemas"]["ModelInfo"]` directly.
-        //
-        // Historical: the backend used to serialise ModelInfo with
-        // serialization aliases (`displayName` etc), so the wire mixed
-        // casings. A wire normalization pass made it snake_case-only; this
-        // normalizer keeps reading snake-first with the camelCase fallback
-        // as the one-release safety net for the rollout. Fall back to `key`
-        // when both spellings are missing OR empty — previously the ternary
-        // `display_name !== "" ? display_name : key` kept `undefined` when
-        // the field wasn't present, rendering blank <option> text in every
-        // dropdown.
-        const wire = m as Record<string, unknown>;
-        const displayName =
-          typeof wire.display_name === "string" && wire.display_name.length > 0
-            ? wire.display_name
-            : typeof wire.displayName === "string" &&
-                wire.displayName.length > 0
-              ? wire.displayName
-              : m.key;
-        // max_context_length is camelCase on the wire (FastAPI default
-        // response_model_by_alias=True) but the pydantic field name is
-        // snake_case. Defend against either.
-        const maxContextLength =
-          typeof wire.max_context_length === "number"
-            ? wire.max_context_length
-            : typeof wire.maxContextLength === "number"
-              ? wire.maxContextLength
-              : 0;
-        // The actually-loaded context per instance — same dual-shape
-        // defense for the BE alias.
-        const loadedContextLength =
-          typeof wire.loaded_context_length === "number"
-            ? wire.loaded_context_length
-            : typeof wire.loadedContextLength === "number"
-              ? wire.loadedContextLength
-              : 0;
-        // size_bytes / params_string carry the same alias asymmetry; defend
-        // here too while we're touching this normalizer.
-        const sizeBytes =
-          typeof wire.size_bytes === "number"
-            ? wire.size_bytes
-            : typeof wire.sizeBytes === "number"
-              ? wire.sizeBytes
-              : 0;
-        const paramsString =
-          typeof wire.params_string === "string"
-            ? wire.params_string
-            : typeof wire.paramsString === "string"
-              ? wire.paramsString
-              : "";
-        // Normalize capabilities to the correct ModelCapabilities shape.
-        // The BE serialises this as a full
-        // Capabilities object; older responses or embedding models may omit
-        // it entirely. Provide a safe default so consumers can always read
-        // capabilities.vision / .trained_for_tool_use without null-checks.
-        // Multi-provider: read provider slug from wire; default to "lmstudio"
-        // for backward-compat with LM Studio-only responses.
-        const provider =
-          typeof wire.provider === "string" && wire.provider.length > 0
-            ? wire.provider
-            : "lmstudio";
-        const rawCaps = wire.capabilities as Record<string, unknown> | null | undefined;
+        // Fall back to `key` when `display_name` is empty or the wire
+        // omits it (LM Studio doesn't always send it) — rendering
+        // `undefined` would blank the <option> text in every dropdown.
+        const displayName = m.display_name || m.key;
+        // Provide a safe default so consumers can always read
+        // capabilities.vision / .trained_for_tool_use without null-checks;
+        // embedding models and older responses may omit `capabilities`.
         const capabilities: ModelCapabilities = {
-          vision: rawCaps?.vision === true,
-          trained_for_tool_use: rawCaps?.trained_for_tool_use === true,
-          reasoning:
-            rawCaps?.reasoning != null &&
-            typeof rawCaps.reasoning === "object" &&
-            "default" in rawCaps.reasoning &&
-            "allowed_options" in rawCaps.reasoning
-              ? (rawCaps.reasoning as ModelCapabilities["reasoning"])
-              : null,
-          embedding: rawCaps?.embedding === true,
+          vision: m.capabilities?.vision === true,
+          trained_for_tool_use: m.capabilities?.trained_for_tool_use === true,
+          reasoning: m.capabilities?.reasoning ?? null,
+          embedding: m.capabilities?.embedding === true,
         };
         return {
           id: m.key,
           name: displayName,
-          provider,
+          // Multi-provider: default to "lmstudio" for backward-compat
+          // with LM Studio-only responses.
+          provider: m.provider || "lmstudio",
           capabilities,
           loaded: m.loaded_instances > 0,
-          size_bytes: sizeBytes,
-          params_string: paramsString,
+          size_bytes: m.size_bytes,
+          params_string: m.params_string ?? "",
           // Generated type marks these optional (pydantic defaults) —
           // normalise to the UI shape's non-optional contracts.
           quantization: m.quantization ?? null,
           loaded_instance_ids: m.loaded_instance_ids ?? [],
-          max_context_length: maxContextLength,
-          loaded_context_length: loadedContextLength,
+          max_context_length: m.max_context_length,
+          loaded_context_length: m.loaded_context_length,
         };
       });
       return { models, total: models.length };

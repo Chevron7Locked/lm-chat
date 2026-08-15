@@ -10,8 +10,8 @@
  *   GET    /api/projects                    list all projects for caller
  *   GET    /api/projects/{id}               fetch one project
  *   PATCH  /api/projects/{id}               update name / description /
- *                                           system_prompt / folders;
- *                                           ``clear=`` semantics
+ *                                           system_prompt; ``clear=``
+ *                                           semantics
  *   DELETE /api/projects/{id}               delete (children survive
  *                                           un-projected via FK SET NULL)
  *   POST   /api/projects/{id}/archive       soft-archive
@@ -53,13 +53,6 @@ export interface ProjectResponse {
   description: string;
   system_prompt: string;
   /**
-   * Per-project folders feature removed. Field marked optional +
-   * deprecated; the backend no longer returns it. Kept on the type so old
-   * code paths (snapshot fixtures, etc.) don't TS-error during transition.
-   * @deprecated per-project folders were removed
-   */
-  folders?: string[];
-  /**
    * The embedding model pinned by the first document attach. NULL when no
    * docs are attached yet. Surfaced for the ReembedBanner which compares
    * this to the user's currently active embedding model and warns when they
@@ -98,14 +91,12 @@ interface CreateProjectBody {
   name: string;
   description?: string;
   system_prompt?: string;
-  folders?: string[];
 }
 
 interface UpdateProjectBody {
   name?: string;
   description?: string;
   system_prompt?: string;
-  folders?: string[];
   /**
    * Seeds chats.model_id on new project chats. To reset to "use global
    * default", omit this field and add "default_model_id" to `clear` instead
@@ -144,8 +135,7 @@ function projectsToForm(
   body: CreateProjectBody | UpdateProjectBody,
 ): Record<string, string> {
   // FastAPI form-encoding: omitted fields → don't touch; "" → omitted
-  // (see /api/projects PATCH route docstring). Folders is sent as a
-  // JSON array string (the backend's `folders` Form field parses JSON).
+  // (see /api/projects PATCH route docstring).
   const form: Record<string, string> = {};
   if ("name" in body) form.name = body.name;
   if ("description" in body) {
@@ -153,9 +143,6 @@ function projectsToForm(
   }
   if ("system_prompt" in body) {
     form.system_prompt = body.system_prompt;
-  }
-  if ("folders" in body) {
-    form.folders = JSON.stringify(body.folders);
   }
   if ("default_model_id" in body) {
     form.default_model_id = body.default_model_id;

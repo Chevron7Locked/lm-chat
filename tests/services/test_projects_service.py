@@ -64,9 +64,8 @@ async def test_create_with_all_fields(tmp_path: Path) -> None:
     try:
         uid = await _insert_user(eng)
         svc = ProjectsService(engine=eng)
-        # The per-project folders feature was removed. The ``folders``
-        # kwarg is accepted for backward-compat but silently discarded;
-        # no round-trip.
+        # The per-project folders feature was removed; ``create`` no
+        # longer accepts a ``folders`` kwarg at all.
         p = await svc.create(
             user_id=uid,
             name="Book",
@@ -81,8 +80,8 @@ async def test_create_with_all_fields(tmp_path: Path) -> None:
 
 
 # The folder de-dup + corrupt-shape tests + folders=None tests were
-# DELETED alongside the removed folders feature. The ``folders`` kwarg
-# is now backward-compat noise; the round-trip path no longer exists.
+# DELETED alongside the removed folders feature. ``create``/``update``
+# no longer accept a ``folders`` kwarg at all.
 
 
 @pytest.mark.anyio

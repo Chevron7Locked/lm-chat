@@ -13,11 +13,9 @@ Validation:
 
 Mutation semantics for ``update``: ``None`` means "don't touch this
 field"; ``""`` (for description / system_prompt) is a real value that
-clears the column. The legacy ``folders`` kwarg is accepted but silently
-discarded (column dropped by migration 0023b). ``default_model_id`` /
-``rag_threshold`` are nullable columns where NULL is itself meaningful,
-so clearing them goes through the ``clear`` kwarg instead of an
-empty-string sentinel.
+clears the column. ``default_model_id`` / ``rag_threshold`` are
+nullable columns where NULL is itself meaningful, so clearing them
+goes through the ``clear`` kwarg instead of an empty-string sentinel.
 
 Constructed once at app lifespan and attached to
 ``app.state.projects_service``; routes resolve it via DI.
@@ -286,21 +284,12 @@ class ProjectsService:
         name: str,
         description: str = "",
         system_prompt: str = "",
-        folders: list[str] | None = None,
     ) -> Project:
         """Create a new project owned by *user_id*.
-
-        Args:
-            folders: ACCEPTED FOR BACKWARD-COMPAT, IGNORED. Per-project
-                folders were removed. The kwarg stays so older clients
-                don't 400; the value is silently dropped.
 
         Raises:
             InvalidProjectFieldError: On any field validation failure.
         """
-        # Accepted for backward-compat with older clients; nowhere to
-        # persist it (column dropped).
-        _ = folders
         clean_name = _normalize_name(name)
         clean_description = _normalize_optional_text(
             description,
@@ -421,7 +410,6 @@ class ProjectsService:
         name: str | None = None,
         description: str | None = None,
         system_prompt: str | None = None,
-        folders: list[str] | None = None,
         default_model_id: str | None = None,
         rag_threshold: int | None = None,
         clear: frozenset[str] | None = None,
@@ -429,8 +417,7 @@ class ProjectsService:
         """PATCH semantics — None means "don't touch this field."
 
         Empty string for ``description`` / ``system_prompt`` is a real
-        value (clears the column). The ``folders`` kwarg is accepted for
-        backward-compat but silently discarded.
+        value (clears the column).
 
         ``default_model_id`` / ``rag_threshold`` are nullable columns
         where NULL is itself meaningful ("fall through to the global
@@ -464,9 +451,6 @@ class ProjectsService:
             # Write-time budget check.
             _validate_system_prompt_budget(cleaned_prompt)
             patch["system_prompt"] = cleaned_prompt
-        # Accepted for backward-compat but silently discarded.
-        if folders is not None:
-            _ = folders
         # Clear-to-NULL wins over a same-call set (mirrors the route's
         # own clear-vs-value precedence).
         if "default_model_id" in clear_fields:

@@ -112,30 +112,10 @@ describe("useModels", () => {
   });
 
   // Cluster 0 (audit 2026-06-10): max_context_length wire-through.
-  // FastAPI's default response_model_by_alias=True puts aliased fields on
-  // the wire as camelCase. The normalizer must accept either shape.
-  it("carries max_context_length from camelCase wire", async () => {
-    const { useModels } = await import("@/hooks/useModels");
-    const { wrapper } = makeWrapper();
-    mockRequest.mockResolvedValue([{
-      key: "qwen3-vl-8b-instruct",
-      displayName: "Qwen3 VL 8B Instruct",
-      capabilities: { vision: true, trained_for_tool_use: true },
-      loaded_instances: 2,
-      loaded_instance_ids: ["model-a", "model-b"],
-      maxContextLength: 16384,
-      sizeBytes: 7454273952,
-      paramsString: "8B",
-    }]);
-    const { result } = renderHook(() => useModels(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    const m = result.current.data?.models[0];
-    expect(m?.max_context_length).toBe(16384);
-    expect(m?.size_bytes).toBe(7454273952);
-    expect(m?.params_string).toBe("8B");
-  });
-
-  it("carries max_context_length from snake_case wire (fallback path)", async () => {
+  // The backend's ModelInfo aliases are validation-only (input-side LM
+  // Studio field-name compat); serialization is snake_case-only, so this
+  // is the only wire shape the normalizer needs to handle.
+  it("carries max_context_length from the wire", async () => {
     const { useModels } = await import("@/hooks/useModels");
     const { wrapper } = makeWrapper();
     mockRequest.mockResolvedValue([{
@@ -153,21 +133,6 @@ describe("useModels", () => {
     expect(result.current.data?.models[0]?.max_context_length).toBe(131072);
   });
 
-  it("defaults max_context_length to 0 when wire omits the field", async () => {
-    const { useModels } = await import("@/hooks/useModels");
-    const { wrapper } = makeWrapper();
-    mockRequest.mockResolvedValue([{
-      key: "text-embedding-nomic-embed-text-v1.5",
-      displayName: "Nomic Embed Text v1.5",
-      capabilities: {},
-      loaded_instances: 0,
-      loaded_instance_ids: [],
-    }]);
-    const { result } = renderHook(() => useModels(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data?.models[0]?.max_context_length).toBe(0);
-  });
-
   // Cluster 3a Task 1 (audit 2026-06-10): ModelInfo.capabilities is now typed
   // as ModelCapabilities (not Record<string,boolean>). The normalizer must
   // produce the correct shape including reasoning as object|null.
@@ -177,7 +142,7 @@ describe("useModels", () => {
     mockRequest.mockResolvedValue([
       {
         key: "qwen3-vl-8b-instruct",
-        displayName: "Qwen3 VL 8B",
+        display_name: "Qwen3 VL 8B",
         capabilities: {
           vision: true,
           trained_for_tool_use: true,
@@ -189,11 +154,11 @@ describe("useModels", () => {
         },
         loaded_instances: 1,
         loaded_instance_ids: ["model-a"],
-        maxContextLength: 32768,
+        max_context_length: 32768,
       },
       {
         key: "nomic-embed",
-        displayName: "Nomic Embed",
+        display_name: "Nomic Embed",
         capabilities: null, // legacy wire: no capabilities
         loaded_instances: 0,
         loaded_instance_ids: [],

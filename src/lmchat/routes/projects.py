@@ -7,8 +7,8 @@ POST   /api/projects             — create a new project for the caller.
 GET    /api/projects             — list every project owned by the caller.
 GET    /api/projects/{id}        — fetch one project (ownership-bounded).
 PATCH  /api/projects/{id}        — update name / description /
-                                   system_prompt / folders /
-                                   default_model_id / rag_threshold.
+                                   system_prompt / default_model_id /
+                                   rag_threshold.
 DELETE /api/projects/{id}        — delete; ON DELETE SET NULL cascades
                                    on chats / documents / memory_insights
                                    (children survive as un-projected).
@@ -33,7 +33,6 @@ fields are ambiguous with omitted ones under FastAPI's Form handling.
 """
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 from typing import Any, Final
 
@@ -67,13 +66,10 @@ _HTTP_404: Final[int] = 404
 _HTTP_422: Final[int] = 422
 
 _CLEARABLE_FIELDS: Final[frozenset[str]] = frozenset(
-    # ``folders`` was removed from the clearable set alongside the
-    # per-project folder feature itself. Older clients sending
-    # ``?clear=folders`` get the existing 422 with the allowed list.
-    # ``default_model_id`` / ``rag_threshold`` are both
-    # nullable columns where NULL is itself meaningful ("use the
-    # global default" / "use the formula"), so they clear via this
-    # list rather than an empty-string sentinel.
+    # ``default_model_id`` / ``rag_threshold`` are both nullable columns
+    # where NULL is itself meaningful ("use the global default" / "use
+    # the formula"), so they clear via this list rather than an
+    # empty-string sentinel.
     {"description", "system_prompt", "default_model_id", "rag_threshold"}
 )
 
@@ -224,32 +220,6 @@ class ProjectExportResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _parse_folders(raw: str | None) -> list[str] | None:
-    """PATCH/POST helper: parse the ``folders`` form value.
-
-    Accepted shapes:
-    - omitted (None) → return None (don't touch)
-    - empty string → return None (treat as omitted; use ``clear=folders``
-      to set the list to empty)
-    - JSON array → decoded list[str]
-    """
-    if raw is None or raw == "":
-        return None
-    try:
-        decoded = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=_HTTP_422,
-            detail=f"folders must be a JSON array of strings ({exc})",
-        ) from exc
-    if not isinstance(decoded, list):
-        raise HTTPException(
-            status_code=_HTTP_422,
-            detail="folders must be a JSON array",
-        )
-    return [str(x) for x in decoded]
-
-
 def _parse_clear(raw: str | None) -> frozenset[str]:
     """Parse the ``clear=`` comma-list for the project PATCH route.
 
@@ -299,20 +269,17 @@ async def create_project(
     name: str = Form(...),
     description: str = Form(default=""),
     system_prompt: str = Form(default=""),
-    folders: str | None = Form(default=None),
     user: User = Depends(require_user),
     svc: ProjectsService = Depends(_get_projects_service),
 ) -> ProjectResponse:
     """Create a new project owned by the caller."""
     log.info("projects.create.request", user_id=user.id, name=name)
-    folders_list = _parse_folders(folders)
     try:
         project = await svc.create(
             user_id=user.id,
             name=name,
             description=description,
             system_prompt=system_prompt,
-            folders=folders_list,
         )
     except InvalidProjectFieldError as exc:
         raise HTTPException(status_code=_HTTP_422, detail=str(exc)) from exc
@@ -356,7 +323,6 @@ async def update_project(
     name: str | None = Form(default=None),
     description: str | None = Form(default=None),
     system_prompt: str | None = Form(default=None),
-    folders: str | None = Form(default=None),
     default_model_id: str | None = Form(default=None),
     rag_threshold: int | None = Form(default=None),
     clear: str | None = Form(default=None),
@@ -368,8 +334,8 @@ async def update_project(
     Field semantics:
         - Omitted form field → leave the column untouched.
         - Non-empty form field → set the column to the new value.
-        - To clear ``description`` / ``system_prompt`` / ``folders``
-          / ``default_model_id`` / ``rag_threshold``, name the field
+        - To clear ``description`` / ``system_prompt`` /
+          ``default_model_id`` / ``rag_threshold``, name the field
           in the ``clear=`` comma-separated list. (Empty form fields
           are ambiguous with omitted ones under FastAPI's Form
           handling — this matches the auth profile route.)
@@ -393,11 +359,6 @@ async def update_project(
             system_prompt if system_prompt not in (None, "") else None
         )
     )
-    folders_param: list[str] | None
-    if "folders" in clear_set:
-        folders_param = []
-    else:
-        folders_param = _parse_folders(folders)
     default_model_id_param: str | None = (
         default_model_id if default_model_id not in (None, "") else None
     )
@@ -409,7 +370,6 @@ async def update_project(
             name=name_param,
             description=description_param,
             system_prompt=system_prompt_param,
-            folders=folders_param,
             default_model_id=default_model_id_param,
             rag_threshold=rag_threshold,
             clear=clear_set,

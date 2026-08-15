@@ -1309,7 +1309,8 @@ export interface paths {
          *                           is treated as a folder name, not as "remove folder").
          *         pinned:           New pinned flag (optional form field).
          *         tags:             JSON-encoded array of tag strings; replaces the
-         *                           chat's whole tag list.
+         *                           chat's whole tag list. At most 20 tags, each at
+         *                           most SHORT_FIELD_MAX_LENGTH (256) characters.
          *         rag_enabled:      Toggle RAG augmentation for this chat.
          *         reasoning_effort: Per-chat reasoning level
          *                           (``"off"``, ``"low"``, ``"medium"``, ``"high"``,
@@ -3219,8 +3220,8 @@ export interface paths {
          *     Field semantics:
          *         - Omitted form field → leave the column untouched.
          *         - Non-empty form field → set the column to the new value.
-         *         - To clear ``description`` / ``system_prompt`` / ``folders``
-         *           / ``default_model_id`` / ``rag_threshold``, name the field
+         *         - To clear ``description`` / ``system_prompt`` /
+         *           ``default_model_id`` / ``rag_threshold``, name the field
          *           in the ``clear=`` comma-separated list. (Empty form fields
          *           are ambiguous with omitted ones under FastAPI's Form
          *           handling — this matches the auth profile route.)
@@ -4167,8 +4168,6 @@ export interface components {
              * @default
              */
             description: string;
-            /** Folders */
-            folders?: string | null;
             /** Name */
             name: string;
             /**
@@ -4426,8 +4425,6 @@ export interface components {
             default_model_id?: string | null;
             /** Description */
             description?: string | null;
-            /** Folders */
-            folders?: string | null;
             /** Name */
             name?: string | null;
             /** Rag Threshold */
@@ -4719,8 +4716,13 @@ export interface components {
          *                     incognito=False.
          *         project_id: Owning project PK, or null when the chat
          *                     is not attached to a project.
+         *         tags:       Free-form user tags. Empty list = no tags.
+         *         archived_at: None = active chat; a timestamp = archived at that
+         *                     instant.
          */
         ChatWithMessagesResponse: {
+            /** Archived At */
+            archived_at?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -4750,6 +4752,11 @@ export interface components {
             pinned: boolean;
             /** Project Id */
             project_id?: number | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
             /** Title */
             title: string;
             /**

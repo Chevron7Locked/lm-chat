@@ -61,14 +61,14 @@ describe("useChatModelOptions", () => {
     mockRequest.mockResolvedValue([
       {
         key: "qwen3-8b",
-        displayName: "Qwen3 8B",
+        display_name: "Qwen3 8B",
         capabilities: { vision: false, trained_for_tool_use: false, reasoning: null, embedding: false },
         loaded_instances: 1,
         loaded_instance_ids: ["qwen3-8b"],
       },
       {
         key: "text-embedding-nomic-embed-text-v1.5",
-        displayName: "Nomic Embed",
+        display_name: "Nomic Embed",
         capabilities: { vision: false, trained_for_tool_use: false, reasoning: null, embedding: true },
         loaded_instances: 1,
         loaded_instance_ids: [],
@@ -88,15 +88,15 @@ describe("useChatModelOptions", () => {
     mockRequest.mockResolvedValue([
       {
         key: "qwen3-vl-8b-instruct",
-        displayName: "Qwen3 VL 8B",
+        display_name: "Qwen3 VL 8B",
         capabilities: { vision: true, trained_for_tool_use: true, reasoning: null, embedding: false },
         loaded_instances: 2,
         loaded_instance_ids: ["model-a", "model-b"],
-        maxContextLength: 16384,
+        max_context_length: 16384,
       },
       {
         key: "llama3-8b",
-        displayName: "Llama 3 8B",
+        display_name: "Llama 3 8B",
         capabilities: { vision: false, trained_for_tool_use: false, reasoning: null, embedding: false },
         loaded_instances: 1,
         loaded_instance_ids: ["llama3-8b"],
@@ -108,7 +108,7 @@ describe("useChatModelOptions", () => {
         // fixture used to assert it appeared with an "(unloaded)" suffix;
         // it now asserts the opposite (see below).
         key: "mistral-7b",
-        displayName: "Mistral 7B",
+        display_name: "Mistral 7B",
         capabilities: { vision: false, trained_for_tool_use: false, reasoning: null, embedding: false },
         loaded_instances: 0,
         loaded_instance_ids: [],
@@ -150,7 +150,7 @@ describe("useChatModelOptions", () => {
     mockRequest.mockResolvedValue([
       {
         key: "qwen3.6-35b-a3b",
-        displayName: "Qwen3.6 35B A3B",
+        display_name: "Qwen3.6 35B A3B",
         capabilities: { vision: false, trained_for_tool_use: true, reasoning: null, embedding: false },
         loaded_instances: 2,
         // Upstream reported the SAME instance id twice.
@@ -176,7 +176,7 @@ describe("useChatModelOptions", () => {
     mockRequest.mockResolvedValue([
       {
         key: "vision-model",
-        displayName: "Vision Model",
+        display_name: "Vision Model",
         capabilities: {
           vision: true,
           trained_for_tool_use: true,
@@ -207,7 +207,7 @@ describe("useChatModelOptions", () => {
       mockRequest.mockResolvedValue([
         {
           key: "loaded-local-7b",
-          displayName: "Loaded Local 7B",
+          display_name: "Loaded Local 7B",
           capabilities: { vision: false, trained_for_tool_use: false, reasoning: null, embedding: false },
           loaded_instances: 1,
           loaded_instance_ids: ["loaded-local-7b"],
@@ -216,7 +216,7 @@ describe("useChatModelOptions", () => {
           // provider omitted → defaults to "lmstudio" (useModels.ts
           // normalizer). loaded_instances: 0 → loaded === false.
           key: "unloaded-local-7b",
-          displayName: "Unloaded Local 7B",
+          display_name: "Unloaded Local 7B",
           capabilities: { vision: false, trained_for_tool_use: false, reasoning: null, embedding: false },
           loaded_instances: 0,
           loaded_instance_ids: [],
@@ -247,7 +247,7 @@ describe("useChatModelOptions", () => {
       mockRequest.mockResolvedValue([
         {
           key: "meta-llama/llama-3.3-70b-instruct",
-          displayName: "Llama 3.3 70B",
+          display_name: "Llama 3.3 70B",
           provider: "openrouter",
           capabilities: { vision: false, trained_for_tool_use: true, reasoning: null, embedding: false },
           loaded_instances: 0,
@@ -282,21 +282,21 @@ describe("useChatModelOptions", () => {
       mockRequest.mockResolvedValue([
         {
           key: "loaded-local",
-          displayName: "Loaded Local",
+          display_name: "Loaded Local",
           capabilities: { vision: false, trained_for_tool_use: false, reasoning: null, embedding: false },
           loaded_instances: 1,
           loaded_instance_ids: ["loaded-local"],
         },
         {
           key: "unloaded-local",
-          displayName: "Unloaded Local",
+          display_name: "Unloaded Local",
           capabilities: { vision: false, trained_for_tool_use: false, reasoning: null, embedding: false },
           loaded_instances: 0,
           loaded_instance_ids: [],
         },
         {
           key: "cloud-loaded",
-          displayName: "Cloud Loaded",
+          display_name: "Cloud Loaded",
           provider: "groq",
           capabilities: { vision: false, trained_for_tool_use: false, reasoning: null, embedding: false },
           loaded_instances: 1,
@@ -304,7 +304,7 @@ describe("useChatModelOptions", () => {
         },
         {
           key: "cloud-unloaded",
-          displayName: "Cloud Unloaded",
+          display_name: "Cloud Unloaded",
           provider: "groq",
           capabilities: { vision: false, trained_for_tool_use: false, reasoning: null, embedding: false },
           loaded_instances: 0,

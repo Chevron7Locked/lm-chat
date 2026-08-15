@@ -3,9 +3,9 @@
  *
  * Usage: pnpm codegen
  *
- * The output file is gitignored (it's a build artifact). Run this script
- * whenever the backend's OpenAPI spec changes. P6 auto-emits openapi.yaml;
- * P7 consumes it via this codegen step.
+ * The output file is committed (`web/src/types/api.ts`) — see
+ * CONTRIBUTING.md. Run this script whenever the backend's OpenAPI spec
+ * changes. P6 auto-emits openapi.yaml; P7 consumes it via this codegen step.
  */
 import { execSync } from "node:child_process";
 import { resolve, dirname } from "node:path";

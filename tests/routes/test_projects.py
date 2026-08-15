@@ -228,8 +228,8 @@ async def test_create_rejects_empty_name(
 
 # The folders feature was removed. The
 # ``test_create_rejects_invalid_folders_json`` test was DELETED
-# alongside; the route still accepts the form field for older-client
-# backward compat, but no longer parses or validates it.
+# alongside; the route no longer accepts a ``folders`` form field at
+# all (the backward-compat pass-through was removed too).
 
 
 # ---------------------------------------------------------------------------
