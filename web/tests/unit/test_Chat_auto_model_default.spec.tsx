@@ -28,6 +28,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { __resetChatScopedMemoryForTests } from "@/hooks/useChatScopedState";
 import { AUTO_MODEL_VALUE } from "@/components/chat/shared";
+import type { ChatSummary } from "@/hooks/useChats";
 
 // jsdom doesn't implement scrollIntoView; Chat's auto-scroll effect crashes
 // without this stub.
@@ -130,40 +131,43 @@ vi.mock("@/hooks/useLmStudioConfig", () => ({
 
 // Mutable fixture — the useUpdateChat spy mutates model_id in place so the
 // reset-to-Auto display update is realistically exercised.
-interface ChatFixture {
-  id: number;
-  title: string;
-  model_id: string | null;
-  pinned: boolean;
-  incognito: boolean;
-  updated_at: string;
-  settings: Record<string, unknown>;
-}
-
-function makeChats(): ChatFixture[] {
+// Real ChatSummary import above — not a hand-rolled shadow. A local mirror
+// of this shape (the previous `ChatFixture`) was missing `folder`,
+// `display_order`, `tags`, and `archived_at` — same class of drift as
+// `TestChat`/`ChatRow`, invisible because useChatsDirect is mocked and its
+// return value isn't checked against the real hook's type.
+function makeChats(): ChatSummary[] {
   return [
     {
       id: 1,
       title: "Auto chat",
+      folder: null,
       model_id: null, // no explicit override → "Auto"
       pinned: false,
       incognito: false,
       updated_at: "2026-08-11T00:00:00Z",
       settings: {},
+      display_order: 0,
+      tags: [],
+      archived_at: null,
     },
     {
       id: 2,
       title: "Pinned chat",
+      folder: null,
       model_id: "model-x", // explicit override
       pinned: false,
       incognito: false,
       updated_at: "2026-08-11T00:00:00Z",
       settings: {},
+      display_order: 1,
+      tags: [],
+      archived_at: null,
     },
   ];
 }
 
-let mockChats: ChatFixture[] = makeChats();
+let mockChats: ChatSummary[] = makeChats();
 
 const updateChatCalls = vi.hoisted(
   () => [] as { chatId: number; payload: Record<string, unknown> }[],

@@ -23,6 +23,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ChatMessageData } from "@/components/ChatMessage";
 import type { StreamState } from "@/hooks/useSSE";
+import type { MessageRecord } from "@/hooks/useChats";
 
 if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = function (): void {
@@ -137,16 +138,11 @@ vi.mock("@/hooks/useModelList", () => ({
 }));
 
 // Persisted-message source — mutable so tests control stop_reason rows.
-interface MockMessageRecord {
-  id: number;
-  chat_id: number;
-  role: string;
-  content: string;
-  reasoning_content: string | null;
-  stop_reason?: string | null;
-  created_at: string;
-}
-let mockMessages: MockMessageRecord[] = [];
+// Real MessageRecord import above — not a hand-rolled shadow. The previous
+// `MockMessageRecord` widened `role` from the real literal union to plain
+// `string` (a loosened constraint, not just a missing field — the test
+// could construct a role the app's types forbid and nothing would object).
+let mockMessages: MessageRecord[] = [];
 
 vi.mock("@/hooks/useChats", () => ({
   useChatsDirect: () => ({ data: [], isLoading: false, isError: false }),
