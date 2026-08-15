@@ -168,8 +168,19 @@ export interface StreamState {
    * as a no-op. Reset to `undefined` on every start()/reset(); consumed by
    * an effect in Chat.tsx that applies it via `useChatPreset`'s
    * `adoptModelPreset`.
+   *
+   * `chatId` is the chat the STREAM that produced this verdict was started
+   * for (the `start(chatId, …)` argument) — NOT necessarily the chat
+   * currently on screen. `state` is a single instance shared across chat
+   * navigation (see the Chat.tsx doc comment near `followupSuggestions`),
+   * so this frame can still be sitting here after the user has switched to
+   * a different chat. Consumers MUST compare this against the chat they're
+   * about to apply the adoption to and no-op on a mismatch, or a verdict
+   * computed for one conversation gets silently applied to whatever chat
+   * happens to be open when it arrives (see the mode-adoption cross-chat
+   * leak this field was added to close).
    */
-  modeAdopt: { presetId: string | null; msgId: number } | undefined;
+  modeAdopt: { presetId: string | null; msgId: number; chatId: number } | undefined;
 }
 
 export interface ChatStreamPayload {
@@ -715,7 +726,10 @@ function handleEvent(
       if (msgId !== undefined) {
         setState((s) => ({
           ...s,
-          modeAdopt: { presetId: raw.preset_id ?? null, msgId },
+          // chatId is this event's OWN stream's chat, not necessarily
+          // whatever chat is on screen when the consuming effect runs —
+          // see the StreamState.modeAdopt doc.
+          modeAdopt: { presetId: raw.preset_id ?? null, msgId, chatId },
         }));
       }
       break;

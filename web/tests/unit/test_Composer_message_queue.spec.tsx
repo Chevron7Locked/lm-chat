@@ -14,6 +14,11 @@
  *     user clicked Stop, the queued message is NOT auto-fired into the
  *     interrupted conversation — it stays queued, discoverable via the
  *     queue row's "Send now" (manual flush) and remove controls.
+ *  5. Cross-chat scoping: this Composer instance is not remounted on chat
+ *     navigation, so a queued message must stay scoped to the chat it was
+ *     submitted from — invisible and non-draining while a different chat
+ *     is on screen, and only auto-sent (to the RIGHT chat) once its own
+ *     chat is idle and back on screen.
  */
 import type { ComponentProps } from "react";
 import { describe, it, expect, vi } from "vitest";
@@ -246,6 +251,42 @@ describe("Composer message queue (streaming submit)", () => {
     const [, , sentUserText] = onSubmit.mock.calls[0]!;
     expect(sentUserText).toBe("stranded message");
     expect(screen.queryByTestId("composer-queue")).toBeNull();
+  });
+
+  it("does NOT drain a queued message into a different chat navigated to before its stream finishes, and drains it once the origin chat is back on screen", () => {
+    const onSubmit = vi.fn<OnSubmitFn>();
+    const { rerender } = render(
+      <Composer {...baseProps} chatId={1} streaming onSubmit={onSubmit} />,
+    );
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "queued in chat 1" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // The user navigates to a different chat while chat 1's stream is
+    // still running in the background — Chat.tsx renders <Composer> with
+    // no `key={chatId}`, so this is a prop change on the SAME instance,
+    // not a remount. The chat-1 item must not be visible from chat 2.
+    rerender(<Composer {...baseProps} chatId={2} streaming onSubmit={onSubmit} />);
+    expect(screen.queryByTestId("composer-queue")).toBeNull();
+
+    // Chat 1's stream completes naturally in the background while chat 2
+    // is still the one on screen.
+    rerender(<Composer {...baseProps} chatId={2} streaming={false} onSubmit={onSubmit} />);
+
+    // Must NOT fire into chat 2 — this is the wrong-chat leak.
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("composer-queue")).toBeNull();
+
+    // The user navigates back to chat 1 (streaming already settled false
+    // in the background) — the queued item drains there, correctly, and
+    // becomes visible again while it's still pending.
+    rerender(<Composer {...baseProps} chatId={1} streaming={false} onSubmit={onSubmit} />);
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const [sentChatId, , sentUserText] = onSubmit.mock.calls[0]!;
+    expect(sentChatId).toBe(1);
+    expect(sentUserText).toBe("queued in chat 1");
   });
 
   it("removes a queued message without sending it", () => {

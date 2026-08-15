@@ -196,12 +196,21 @@ const NO_SELECTED_INTEGRATIONS: string[] = [];
  * normal send) and captured here verbatim — it is NOT re-derived when the
  * queue drains, so it reflects the model/preset/tools that were active when
  * the user hit send, not whatever the composer's state happens to be later.
+ *
+ * `chatId` is captured the same way, for the same reason: this Composer
+ * instance is NOT remounted on chat navigation (no `key={chatId}` at the
+ * call site), so its `queue` state — and the `chatId` prop the drain effect
+ * would otherwise read live — survive a chat switch. Without a captured
+ * chatId, a message queued in chat A auto-drains into whichever chat
+ * happens to be on screen when the stream it was queued behind finishes,
+ * not the chat it was written for.
  */
 interface QueuedMessage {
   id: number;
   userText: string;
   payload: ChatStreamPayload;
   presetLabel: string | undefined;
+  chatId: number;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -291,8 +300,14 @@ export function Composer({
 
   // Messages submitted while `streaming` is true land here instead of being
   // dropped; see the streaming→idle effect below (defined after handleSubmit)
-  // for the auto-send + Stop-abort behavior.
+  // for the auto-send + Stop-abort behavior. NOT chat-scoped by itself —
+  // this Composer instance survives a chat switch (no `key={chatId}` at
+  // the call site) — so `queue` can hold items belonging to chats other
+  // than the one currently on screen. Use `visibleQueue` below wherever
+  // the queue is rendered or drained against "the current chat".
   const [queue, setQueue] = useState<QueuedMessage[]>([]);
+  // This chat's own queued items only — see the `queue` doc above.
+  const visibleQueue = queue.filter((item) => item.chatId === chatId);
 
   // Per-chat integrations state, seeded from admin defaults.
   // Decision: per-chat (state persists for this chat session, resets on new
@@ -419,19 +434,25 @@ export function Composer({
   const barRef = useRef<HTMLDivElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queueIdRef = useRef(0);
-  // Tracks the PREVIOUS value of `streaming` so the effect below can detect
-  // a genuine true→false edge (stream just finished) instead of acting on
-  // every render where `streaming` happens to already be false. Reading AND
-  // writing this ref synchronously inside the same effect pass makes it
-  // self-correcting under React 18 StrictMode's dev-only double-invoke of
-  // effects (same idiom as Chat.tsx's staleModelSwitchedForChatIdRef): a
-  // second back-to-back invocation sees the ref already updated by the
-  // first, so it no-ops instead of double-firing.
-  const prevStreamingRef = useRef(streaming);
-  // Set by handleStop just before calling onStop; consumed by the very next
-  // streaming→false transition so an ABORTED stream does not auto-send the
-  // next queued message (see the effect below).
-  const wasStoppedRef = useRef(false);
+  // The chatId whose stream the user just Stopped (captured by handleStop
+  // at click time — a synchronous action tied to whatever's on screen, so
+  // it's always correct even though `streaming` itself is shared/not
+  // chat-scoped elsewhere). Consumed — cleared to null — the next time the
+  // drain effect below evaluates a head item that belongs to THIS chat, so
+  // exactly one auto-send opportunity is skipped per Stop; a later,
+  // genuinely new completion for the same chat still drains normally (see
+  // the effect's doc). Per-chat rather than a bare boolean because the
+  // drain effect is level-triggered (see below) and can evaluate the same
+  // settled state again after a chat switch, well after the Stop that
+  // produced it.
+  const stoppedChatIdRef = useRef<number | null>(null);
+  // Guards against React 18 StrictMode's dev-only double-invoke of effects
+  // double-firing onSubmit: both invocations of a double-invoked pass read
+  // the SAME (stale) `queue` closure, since no re-render happens between
+  // them, so `next` would resolve to the same item twice. Mutating this
+  // ref inside the effect body persists across that replay even though
+  // props/state don't change between the two invocations.
+  const drainingIdRef = useRef<number | null>(null);
   const { push } = useToast();
   const { data: prompts } = usePrompts();
 
@@ -815,7 +836,13 @@ function handleChange(e: ChangeEvent<HTMLTextAreaElement>): void {
       const id = (queueIdRef.current += 1);
       setQueue((prev) => [
         ...prev,
-        { id, userText: trimmed, payload, presetLabel: presetSnapshot?.label },
+        {
+          id,
+          userText: trimmed,
+          payload,
+          presetLabel: presetSnapshot?.label,
+          chatId,
+        },
       ]);
       return;
     }
@@ -838,50 +865,73 @@ function handleChange(e: ChangeEvent<HTMLTextAreaElement>): void {
     push,
   ]);
 
-  // Stop button wrapper — records that THIS streaming→false transition is an
-  // abort before calling the real onStop, so the effect below can skip the
+  // Stop button wrapper — records which chat's stream is being aborted
+  // before calling the real onStop, so the effect below can skip the
   // auto-send for it.
   const handleStop = useCallback((): void => {
-    wasStoppedRef.current = true;
+    stoppedChatIdRef.current = chatId;
     onStop();
-  }, [onStop]);
+  }, [onStop, chatId]);
 
-  // Drains the queue when the active stream finishes.
+  // Drains the queue once the chat a queued message belongs to is BOTH
+  // idle (not streaming) AND the one actually on screen.
   //  - Natural completion (the model finished / errored / hit a stop
-  //    reason on its own): send the oldest queued message as the next turn.
-  //  - User-initiated Stop (wasStoppedRef, set by handleStop above): skip
-  //    the auto-send. The stream ended because the user chose to interrupt
-  //    it — auto-firing another generation right into that would defeat the
-  //    point of stopping. The queued message(s) are NOT discarded; they
-  //    stay visible (queue chip row below) and can be sent manually via
-  //    "Send now" once idle, or will still auto-send after whatever stream
-  //    completes next.
+  //    reason on its own): send the oldest queued message for the chat
+  //    currently on screen as the next turn.
+  //  - User-initiated Stop (stoppedChatIdRef, set by handleStop above):
+  //    skip the auto-send for that chat's head item once. The stream
+  //    ended because the user chose to interrupt it — auto-firing another
+  //    generation right into that would defeat the point of stopping. The
+  //    queued message(s) are NOT discarded; they stay visible (queue chip
+  //    row below, once the owning chat is on screen again) and can be sent
+  //    manually via "Send now", or will still auto-send after whatever
+  //    stream completes next for that chat.
+  //
+  // Cross-chat guard: this Composer instance is NOT remounted on chat
+  // navigation, so `queue` can hold an item queued against a DIFFERENT
+  // chat than the one currently on screen (`chatId` prop) — `streaming`
+  // itself is shared/not chat-scoped too (see useSSE), so it can go idle
+  // while the user is looking at an unrelated chat. Auto-draining
+  // unconditionally would post the item into whatever chat happens to be
+  // open at that moment — silently, into a conversation the user never
+  // addressed it to. Deliberately level-triggered (not edge-only) rather
+  // than requiring the EXACT true→false tick: the head item's captured
+  // chatId must match the chat on screen AND streaming must currently be
+  // false, so navigating back to the right chat later (after its stream
+  // already finished elsewhere) drains it then too, without requiring a
+  // manual "Send now".
   useEffect(() => {
-    const wasStreaming = prevStreamingRef.current;
-    prevStreamingRef.current = streaming;
-    if (!wasStreaming || streaming) return; // only a true → false edge matters
-    if (wasStoppedRef.current) {
-      wasStoppedRef.current = false;
-      return;
-    }
+    if (streaming) return;
     const next = queue[0];
     if (next === undefined) return;
+    if (next.chatId !== chatId) return;
+    if (stoppedChatIdRef.current === next.chatId) {
+      stoppedChatIdRef.current = null;
+      return;
+    }
+    if (drainingIdRef.current === next.id) return; // StrictMode replay guard
+    drainingIdRef.current = next.id;
     setQueue((prev) => prev.filter((item) => item.id !== next.id));
-    onSubmit(chatId, next.payload, next.userText, next.presetLabel);
+    onSubmit(next.chatId, next.payload, next.userText, next.presetLabel);
   }, [streaming, queue, chatId, onSubmit]);
 
   // Manually fire a queued message right now (only meaningful once idle —
   // sending while another stream is active would race two streams for the
   // same chat). Used by the queue chip row's "Send now" control, mainly to
   // recover a message stranded by a Stop-abort (see the effect above).
+  // Always submits to the item's OWN captured chatId (see QueuedMessage's
+  // doc) — the queue-panel render below already restricts which items are
+  // visible/clickable to the chat currently on screen, but submitting to
+  // `target.chatId` rather than the live `chatId` prop keeps this correct
+  // even if that render-side restriction is ever loosened.
   const sendQueuedMessageNow = useCallback(
     (id: number): void => {
       const target = queue.find((item) => item.id === id);
       if (target === undefined) return;
       setQueue((prev) => prev.filter((item) => item.id !== id));
-      onSubmit(chatId, target.payload, target.userText, target.presetLabel);
+      onSubmit(target.chatId, target.payload, target.userText, target.presetLabel);
     },
-    [queue, chatId, onSubmit],
+    [queue, onSubmit],
   );
 
   // Discard a queued message without sending it.
@@ -1139,9 +1189,14 @@ function handleChange(e: ChangeEvent<HTMLTextAreaElement>): void {
           handleSubmit). Visible so "where did my message go" never has to
           be asked. The head item auto-sends once the CURRENT stream
           finishes naturally; a Stop-initiated abort skips that auto-send
-          (wasStoppedRef) so nothing fires into the interrupted response —
-          each item stays here with its own Send now / remove controls. */}
-      {queue.length > 0 && (
+          (stoppedChatIdRef) so nothing fires into the interrupted response —
+          each item stays here with its own Send now / remove controls.
+          Filtered to THIS chat's own items: `queue` isn't chat-scoped
+          (this Composer instance survives a chat switch — see
+          QueuedMessage's doc), so without the filter a chat navigated away
+          from would still show up here, and idx 0 could read "sends next"
+          for a message that belongs to a different conversation. */}
+      {visibleQueue.length > 0 && (
         <div
           role="list"
           aria-label="Queued messages"
@@ -1154,7 +1209,7 @@ function handleChange(e: ChangeEvent<HTMLTextAreaElement>): void {
             marginBottom: "var(--space-glue, 4px)",
           }}
         >
-          {queue.map((item, idx) => (
+          {visibleQueue.map((item, idx) => (
             <div
               key={item.id}
               role="listitem"

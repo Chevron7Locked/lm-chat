@@ -1010,6 +1010,16 @@
       env(safe-area-inset-bottom, 0px)
     );
   }
+
+  /* Row actions (move-to-folder, tags, archive/delete) are hover/
+     focus-within-revealed above — there's no hover on the mobile drawer, so
+     without this they're permanently invisible/untappable (pointer-events:
+     none). Same treatment as `.lmchat-message-actions` on mobile
+     (chat.css). */
+  .lmchat-chat-row-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 /* ── pointer: coarse — sidebar touch lifts ───────────────────────────────────
@@ -1025,6 +1035,14 @@
   .lmchat-new-chat-btn,
   .lmchat-projects-link {
     min-height: 44px;
+  }
+
+  /* Row actions always-visible on touch (no hover) — same reasoning as the
+     mobile-drawer override above, for wide coarse-pointer viewports (iPad +
+     Magic Keyboard, Surface) where the max-width: 768px block doesn't fire. */
+  .lmchat-chat-row-actions {
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 

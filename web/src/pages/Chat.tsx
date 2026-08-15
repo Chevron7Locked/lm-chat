@@ -553,9 +553,19 @@ export default function Chat() {
   // preset (see useChatPresetStore.adoptModel) — a manual rail-picker
   // choice always wins over an inferred one.
   useEffect(() => {
-    const presetId = sseState.modeAdopt?.presetId;
-    if (presetId) adoptModelPreset(presetId);
-  }, [sseState.modeAdopt, adoptModelPreset]);
+    const verdict = sseState.modeAdopt;
+    if (verdict?.presetId == null) return;
+    // sseState is a single shared instance kept alive across chat
+    // navigation (see the followupSuggestions wipe comment above) — a
+    // verdict can still be sitting here after the user has switched to a
+    // different chat. Only apply it to the chat whose stream actually
+    // produced it; otherwise this effect would still re-fire on every
+    // subsequent chatId change (adoptModelPreset's identity changes with
+    // chatId) and silently re-apply a stale persona — and re-PATCH the
+    // server — for every chat browsed afterward.
+    if (verdict.chatId !== chatId) return;
+    adoptModelPreset(verdict.presetId);
+  }, [sseState.modeAdopt, adoptModelPreset, chatId]);
 
   useSSEWarningToasts(sseState.warnings, push);
 
