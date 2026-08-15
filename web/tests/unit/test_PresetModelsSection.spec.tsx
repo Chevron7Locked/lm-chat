@@ -198,7 +198,8 @@ describe("PresetModelsSection", () => {
     });
 
     expect(mockPush).toHaveBeenCalledOnce();
-    expect(mockPush.mock.calls[0][0]).toMatchObject({
+    // Guaranteed non-null by the toHaveBeenCalledOnce() check just above.
+    expect(mockPush.mock.calls[0]![0]).toMatchObject({
       variant: "error",
       message: "Save failed.",
     });
@@ -236,7 +237,9 @@ describe("PresetModelsSection", () => {
 
     // And a matching, labelled option must actually exist in the DOM (so the
     // trigger renders the truth), carrying the "not loaded" marker.
-    const selected = coderSelect.selectedOptions[0];
+    // A rendered <select> always has a selected option — DOM semantics, not
+    // an assumption; the toBeTruthy() below is a runtime belt-and-braces.
+    const selected = coderSelect.selectedOptions[0]!;
     expect(selected).toBeTruthy();
     expect(selected.value).toBe("lmstudio::laguna-s-2.1@q4_k_xl");
     expect(selected.textContent).toContain("laguna-s-2.1@q4_k_xl");
@@ -256,7 +259,7 @@ describe("PresetModelsSection", () => {
     // No "Saved but not loaded" group should appear for a valid pin.
     expect(screen.queryByText("Saved but not loaded")).toBeNull();
     // The selected option is the real loaded one, unmarked.
-    expect(coderSelect.selectedOptions[0].textContent).not.toContain(
+    expect(coderSelect.selectedOptions[0]!.textContent).not.toContain(
       "not loaded",
     );
   });
@@ -301,12 +304,12 @@ describe("PresetModelsSection", () => {
 
     // Each row reflects its OWN stored value, provider prefix preserved.
     expect(coderSelect.value).toBe("lmstudio::laguna-s-2.1@q4_k_xl");
-    expect(coderSelect.selectedOptions[0].textContent).toContain("not loaded");
+    expect(coderSelect.selectedOptions[0]!.textContent).toContain("not loaded");
     expect(researchSelect.value).toBe("openrouter::acme/deprecated-70b");
-    expect(researchSelect.selectedOptions[0].textContent).toContain(
+    expect(researchSelect.selectedOptions[0]!.textContent).toContain(
       "acme/deprecated-70b",
     );
-    expect(researchSelect.selectedOptions[0].textContent).toContain(
+    expect(researchSelect.selectedOptions[0]!.textContent).toContain(
       "not loaded",
     );
   });

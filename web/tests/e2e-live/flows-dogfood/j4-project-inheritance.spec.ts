@@ -94,7 +94,8 @@ test(
       let best = 1;
       let bestRank = Number.POSITIVE_INFINITY;
       for (let i = 0; i < sel.options.length; i++) {
-        const o = sel.options[i];
+        // Guaranteed defined: i is always a valid index (loop bound above).
+        const o = sel.options[i]!;
         if (o.disabled || o.value === "") continue;
         if (o.text.toLowerCase().includes("unloaded")) continue;
         const r = rank(o.text);

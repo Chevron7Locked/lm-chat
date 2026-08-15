@@ -150,7 +150,8 @@ describe("AdminIntegrations", () => {
     fireEvent.click(screen.getByTestId("save-btn"));
 
     expect(mockMutate).toHaveBeenCalledTimes(1);
-    const calledWith = mockMutate.mock.calls[0][0] as Array<{ value: string }>;
+    // Guaranteed non-null by the toHaveBeenCalledTimes(1) check just above.
+    const calledWith = mockMutate.mock.calls[0]![0] as Array<{ value: string }>;
     const values = calledWith.map((e) => e.value);
     expect(values).toContain("mcp/extra");
     expect(values).toContain("mcp/searxng");

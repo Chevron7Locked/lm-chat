@@ -417,10 +417,11 @@ describe("MemorySettings", () => {
     );
     expect(patchCalls.length).toBeGreaterThanOrEqual(2);
 
+    // Both indices guaranteed by the length check just above.
     // First PATCH should set provider to ddg
-    expect(patchCalls[0][1].body).toContain("web_search_provider");
+    expect(patchCalls[0]![1].body).toContain("web_search_provider");
     // Second PATCH should clear the URL
-    expect(patchCalls[1][1].body).toContain("searxng_url");
+    expect(patchCalls[1]![1].body).toContain("searxng_url");
   });
 
     it("repeat-loop cut (K) edit button opens the numeric input", async () => {

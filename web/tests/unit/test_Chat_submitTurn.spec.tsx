@@ -120,8 +120,10 @@ describe("submitTurn — payload contract", () => {
       startStream: withTools,
       setAutoStick: vi.fn(),
     });
+    // submitTurn above is fully inlined (no branch skips startStream when
+    // model is non-empty, as here) — the call is guaranteed to have landed.
     expect(
-      (withTools.mock.calls[0][1] as Record<string, unknown>).integrations,
+      (withTools.mock.calls[0]![1] as Record<string, unknown>).integrations,
     ).toEqual(["mcp/context7"]);
 
     const noTools = vi.fn();
@@ -135,7 +137,7 @@ describe("submitTurn — payload contract", () => {
       setAutoStick: vi.fn(),
     });
     expect(
-      "integrations" in (noTools.mock.calls[0][1] as Record<string, unknown>),
+      "integrations" in (noTools.mock.calls[0]![1] as Record<string, unknown>),
     ).toBe(false);
   });
 
@@ -152,7 +154,7 @@ describe("submitTurn — payload contract", () => {
       setAutoStick: vi.fn(),
     });
     expect(
-      (startStream.mock.calls[0][1] as Record<string, unknown>).integrations,
+      (startStream.mock.calls[0]![1] as Record<string, unknown>).integrations,
     ).toEqual(["mcp/override"]);
   });
 

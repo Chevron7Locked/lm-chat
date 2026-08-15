@@ -264,8 +264,9 @@ test.describe("Flow 61 — Preset model routing", () => {
       { provider: string; model_id: string }
     >;
     expect(body["research"]).toBeDefined();
-    expect(body["research"].provider).toBe(PRESET_PROVIDER);
-    expect(body["research"].model_id).toBe(PRESET_MODEL_ID);
+    // Guaranteed non-null by the toBeDefined() check just above.
+    expect(body["research"]!.provider).toBe(PRESET_PROVIDER);
+    expect(body["research"]!.model_id).toBe(PRESET_MODEL_ID);
   });
 
   test("/research sub-session stream carries assigned preset model+provider", async ({
