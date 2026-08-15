@@ -88,7 +88,28 @@ export interface StreamState {
   /** Accumulating reasoning/thinking delta chunks. */
   reasoningDeltas: string[];
   toolCalls: ToolCall[];
-  error: { code: string; message: string } | null;
+  // cumulative_tool_rounds/hint: only ever populated on an mtp_suspected
+  // error frame (see the "error" case in handleEvent below, which reads
+  // raw.error?.cumulative_tool_rounds / raw.error?.hint unconditionally on
+  // every error). Optional here because every other error code leaves them
+  // undefined. Neither is currently read by a consumer of THIS state shape
+  // — StreamErrorBanner renders via humanizeApiError(), which is a static
+  // code→copy lookup blind to both fields; the sub-session panel's own
+  // (differently-typed) SubSessionSSEState.error.hint IS rendered, but that
+  // is a separate state shape (useSubSessionSSE.ts), not this one. Fixing
+  // the type is what was asked; wiring a consumer is separate work — see
+  // the accompanying report.
+  error: {
+    code: string;
+    message: string;
+    // Explicit `| undefined` (not just `?:`) because the construction site
+    // assigns `raw.error?.cumulative_tool_rounds`/`raw.error?.hint`
+    // directly — a value that IS `undefined` when absent, not an omitted
+    // key — and this project's tsconfig has exactOptionalPropertyTypes on,
+    // which treats `prop?: T` and `prop?: T | undefined` differently.
+    cumulative_tool_rounds?: number | undefined;
+    hint?: string | undefined;
+  } | null;
   /** Live stats for the current/last streaming turn. */
   stats: StreamStats;
   /** Current load/processing phase for ThinkingIndicator. */

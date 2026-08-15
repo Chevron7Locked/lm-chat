@@ -60,14 +60,23 @@ describe("ChatMessage edit / regenerate (P13l.1)", () => {
   });
 
   it("hides Edit / Regenerate on the optimistic streaming row", () => {
+    const edit = vi.fn(async () => {});
     const regen = vi.fn();
     render(
-      <ChatMessage
-        message={{ id: "streaming", role: "assistant", content: "", streaming: true }}
-        streamingActive
-        onRegenerate={regen}
-      />,
+      <>
+        <ChatMessage
+          message={{ id: "streaming", role: "user", content: "", streaming: true }}
+          streamingActive
+          onEditUserMessage={edit}
+        />
+        <ChatMessage
+          message={{ id: "streaming", role: "assistant", content: "", streaming: true }}
+          streamingActive
+          onRegenerate={regen}
+        />
+      </>,
     );
+    expect(screen.queryByTestId("chat-message-edit-btn-streaming")).toBeNull();
     expect(screen.queryByTestId("chat-message-regenerate-btn-streaming")).toBeNull();
   });
 

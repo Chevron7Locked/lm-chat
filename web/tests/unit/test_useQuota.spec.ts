@@ -186,8 +186,9 @@ describe("useUpdateQuota", () => {
       requests_per_day: 500,
     });
 
-    const { wrapper } = makeWrapper();
-    const { useUpdateQuota } = await import("@/hooks/useQuota");
+    const { wrapper, qc } = makeWrapper();
+    const { useUpdateQuota, quotaKeys } = await import("@/hooks/useQuota");
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     const { result } = renderHook(() => useUpdateQuota(), { wrapper });
 
     await act(async () => {
@@ -199,6 +200,11 @@ describe("useUpdateQuota", () => {
       tokens_per_day: "50000",
       requests_per_day: "500",
     });
+    // useUpdateQuota's onSuccess invalidates the admin list so the quota
+    // table refetches instead of showing the pre-update value — this is
+    // the assertion the destructured-but-unused `qc` was a fossil of
+    // (see d6e07c4's commit message).
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: quotaKeys.adminList() });
   });
 
   it("pushes error toast on mutation failure (Invariant 2)", async () => {

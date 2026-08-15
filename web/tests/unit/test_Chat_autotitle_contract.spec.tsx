@@ -121,14 +121,18 @@ describe("useAutotitleEffect — AC25: rejection is swallowed", () => {
     const mutateAsync = vi.fn().mockRejectedValue(new Error("network gone"));
     const args = makeArgs({ mutateAsync });
 
-    // This must not throw.
-    const { result } = renderHook(() => useTestHarness(args));
+    // This must not throw — renderHook() itself throwing (synchronously or
+    // via act()) would already fail this test before reaching the
+    // assertion below; there is nothing left to check for that half of the
+    // intent (the modern @testing-library/react renderHook() return value
+    // has no `.error` property — that was the old @testing-library/
+    // react-hooks API; `expect(result.error).toBeUndefined()` used to live
+    // here but always passed vacuously, TS2339 on `.error` not existing).
+    renderHook(() => useTestHarness(args));
     await act(async () => {
       await new Promise<void>((r) => setTimeout(r, 50));
     });
 
-    // renderHook completed → no React error boundary triggered.
-    expect(result.error).toBeUndefined();
     expect(unhandledRejections).toHaveLength(0);
   });
 });
