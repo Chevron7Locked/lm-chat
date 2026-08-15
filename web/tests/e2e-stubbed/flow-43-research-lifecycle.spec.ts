@@ -9,17 +9,12 @@
  */
 import { test, expect } from "@playwright/test";
 
-const AUTH_ME = { user_id: 1, username: "alice", is_admin: false, expires_at: "2026-12-01T00:00:00Z" };
-
 test.describe("Flow 43 — /research sub-session lifecycle", () => {
   /** Counter for stream+finalize calls so we can switch stub response. */
   let streamCallCt = 0;
-  /** Flag set after finalize completes so inject endpoint is expected. */
-  let finalized = false;
 
   test.beforeEach(async ({ page }) => {
     streamCallCt = 0;
-    finalized = false;
 
     // Log all API requests for debugging
     page.on("request", (req) => {
@@ -122,7 +117,6 @@ test.describe("Flow 43 — /research sub-session lifecycle", () => {
     // Finalize endpoint.
     await page.route("**/api/chats/43/sub-session/finalize", (route) => {
       if (route.request().method() !== "POST") return route.continue();
-      finalized = true;
       const sse =
         "event: sub.delta\ndata: {\"delta\":\"Final summary of research…\"}\n\n" +
         "event: sub.complete\ndata: {\"final_content\":\"Final summary of research…\",\"truncated\":false}\n\n";

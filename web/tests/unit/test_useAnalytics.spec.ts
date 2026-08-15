@@ -4,7 +4,7 @@
  * P8c Item 12. Covers query hook + error path (Invariant 2).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor, act } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";

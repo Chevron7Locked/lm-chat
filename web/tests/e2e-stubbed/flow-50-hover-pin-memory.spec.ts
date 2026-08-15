@@ -11,7 +11,7 @@
  * usePinnedMessagesStore (localStorage). This spec is fixme'd until a pin
  * button is added to the message hover action bar.
  */
-import { test, expect } from "@playwright/test";
+import { test } from "@playwright/test";
 
 const AUTH_ME = { user_id: 1, username: "alice", is_admin: false, expires_at: "2026-12-01T00:00:00Z" };
 
@@ -52,7 +52,7 @@ test.describe("Flow 50 — Hover-bar message-level pin", () => {
     });
   });
 
-  test("hover assistant message reveals action bar with pin option", async ({ page }) => {
+  test("hover assistant message reveals action bar with pin option", async () => {
     // The ChatMessage component does not have a pin button in its hover
     // action bar. This feature requires a product-code change to add
     // a pin button to the lmchat-message-actions div.

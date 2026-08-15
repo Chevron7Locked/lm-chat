@@ -186,7 +186,7 @@ describe("useUpdateQuota", () => {
       requests_per_day: 500,
     });
 
-    const { wrapper, qc } = makeWrapper();
+    const { wrapper } = makeWrapper();
     const { useUpdateQuota } = await import("@/hooks/useQuota");
     const { result } = renderHook(() => useUpdateQuota(), { wrapper });
 

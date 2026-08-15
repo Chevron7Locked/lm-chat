@@ -26,7 +26,7 @@
  * (pageerror + dialog assertions) is covered by the Playwright-based
  * nightly suite (`.LN-redteam` per PLAN v3 §3G).
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { ChatMessage } from "@/components/ChatMessage";
 

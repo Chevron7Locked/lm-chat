@@ -12,7 +12,6 @@
 
 import { test, expect } from "../_fixtures";
 import {
-  attachErrorCollector,
   loginAndWait,
   createChatViaRequest,
 } from "./_flow-helpers";

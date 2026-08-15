@@ -294,7 +294,7 @@ test(
     // The stub's buildSseFixture uses "stub-resp-1" — the FE should store that.
     // We let the real stream proxy through to the backend, which proxies to the
     // stub server. The stub always responds with response_id "stub-resp-1".
-    await page.evaluate((burl: string) => {
+    await page.evaluate(() => {
       const originalFetch = window.fetch.bind(window);
       window.fetch = async function patchedFetch(
         input: RequestInfo | URL,
@@ -327,7 +327,7 @@ test(
         }
         return originalFetch(input, init);
       };
-    }, backendURL);
+    });
 
     const composer = page.getByPlaceholder(/Message/);
     await composer.fill("First message — let the stream complete.");

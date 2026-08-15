@@ -139,14 +139,6 @@ const SERVER_CONNECTED = {
   tool_policy: [],
 };
 
-const SERVER_DISABLED = {
-  ...SERVER_CONNECTED,
-  slug: "github-mcp",
-  name: "GitHub MCP",
-  enabled: false,
-  connected: false,
-};
-
 // ─── Suite ───────────────────────────────────────────────────────────────────
 
 describe("McpStoreSection", () => {

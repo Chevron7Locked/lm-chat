@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import { renderHook, render, act, fireEvent } from "@testing-library/react";
-import { createElement, useRef } from "react";
+import { createElement } from "react";
 import { useDropdownKeyboard } from "@/hooks/useDropdownKeyboard";
 
 // Build a minimal KeyboardEvent-like object for testing.

@@ -60,7 +60,6 @@ describe("ChatMessage edit / regenerate (P13l.1)", () => {
   });
 
   it("hides Edit / Regenerate on the optimistic streaming row", () => {
-    const edit = vi.fn(async () => {});
     const regen = vi.fn();
     render(
       <ChatMessage

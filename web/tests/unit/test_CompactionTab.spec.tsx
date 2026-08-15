@@ -20,8 +20,8 @@ import { CompactionTab } from "@/components/CompactionTab";
 
 vi.mock("@/hooks/useCompactions", () => ({
   useCompactionMessages: (
-    chatId: number | null,
-    compactionId: number | null,
+    _chatId: number | null,
+    _compactionId: number | null,
     enabled: boolean,
   ) => {
     if (enabled) {

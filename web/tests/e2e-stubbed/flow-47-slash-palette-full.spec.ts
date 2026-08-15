@@ -31,7 +31,7 @@ test.describe("Flow 47 — Cmd+/ palette completeness", () => {
     });
   });
 
-  test("palette opens via Cmd+/ and shows commands", async ({ page, browserName }) => {
+  test("palette opens via Cmd+/ and shows commands", async ({ page }) => {
     await page.goto("/chats/47");
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible({ timeout: 10000 });
 
@@ -47,13 +47,13 @@ test.describe("Flow 47 — Cmd+/ palette completeness", () => {
     await expect(palette).toBeVisible({ timeout: 5000 });
   });
 
-  test("palette lists multiple slash commands", async ({ page }) => {
+  test("palette lists multiple slash commands", async () => {
     // This is a fixme because the SlashPalette component uses state-based rendering
     // and the exact testids/selectors may not be available without product-code changes.
     test.fixme(true, "SlashPalette lacks stable data-testid attributes for command items");
   });
 
-  test("selecting /research from palette activates research mode", async ({ page }) => {
+  test("selecting /research from palette activates research mode", async () => {
     test.fixme(true, "SlashPalette command selection routing requires real model and preset interaction");
   });
 });

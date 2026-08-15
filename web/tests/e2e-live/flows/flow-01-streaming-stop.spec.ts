@@ -54,7 +54,7 @@ test(
     // streaming SSE responses in Playwright (buffers the response body before
     // passing to the browser). Using a JS-level fetch patch avoids that issue
     // while allowing the real response to stream through natively.
-    await page.evaluate((burl: string) => {
+    await page.evaluate(() => {
       const originalFetch = window.fetch.bind(window);
       window.fetch = async function patchedFetch(
         input: RequestInfo | URL,
@@ -79,7 +79,7 @@ test(
         }
         return originalFetch(input, init);
       };
-    }, backendURL);
+    });
 
     // Submit a message — the stub LM Studio server returns a fixed SSE stream.
     await composer.fill("Tell me something interesting.");
