@@ -50,7 +50,10 @@ function makeArgs(overrides: {
 
   return {
     chatId,
-    sseState: { status } as AutotitleSSEState,
+    // chatId mirrors the destructured `chatId` above by default so the
+    // ordinary (same-chat) case matches out of the box — see
+    // AutotitleSSEState.chatId / StreamState.chatId.
+    sseState: { status, chatId } as AutotitleSSEState,
     currentChat,
     messagesData,
     mutation: { mutateAsync } as AutotitleMutation,

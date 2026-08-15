@@ -1,18 +1,23 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /**
- * Chat — C3 mode-adoption (`mode_adopt` SSE frame) cross-chat scoping.
+ * Chat — response_id / message-cache cross-chat scoping.
  *
  * `sseState` (useSSE) is a single instance kept alive across chat
  * navigation — NOT chat-scoped (see the followupSuggestions wipe comment in
- * Chat.tsx). `useChatPreset(chatId)`'s `adoptModelPreset` is a useCallback
- * keyed on `chatId`, so its identity changes on every chat switch. Before
- * the fix, the effect consuming `sseState.modeAdopt` re-fired on that
- * identity change alone and reapplied a STALE verdict — computed for the
- * chat whose stream produced it — to whatever chat happened to be on
- * screen at the time. This pins the fix: a verdict is only ever applied to
- * the chat it actually belongs to (`sseState.chatId` — see StreamState;
- * `modeAdopt` itself no longer carries its own duplicate chatId, folded
- * into this single top-level mechanism shared by every sseState consumer).
+ * Chat.tsx). The response-id-persistence effect used the live `chatId`
+ * prop for `storeResponseId`/`clearResponseId`/`qc.invalidateQueries`, with
+ * no check against which chat's stream actually completed. So: send a
+ * message in chat 1, navigate to chat 2 before it finishes, chat 1
+ * completes in the background — chat 2 would get chat 1's `response_id`
+ * written under ITS OWN localStorage key, and chat 2's own message-list
+ * cache would get invalidated (pointless) instead of chat 1's (which
+ * needed it). The next turn in chat 2 would then send chat 1's
+ * `previous_response_id`, continuing chat 1's provider-side thread inside
+ * chat 2 — cross-conversation contamination, no queue and no flag
+ * required, just navigating away from a streaming answer.
+ *
+ * This pins the fix: the effect is now gated on `sseState.chatId ===
+ * chatId`, so it never fires for the wrong chat.
  *
  * Scaffold mirrors test_Chat_chatswitch_ephemeral_wipe.spec.tsx (same
  * two-chat fixture + navigate-without-remount harness).
@@ -29,6 +34,7 @@ import {
 } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { __resetChatScopedMemoryForTests } from "@/hooks/useChatScopedState";
+import { loadResponseId } from "@/lib/responseId";
 import type { StreamState } from "@/hooks/useSSE";
 
 if (typeof window !== "undefined" && !Element.prototype.scrollIntoView) {
@@ -74,12 +80,10 @@ vi.mock("@/hooks/useKeyboardShortcuts", () => ({
   useKeyboardShortcuts: () => undefined,
 }));
 
-// Controllable SSE mock — `mockSSEState` carries a `modeAdopt` verdict and
-// the top-level `chatId` of the stream that produced it (chat 1's, always,
-// in this file — see StreamState.chatId), fixed at mount and never
-// reassigned. Any effect refire this file observes is caused purely by the
-// chat-navigation identity change, not by the verdict/chatId themselves
-// changing.
+// Controllable SSE mock — `mockSSEState` fixed at each assignment, read
+// fresh on every render. Reassigned mid-test + `rerender()`d to simulate a
+// background stream's async completion landing while a different chat is
+// on screen — same idiom test_Chat.spec.tsx's mtp_suspected suite uses.
 const idleSSEState: StreamState = {
   status: "idle",
   chatId: null,
@@ -101,13 +105,14 @@ const idleSSEState: StreamState = {
 };
 
 let mockSSEState: StreamState = { ...idleSSEState };
+const resetStreamSpy = vi.fn();
 
 vi.mock("@/hooks/useSSE", () => ({
   useSSE: () => ({
     state: mockSSEState,
     start: vi.fn(),
     stop: vi.fn(),
-    reset: vi.fn(),
+    reset: resetStreamSpy,
   }),
 }));
 
@@ -166,9 +171,11 @@ const mockChats = [
   },
 ];
 
+const refetchMessagesSpy = vi.fn().mockResolvedValue({ data: { messages: [] } });
+
 vi.mock("@/hooks/useChats", () => ({
   useChatsDirect: () => ({ data: mockChats, isLoading: false, isError: false }),
-  useMessages: () => ({ data: { messages: [] }, refetch: vi.fn() }),
+  useMessages: () => ({ data: { messages: [] }, refetch: refetchMessagesSpy }),
   useUpdateChat: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   useDeleteChat: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   useClearChatMessages: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
@@ -183,24 +190,8 @@ vi.mock("@/hooks/useChats", () => ({
   chatKeys: { messages: (id: number) => ["messages", id] },
 }));
 
-// The spy under test: `useChatPreset` returns a fresh `adoptModelPreset`
-// closure bound to whatever `chatId` it's called with, same shape as the
-// real hook's `useCallback([chatId, adoptModel, updateChat])` — every call
-// records (chatId, presetId) so the assertions can tell which chat an
-// adoption was actually applied to.
-const adoptModelPresetSpy = vi.fn<(chatId: number | null, presetId: string) => void>();
-
 vi.mock("@/hooks/useChatPreset", () => ({
-  useChatPreset: (chatId: number | null) => ({
-    activePreset: "",
-    preset: null,
-    setPreset: vi.fn(),
-    clearPreset: vi.fn(),
-    adoptModelPreset: (presetId: string) => {
-      adoptModelPresetSpy(chatId, presetId);
-    },
-    adoptedByModel: false,
-  }),
+  useChatPreset: () => ({ activePreset: "", preset: null, setPreset: vi.fn(), clearPreset: vi.fn(), adoptModelPreset: vi.fn(), adoptedByModel: false }),
   useHydrateChatPresets: () => undefined,
   useChatPresetStore: (sel: (s: { overrides: Record<number, string>; sources: Record<number, "user" | "model"> }) => unknown) =>
     sel({ overrides: {}, sources: {} }),
@@ -325,27 +316,29 @@ function NavCapture(): null {
   return null;
 }
 
-function renderChat(initialPath: string) {
-  return render(
+function chatRouteTree(initialPath: string) {
+  return createElement(
+    QueryClientProvider,
+    {
+      client: new QueryClient({
+        defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
+      }),
+    },
     createElement(
-      QueryClientProvider,
-      {
-        client: new QueryClient({
-          defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
-        }),
-      },
+      MemoryRouter,
+      { initialEntries: [initialPath] },
+      createElement(NavCapture),
       createElement(
-        MemoryRouter,
-        { initialEntries: [initialPath] },
-        createElement(NavCapture),
-        createElement(
-          Routes,
-          null,
-          createElement(Route, { path: "/chats/:chatId", element: createElement(Chat) }),
-        ),
+        Routes,
+        null,
+        createElement(Route, { path: "/chats/:chatId", element: createElement(Chat) }),
       ),
     ),
   );
+}
+
+function renderChat(initialPath: string) {
+  return render(chatRouteTree(initialPath));
 }
 
 function navigateTo(path: string): void {
@@ -357,59 +350,49 @@ function navigateTo(path: string): void {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("Chat — mode_adopt (C3) cross-chat scoping", () => {
+describe("Chat — response_id / message-cache cross-chat scoping", () => {
   beforeEach(() => {
     __resetChatScopedMemoryForTests();
     capturedNavigate = null;
     mockSSEState = { ...idleSSEState };
-    adoptModelPresetSpy.mockClear();
+    refetchMessagesSpy.mockClear();
+    localStorage.clear();
   });
 
-  it("applies a mode_adopt verdict to the chat whose stream produced it", () => {
+  it("does NOT give chat 2 chat 1's response_id when chat 1's stream completes in the background while chat 2 is on screen", () => {
+    // Chat 1's stream is in flight.
+    mockSSEState = { ...idleSSEState, chatId: 1, status: "streaming" };
+    const { rerender } = renderChat("/chats/1");
+
+    // User navigates away before it finishes.
+    navigateTo("/chats/2");
+
+    // Chat 1's stream completes in the background — sseState is a single
+    // shared instance, still tagged chatId: 1, NOT reset by the navigate.
     mockSSEState = {
       ...idleSSEState,
       chatId: 1,
-      modeAdopt: { presetId: "coder", msgId: 1 },
+      status: "complete",
+      responseId: "resp-from-chat-1",
     };
-    renderChat("/chats/1");
+    rerender(chatRouteTree("/chats/2"));
 
-    expect(adoptModelPresetSpy).toHaveBeenCalledWith(1, "coder");
+    // The cross-chat leak: chat 2 must never receive chat 1's response_id.
+    expect(loadResponseId(2)).toBeNull();
   });
 
-  it("does NOT reapply a chat 1 verdict once the user has navigated to chat 2", () => {
+  it("still stores the response_id correctly for the ORDINARY case — same chat throughout", () => {
+    mockSSEState = { ...idleSSEState, chatId: 1, status: "streaming" };
+    const { rerender } = renderChat("/chats/1");
+
     mockSSEState = {
       ...idleSSEState,
       chatId: 1,
-      modeAdopt: { presetId: "coder", msgId: 1 },
+      status: "complete",
+      responseId: "resp-from-chat-1",
     };
-    renderChat("/chats/1");
-    adoptModelPresetSpy.mockClear();
+    rerender(chatRouteTree("/chats/1"));
 
-    // sseState is a single shared instance — the verdict object AND the
-    // top-level chatId it's tagged with are deliberately NOT reset by
-    // this navigate (see the doc above), so state.chatId is still 1 once
-    // the user is on chat 2.
-    navigateTo("/chats/2");
-
-    // Must never have been applied to chat 2 — that's the cross-chat leak.
-    const chat2Calls = adoptModelPresetSpy.mock.calls.filter(([cid]) => cid === 2);
-    expect(chat2Calls).toHaveLength(0);
-  });
-
-  it("keeps re-applying (harmlessly) to chat 1 itself across unrelated re-renders, but never to chat 2 or beyond", () => {
-    mockSSEState = {
-      ...idleSSEState,
-      chatId: 1,
-      modeAdopt: { presetId: "researcher", msgId: 7 },
-    };
-    renderChat("/chats/1");
-
-    navigateTo("/chats/2");
-    navigateTo("/chats/1");
-    navigateTo("/chats/2");
-
-    const calls = adoptModelPresetSpy.mock.calls;
-    expect(calls.every(([cid]) => cid === 1)).toBe(true);
-    expect(calls.some(([cid]) => cid === 2)).toBe(false);
+    expect(loadResponseId(1)).toBe("resp-from-chat-1");
   });
 });

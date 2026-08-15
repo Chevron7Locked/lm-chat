@@ -25,6 +25,7 @@ import type { ApiError } from "@/lib/api";
  * "complete". */
 export interface AutotitleSSEState {
   status: "idle" | "streaming" | "complete" | "error" | "stopped";
+  chatId: number | null;
 }
 
 /** Minimal chat shape required by this hook. */
@@ -86,6 +87,11 @@ export function useAutotitleEffect({
   useEffect(() => {
     if (sseState.status !== "complete") return;
     if (chatId === null) return;
+    // sseState is a single shared instance kept alive across chat
+    // navigation (see StreamState.chatId) — a DIFFERENT chat's stream
+    // completing in the background must not trigger autotitle for
+    // whatever chat is currently on screen.
+    if (sseState.chatId !== chatId) return;
     const msgs = messagesData?.messages ?? [];
     const assistantCount = msgs.filter((m) => m.role === "assistant").length;
     if (assistantCount < 1) return;
@@ -122,6 +128,7 @@ export function useAutotitleEffect({
       });
   }, [
     sseState.status,
+    sseState.chatId,
     chatId,
     messagesData,
     currentChat,

@@ -42,6 +42,7 @@ vi.mock("@/hooks/useChats", () => ({
 function idleStreamState(overrides: Partial<StreamState>): StreamState {
   return {
     status: "idle",
+    chatId: null,
     messageId: null,
     responseId: null,
     contentDeltas: [],

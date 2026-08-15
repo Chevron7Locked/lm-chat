@@ -42,6 +42,11 @@ function mkStats(overrides: Partial<StreamStats> = {}): StreamStats {
 function mkSSEState(overrides: Partial<StreamState> = {}): StreamState {
   return {
     status: "idle",
+    // Matches baseArgs()'s chatId by default so every pre-existing
+    // override below (which never touches chatId) keeps describing the
+    // ordinary same-chat case. Cross-chat behavior is exercised by tests
+    // that explicitly pass a mismatched chatId to deriveMessageList.
+    chatId: 1,
     messageId: null,
     responseId: null,
     contentDeltas: [],
@@ -68,6 +73,7 @@ function baseArgs(): Parameters<typeof deriveMessageList>[0] {
     finalStats: null,
     pendingUser: null,
     sseState: mkSSEState(),
+    chatId: 1,
   };
 }
 
@@ -141,6 +147,36 @@ describe("deriveMessageList", () => {
   it("streamActive is true while stopped", () => {
     const result = deriveMessageList({ ...baseArgs(), sseState: mkSSEState({ status: "stopped" }) });
     expect(result.streamActive).toBe(true);
+  });
+
+  it("streamActive is false while streaming when the stream belongs to a DIFFERENT chat", () => {
+    // sseState is a single instance shared across chat navigation — a
+    // status of "streaming" tagged for chat 2 must not make chat 1's own
+    // derivation (chatId: 1, from baseArgs()) treat itself as live.
+    const result = deriveMessageList({
+      ...baseArgs(),
+      sseState: mkSSEState({ status: "streaming", chatId: 2, contentDeltas: ["hello from chat 2"] }),
+    });
+    expect(result.streamActive).toBe(false);
+    expect(result.streamingMessages).toEqual([]);
+  });
+
+  it("does NOT render a different chat's live content into this chat's message list", () => {
+    const raw: MessageRecord[] = [mkMessage({ id: 1, role: "user", content: "hi" })];
+    const result = deriveMessageList({
+      ...baseArgs(),
+      serverMessagesRaw: raw,
+      sseState: mkSSEState({
+        status: "streaming",
+        chatId: 99,
+        messageId: 50,
+        contentDeltas: ["someone else's answer"],
+      }),
+    });
+    // Only this chat's own persisted message — no phantom streaming
+    // bubble borrowed from chat 99.
+    expect(result.allMessages).toHaveLength(1);
+    expect(result.allMessages.some((m) => m.content === "someone else's answer")).toBe(false);
   });
 
   it("streamActive is true when complete AND a pendingUser bubble is still outstanding", () => {
@@ -233,6 +269,7 @@ describe("deriveMessageList", () => {
       finalStats: null,
       pendingUser: { text: "pending bubble", baseline: 1 },
       sseState: mkSSEState({ status: "streaming", messageId: 99, contentDeltas: ["live"] }),
+      chatId: 1,
     });
 
     expect(result.allMessages.map((m) => m.id)).toEqual([1, "pending-user", 99]);
@@ -250,6 +287,7 @@ describe("deriveMessageList", () => {
       finalStats,
       pendingUser: { text: "still pending", baseline: 1 }, // keeps streamActive true post-"complete"
       sseState: mkSSEState({ status: "complete", messageId: 999, contentDeltas: ["done"], stats: liveStats }),
+      chatId: 1,
     });
 
     // Last assistant server row picks up finalStats (idx === lastIdx && role === "assistant").

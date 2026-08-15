@@ -81,6 +81,9 @@ vi.mock("@/hooks/useKeyboardShortcuts", () => ({
 // vi.mock factory's return value isn't checked against the real hook's type.
 const idleSSEState: StreamState = {
   status: "idle",
+  // Matches the /chats/1 target every test in this file renders — see
+  // StreamState.chatId.
+  chatId: 1,
   messageId: null,
   responseId: null,
   contentDeltas: [],

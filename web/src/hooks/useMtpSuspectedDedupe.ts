@@ -59,11 +59,17 @@ export function useMtpSuspectedDedupe(
       sseState.status === "error" &&
       sseState.error !== null &&
       sseState.error.code === "mtp_suspected" &&
-      chatId !== null
+      chatId !== null &&
+      // sseState is a single shared instance kept alive across chat
+      // navigation (see StreamState.chatId) — an mtp_suspected error from a
+      // DIFFERENT chat's stream must not mark THIS chatId as dedup'd; it
+      // would suppress the banner for a chat whose own turn never actually
+      // hit the error.
+      sseState.chatId === chatId
     ) {
       mtpSuspectedShownRef.current.add(chatId);
     }
-  }, [sseState.status, sseState.error?.code, chatId]);
+  }, [sseState.status, sseState.error?.code, sseState.chatId, chatId]);
 
   return mtpSuspectedShownRef;
 }

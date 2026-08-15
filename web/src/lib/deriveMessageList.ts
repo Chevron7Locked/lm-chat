@@ -11,6 +11,11 @@
  * list, and stay in Chat.tsx).
  *
  * This function reads ONLY its args — no hooks, no refs, no module state.
+ *
+ * `chatId` (Chat.tsx's own chatId) is compared against `sseState.chatId`
+ * (which chat the shared, not-chat-scoped useSSE() instance's state
+ * actually belongs to) before the live stream is allowed to contribute a
+ * streaming bubble — see StreamState.chatId and `belongsToThisChat` below.
  */
 import type { ChatMessageData, MessageRole } from "@/components/ChatMessage";
 import type { MessageRecord } from "@/hooks/useChats";
@@ -21,6 +26,17 @@ export function deriveMessageList(args: {
   finalStats: StreamStats | null;
   pendingUser: { text: string; baseline: number } | null;
   sseState: StreamState;
+  /**
+   * The chat this derivation is FOR (Chat.tsx's own `chatId`). `sseState`
+   * is a single instance shared across chat navigation — it can describe
+   * a DIFFERENT chat's in-flight/just-finished stream (see
+   * `StreamState.chatId`). Compared against `sseState.chatId` to decide
+   * whether the live streaming bubble belongs on THIS list at all; without
+   * it, switching to a chat while a different one is still streaming would
+   * render the other chat's live answer appended onto this chat's own
+   * persisted messages.
+   */
+  chatId: number | null;
 }): {
   // The caller (Chat.tsx) consumes only activeServerMessages,
   // optimisticUserMessages, streamActive, streamingMessages, allMessages, and
@@ -44,6 +60,7 @@ export function deriveMessageList(args: {
     finalStats: _finalStats,
     pendingUser,
     sseState,
+    chatId,
   } = args;
 
   // Build the message list: server messages + in-flight streaming assistant.
@@ -101,10 +118,17 @@ export function deriveMessageList(args: {
   // persist after completion, so holding it here prevents a blink-out.
   // Also keep visible while "stopped" so the partial with a "Stopped"
   // chip stays on screen until the 600ms refetch + comparison.
+  // sseState is a single instance shared across chat navigation (see
+  // StreamState.chatId) — without this guard, switching to a chat while a
+  // DIFFERENT one is still streaming would render the other chat's live
+  // answer appended onto this chat's own persisted messages the instant
+  // this component renders for the new chatId.
+  const belongsToThisChat = sseState.chatId === chatId;
   const streamActive =
-    sseState.status === "streaming" ||
-    sseState.status === "stopped" ||
-    (sseState.status === "complete" && pendingUser !== null);
+    belongsToThisChat &&
+    (sseState.status === "streaming" ||
+      sseState.status === "stopped" ||
+      (sseState.status === "complete" && pendingUser !== null));
 
   // Strip the hidden followups comment from the displayed content.
   //

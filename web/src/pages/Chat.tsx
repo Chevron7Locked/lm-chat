@@ -485,33 +485,43 @@ export default function Chat() {
   // fire unconditionally on completion so the message list syncs to the DB.
   // Only call storeResponseId when the value is actually present.
   useEffect(() => {
-    if (sseState.status === "complete" && chatId !== null) {
-      // Skip storing the rid if the chain was invalidated by an edit that
-      // happened between stream-complete and this effect running.  Also clear
-      // any stale rid that may still be in localStorage from an earlier turn.
-      if (chainInvalidatedRef.current) {
-        chainInvalidatedRef.current = false;
-        clearResponseId(chatId);
-      } else if (sseState.responseId !== null) {
-        storeResponseId(chatId, sseState.responseId);
-      }
-      // Snapshot final stats for the completed streaming message.
-      finalStatsRef.current = sseState.stats;
-      // Extract follow-up suggestions from the completed content.
-      const completedContent = sseState.contentDeltas.join("");
-      const { followups } = extractFollowups(completedContent);
-      setFollowupSuggestions(followups);
-      // No-flash: record the just-completed message id BEFORE the refetch so
-      // the incoming persisted row can suppress its entrance animation.
-      if (typeof sseState.messageId === "number") {
-        recentlyStreamedIdRef.current = sseState.messageId;
-      }
-      // Refresh messages to load the finalized message from the server.
-      void refetchMessages();
-      void qc.invalidateQueries({ queryKey: chatKeys.messages(chatId) });
+    if (sseState.status !== "complete" || chatId === null) return;
+    // sseState is a single shared instance kept alive across chat
+    // navigation (see the StreamState.chatId doc) — a "complete" status
+    // here can belong to a DIFFERENT chat's stream finishing in the
+    // background while the user is looking at this one. Applying any of
+    // the below to the wrong chat previously stored/cleared the WRONG
+    // chat's response_id (poisoning its previous_response_id chain with a
+    // different conversation's provider-side thread) and invalidated the
+    // WRONG chat's message-list cache — cross-conversation contamination,
+    // not just a display glitch.
+    if (sseState.chatId !== chatId) return;
+    // Skip storing the rid if the chain was invalidated by an edit that
+    // happened between stream-complete and this effect running.  Also clear
+    // any stale rid that may still be in localStorage from an earlier turn.
+    if (chainInvalidatedRef.current) {
+      chainInvalidatedRef.current = false;
+      clearResponseId(chatId);
+    } else if (sseState.responseId !== null) {
+      storeResponseId(chatId, sseState.responseId);
     }
+    // Snapshot final stats for the completed streaming message.
+    finalStatsRef.current = sseState.stats;
+    // Extract follow-up suggestions from the completed content.
+    const completedContent = sseState.contentDeltas.join("");
+    const { followups } = extractFollowups(completedContent);
+    setFollowupSuggestions(followups);
+    // No-flash: record the just-completed message id BEFORE the refetch so
+    // the incoming persisted row can suppress its entrance animation.
+    if (typeof sseState.messageId === "number") {
+      recentlyStreamedIdRef.current = sseState.messageId;
+    }
+    // Refresh messages to load the finalized message from the server.
+    void refetchMessages();
+    void qc.invalidateQueries({ queryKey: chatKeys.messages(chatId) });
   }, [
     sseState.status,
+    sseState.chatId,
     sseState.responseId,
     sseState.stats,
     sseState.contentDeltas,
@@ -536,10 +546,13 @@ export default function Chat() {
   useEffect(() => {
     // Guard against test mocks that don't carry the followups field.
     const chips = sseState.followups;
-    if (Array.isArray(chips) && chips.length > 0) {
-      setFollowupSuggestions(chips);
-    }
-  }, [sseState.followups]);
+    if (!Array.isArray(chips) || chips.length === 0) return;
+    // Same cross-chat guard as the response-id effect above — these
+    // followups belong to whichever chat's stream produced them, not
+    // necessarily the one currently on screen (see StreamState.chatId).
+    if (sseState.chatId !== chatId) return;
+    setFollowupSuggestions(chips);
+  }, [sseState.followups, sseState.chatId, chatId]);
 
   // C3 — model-decided role adoption (next turn). Arrives via the
   // `mode_adopt` SSE frame AFTER chat.end (see streaming_service
@@ -558,14 +571,15 @@ export default function Chat() {
     // sseState is a single shared instance kept alive across chat
     // navigation (see the followupSuggestions wipe comment above) — a
     // verdict can still be sitting here after the user has switched to a
-    // different chat. Only apply it to the chat whose stream actually
-    // produced it; otherwise this effect would still re-fire on every
-    // subsequent chatId change (adoptModelPreset's identity changes with
-    // chatId) and silently re-apply a stale persona — and re-PATCH the
-    // server — for every chat browsed afterward.
-    if (verdict.chatId !== chatId) return;
+    // different chat. Only apply it to the chat whose STREAM actually
+    // produced it (sseState.chatId — see the StreamState doc), not
+    // whatever chat happens to be on screen; otherwise this effect would
+    // still re-fire on every subsequent chatId change (adoptModelPreset's
+    // identity changes with chatId) and silently re-apply a stale persona
+    // — and re-PATCH the server — for every chat browsed afterward.
+    if (sseState.chatId !== chatId) return;
     adoptModelPreset(verdict.presetId);
-  }, [sseState.modeAdopt, adoptModelPreset, chatId]);
+  }, [sseState.modeAdopt, sseState.chatId, adoptModelPreset, chatId]);
 
   useSSEWarningToasts(sseState.warnings, push);
 
@@ -625,7 +639,10 @@ export default function Chat() {
   //     position reads as intentional.
   // Plus rAF-coalesce so multiple rapid-fire deltas in the same frame
   // produce ONE scroll call, not N.
-  const isStreaming = sseState.status === "streaming";
+  // Gated on sseState.chatId — a foreign chat's stream should not drive
+  // this chat's auto-scroll (see StreamState.chatId doc).
+  const isStreaming =
+    sseState.status === "streaming" && sseState.chatId === chatId;
   const lastScrollFrame = useRef<number | null>(null);
   useEffect(() => {
     if (lastScrollFrame.current !== null) {
@@ -1096,6 +1113,7 @@ export default function Chat() {
     finalStats: finalStatsRef.current,
     pendingUser,
     sseState,
+    chatId,
   });
 
   // Presence-state machine — drives <html data-presence> attribute
@@ -1109,7 +1127,9 @@ export default function Chat() {
     ((messagesData?.messages.length ?? 0) > 0 || streamActive);
   const { notifyComposerFocused, notifyComposerBlurred, notifyTyping } =
     usePresence({
-      streaming: sseState.status === "streaming",
+      // Gated on sseState.chatId — a foreign chat's activity must not
+      // drive this chat's ambient presence state.
+      streaming: sseState.status === "streaming" && sseState.chatId === chatId,
       hasReasoningContent,
       chatActive: chatIsActive,
     });
@@ -1456,7 +1476,10 @@ export default function Chat() {
         {/* Interrupted stream row */}
         {chatId !== null &&
           hasOrphanedStream &&
-          sseState.status !== "streaming" && (
+          // A DIFFERENT chat's stream being active must not suppress this
+          // chat's own interrupted-stream banner (see StreamState.chatId
+          // doc) — only this chat's own live stream should.
+          !(sseState.status === "streaming" && sseState.chatId === chatId) && (
             <InterruptedRow onRetry={handleRetryInterruptedStream} />
           )}
 
@@ -1491,7 +1514,12 @@ export default function Chat() {
                 ? subSessionSSE.state.status === "streaming"
                 : abCompareEnabled
                   ? abState.status === "streaming"
-                  : sseState.status === "streaming"
+                  // Gated on sseState.chatId — a foreign chat's stream
+                  // must not show this chat's Composer as streaming (it
+                  // has nothing to Stop, and it would hide the real
+                  // Queue affordance behind a Stop button that aborts
+                  // the WRONG chat's request). See StreamState.chatId.
+                  : sseState.status === "streaming" && sseState.chatId === chatId
             }
             onSubmit={handleSubmit}
             onStop={

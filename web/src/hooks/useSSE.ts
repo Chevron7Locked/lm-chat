@@ -81,6 +81,27 @@ export interface LoadPhase {
 
 export interface StreamState {
   status: "idle" | "streaming" | "complete" | "error" | "stopped";
+  /**
+   * The chat this state actually belongs to — the `chatId` argument the
+   * CURRENT (or most recent) `start(chatId, …)` call was made with, or
+   * `null` before any stream has ever started / after `reset()`.
+   *
+   * `state` is a SINGLE instance shared across chat navigation (see the
+   * Chat.tsx doc comment near `followupSuggestions`) — it is NOT
+   * remounted or reset when the user switches chats, so a stream started
+   * for chat A keeps updating this same object while the user is looking
+   * at chat B. Every consumer that pairs a field of this state with
+   * "the chat currently on screen" (the response-id/cache-invalidation
+   * effect, the streaming bubble in `deriveMessageList`, the `streaming`
+   * prop handed to Composer, the MTP-suspected dedupe, the followups/
+   * auto-title effects, …) MUST compare this against its own chatId and
+   * no-op on a mismatch — otherwise a background stream for one chat gets
+   * silently attributed to whatever chat happens to be open when its
+   * frames arrive. See the cross-chat leaks this field was added to close
+   * (queue drain, C3 mode-adoption, response-id/message-cache corruption,
+   * the live streaming bubble itself).
+   */
+  chatId: number | null;
   messageId: number | null;
   responseId: string | null;
   /** Accumulating assistant content delta chunks (joined for display). */
@@ -167,20 +188,12 @@ export interface StreamState {
    * turn or the feature is disabled server-side — Chat.tsx treats `null`
    * as a no-op. Reset to `undefined` on every start()/reset(); consumed by
    * an effect in Chat.tsx that applies it via `useChatPreset`'s
-   * `adoptModelPreset`.
-   *
-   * `chatId` is the chat the STREAM that produced this verdict was started
-   * for (the `start(chatId, …)` argument) — NOT necessarily the chat
-   * currently on screen. `state` is a single instance shared across chat
-   * navigation (see the Chat.tsx doc comment near `followupSuggestions`),
-   * so this frame can still be sitting here after the user has switched to
-   * a different chat. Consumers MUST compare this against the chat they're
-   * about to apply the adoption to and no-op on a mismatch, or a verdict
-   * computed for one conversation gets silently applied to whatever chat
-   * happens to be open when it arrives (see the mode-adoption cross-chat
-   * leak this field was added to close).
+   * `adoptModelPreset`, gated on the top-level `chatId` field above (this
+   * object used to carry its own duplicate `chatId` — folded into the
+   * single top-level mechanism so there's one way to ask "does this state
+   * belong to the chat on screen", not two).
    */
-  modeAdopt: { presetId: string | null; msgId: number; chatId: number } | undefined;
+  modeAdopt: { presetId: string | null; msgId: number } | undefined;
 }
 
 export interface ChatStreamPayload {
@@ -726,10 +739,7 @@ function handleEvent(
       if (msgId !== undefined) {
         setState((s) => ({
           ...s,
-          // chatId is this event's OWN stream's chat, not necessarily
-          // whatever chat is on screen when the consuming effect runs —
-          // see the StreamState.modeAdopt doc.
-          modeAdopt: { presetId: raw.preset_id ?? null, msgId, chatId },
+          modeAdopt: { presetId: raw.preset_id ?? null, msgId },
         }));
       }
       break;
@@ -761,6 +771,7 @@ const INITIAL_STATS: StreamStats = {
 
 const INITIAL_STATE: StreamState = {
   status: "idle",
+  chatId: null,
   messageId: null,
   responseId: null,
   contentDeltas: [],
@@ -809,9 +820,14 @@ export function useSSE(): UseSSEReturn {
 
         if (msg.type === "stream_started") {
           // Another tab started streaming this chat — show as streaming.
+          // chatId is set here too (msg.chat_id — already confirmed equal
+          // to chatIdRef.current above) so this cross-tab path keeps
+          // state.chatId consistent with the locally-started path; every
+          // chatId-gated consumer relies on it being accurate regardless
+          // of which tab/mechanism last touched this state.
           setState((s) =>
             s.status !== "streaming"
-              ? { ...s, status: "streaming", messageId: msg.msg_id }
+              ? { ...s, status: "streaming", chatId: msg.chat_id, messageId: msg.msg_id }
               : s,
           );
         } else if (msg.type === "chat_end" || msg.type === "aborted") {
@@ -880,6 +896,7 @@ export function useSSE(): UseSSEReturn {
 
       setState({
         status: "streaming",
+        chatId,
         messageId: null,
         responseId: null,
         contentDeltas: [],
@@ -1033,6 +1050,7 @@ export function useSSE(): UseSSEReturn {
     setState((s) => ({
       ...s,
       status: "idle",
+      chatId: null,
       contentDeltas: [],
       reasoningDeltas: [],
       toolCalls: [],

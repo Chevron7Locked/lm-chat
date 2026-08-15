@@ -67,6 +67,7 @@ vi.mock("@/hooks/useKeyboardShortcuts", () => ({
 // renders to exercise stateful behavior (e.g. MTP-suspected dedupe).
 type _SSEState = {
   status: "idle" | "streaming" | "complete" | "error";
+  chatId: number | null;
   messageId: number | null;
   responseId: string | null;
   contentDeltas: string[];
@@ -80,6 +81,9 @@ type _SSEState = {
 
 const _idleSSEState: _SSEState = {
   status: "idle",
+  // Matches the /chats/1 target every test in this describe block renders
+  // — see StreamState.chatId / useMtpSuspectedDedupe's cross-chat guard.
+  chatId: 1,
   messageId: null,
   responseId: null,
   contentDeltas: [],
