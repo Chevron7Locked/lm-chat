@@ -2487,7 +2487,9 @@ async def _sub_session_sse(
     _idle_timeout_sec: float = float(_get_settings().lm_chat_stream_idle_timeout_sec)
     _pstate: dict[str, object] = {"done": False, "last_content_ts": monotonic()}
     _graceful: dict[str, bool] = {"value": False}
-    coalesce = _CoalesceTimer(engine=engine, message_id=msg_id, table=sub_session_messages)
+    coalesce = _CoalesceTimer(
+        engine=engine, message_id=msg_id, table=sub_session_messages, state=_pstate
+    )
 
     async def _on_success(
         content: str, reasoning: str, tool_calls: list[dict[str, object]] | None
@@ -2886,15 +2888,19 @@ async def _sub_session_core(
         if persist_state is not None:
             persist_state["acc_content"] = "".join(accumulated)
 
-    def _persist_reasoning_delta() -> None:
-        """Mirror the post-append reasoning buffer into persist_state.
-
-        Not coalesced to the draft row (mirrors the main-chat pump:
-        reasoning is never shown incrementally) — only kept fresh for a
-        non-graceful terminal's salvage.
+    async def _persist_reasoning_delta() -> None:
+        """Mirror the post-append reasoning buffer into persist_state, and
+        periodically flush it to the draft row via the SAME _CoalesceTimer
+        _persist_content_delta uses (2026-08-15, mirrors streaming_service.py's
+        main-chat pump) — closes the pure-reasoning-phase gap: a /research
+        turn killed before its first content token previously lost its whole
+        reasoning trace, since coalesce.add() is never called for reasoning
+        deltas and nothing else triggered a flush.
         """
         if persist_state is not None:
             persist_state["acc_reasoning"] = "".join(accumulated_reasoning)
+        if coalesce is not None and coalesce.should_flush():
+            await coalesce.flush()
 
     async def _persist_touch_tool_activity() -> None:
         """Bump last_activity_at on a tool_call event (no content delta)."""
@@ -3011,7 +3017,7 @@ async def _sub_session_core(
                     yield b"event: sub.reasoning.start\ndata: {}\n\n"
                 elif etype == "reasoning.delta" and event.content:
                     accumulated_reasoning.append(event.content)
-                    _persist_reasoning_delta()
+                    await _persist_reasoning_delta()
                     yield (
                         b"event: sub.reasoning.delta\ndata: "
                         + json.dumps({"delta": event.content}).encode()

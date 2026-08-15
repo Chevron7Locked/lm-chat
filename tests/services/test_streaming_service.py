@@ -1019,6 +1019,138 @@ async def test_streaming_draft_released_when_cancel_lands_during_release(
 
 
 # ---------------------------------------------------------------------------
+# Test 2d: _CoalesceTimer persists reasoning_content + tool_calls MID-STREAM,
+#          before any terminal — not just at finalize/salvage.
+#
+# RED-ON-REVERT (2026-08-15): before this fix, _CoalesceTimer.flush() wrote
+# only content + last_activity_at; reasoning/tool_calls reached the row ONLY
+# via _finalize_message or the disconnect-salvage path — both of which
+# require a teardown. A killed process (no teardown, no salvage — the
+# reaper's later _finalize_stuck_drafts only flips state=draft->final, it
+# never touches content/reasoning/tool_calls) lost them entirely even though
+# content survived. This test proves the property that didn't exist before:
+# a row STILL IN 'draft' (mid-stream, before chat.end) already carries both.
+#
+# Deterministic, not sleep-gated for the moment that matters: the test reads
+# the DB only after `mid_stream_checkpoint` fires, which the fake stream sets
+# ONLY once the second reasoning.delta has been fully handed off to (and
+# processed by) the persist loop — same async-generator hand-off guarantee
+# the disconnect tests rely on. The one `asyncio.sleep(0.3)` earlier in the
+# fake stream is not part of that gate; like the disconnect tests, it exists
+# only so _COALESCE_INTERVAL_SEC has elapsed by the time the LATER event
+# checks should_flush(), and nothing downstream races against its duration.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_streaming_coalesce_persists_reasoning_and_tool_calls_mid_stream(
+    engine: AsyncEngine,
+) -> None:
+    """A still-draft row (never reached a terminal) already carries
+    reasoning_content and tool_calls, not just content.
+    """
+    mid_stream_checkpoint = asyncio.Event()
+
+    async def _slow_stream(*args: object, **kwargs: object) -> AsyncIterator[CanonicalEvent]:
+        yield CanonicalEvent(type="chat.start")
+        yield CanonicalEvent(type="message.start")
+        yield CanonicalEvent(type="reasoning.start")
+        yield CanonicalEvent(type="reasoning.delta", content="Thinking about this problem. ")
+        yield _tool_call_event("tool_call.start", id="tc-3", name="", arguments={})
+        yield _tool_call_event("tool_call.name", id="tc-3", name="search_web", arguments={})
+        yield _tool_call_event(
+            "tool_call.arguments", id="tc-3", name="search_web", arguments={"query": "mid-stream"}
+        )
+        yield _tool_call_event(
+            "tool_call.success",
+            id="tc-3",
+            name="search_web",
+            arguments={"query": "mid-stream"},
+            result="found mid-stream.",
+        )
+        # Not a race (see the section docstring above): nothing downstream
+        # depends on this duration — it only needs to outlast
+        # _COALESCE_INTERVAL_SEC so the NEXT reasoning.delta's should_flush()
+        # check (added by this fix) trips.
+        await asyncio.sleep(0.3)
+        yield CanonicalEvent(type="reasoning.delta", content="Now I have more to add.")
+        # By the time this line runs, that second reasoning.delta — and the
+        # flush() it triggered (writing BOTH reasoning_content and
+        # tool_calls; _pending_reasoning_and_tool_calls() checks both
+        # regardless of which event triggered the flush) — has already been
+        # fully consumed by the persist loop.
+        mid_stream_checkpoint.set()
+        never = asyncio.Event()
+        await never.wait()  # stay mid-stream (state='draft') until cancelled
+        yield CanonicalEvent(type="message.delta", content="never reaches here")  # pragma: no cover
+
+    lm_client = MagicMock()
+    lm_client.stream = _slow_stream
+
+    from lmchat.db.schema import chats
+
+    async with engine.begin() as conn:
+        await conn.execute(chats.insert().values(user_id=1, title="test"))
+
+    svc = await _make_service(engine, lm_client=lm_client)
+    user = _mock_user(1)
+    request = _mock_request(disconnected=False)
+    payload = _make_request_payload()
+
+    async def _drive() -> None:
+        await _drain(
+            svc.stream_chat(chat_id=1, user=user, payload=payload, request=request)
+        )
+
+    task = asyncio.create_task(_drive())
+    await asyncio.wait_for(mid_stream_checkpoint.wait(), timeout=5.0)
+
+    async with engine.connect() as conn:
+        row = (
+            await conn.execute(
+                select(
+                    messages.c.state,
+                    messages.c.content,
+                    messages.c.reasoning_content,
+                    messages.c.tool_calls,
+                ).where(
+                    messages.c.chat_id == 1,
+                    messages.c.role == "assistant",
+                )
+            )
+        ).fetchone()
+
+    assert row is not None
+    # The property under test: still draft, mid-stream, before any terminal.
+    assert row[0] == PersistState.DRAFT.value, (
+        f"expected the row to still be 'draft' (mid-stream) at this "
+        f"checkpoint, got {row[0]!r} — the test's own timing is broken, not "
+        "the fix"
+    )
+    assert row[2] == "Thinking about this problem. Now I have more to add.", (
+        f"RED-ON-REVERT: reasoning_content not on the DRAFT row mid-stream — "
+        f"got {row[2]!r}. Before this fix, _CoalesceTimer.flush() never "
+        "wrote it; only finalize/salvage did, and neither runs on a killed "
+        "process."
+    )
+    assert row[3] == [
+        {
+            "id": "tc-3",
+            "name": "search_web",
+            "arguments": json.dumps({"query": "mid-stream"}),
+            "status": "success",
+            "result": "found mid-stream.",
+        }
+    ], f"RED-ON-REVERT: tool_calls not on the DRAFT row mid-stream — got {row[3]!r}"
+
+    # Cleanup: end the still-running turn so it doesn't leak into a later test.
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.sleep(0.1)
+
+
+# ---------------------------------------------------------------------------
 # Test 3: Single-stream-per-chat returns StreamInProgressError
 # ---------------------------------------------------------------------------
 

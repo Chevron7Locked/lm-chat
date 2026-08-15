@@ -457,38 +457,98 @@ class _CoalesceTimer:
     ``last_activity_at`` bumps the reaper's extended sub-session sweep
     would force-finalize a healthy multi-minute ``/research`` run at the
     5-minute inactivity mark.
+
+    2026-08-15: also coalesces ``reasoning_content`` and ``tool_calls`` onto
+    the draft row, closing the gap where a process kill (no teardown, no
+    salvage) left a reaper-finalized draft with content but neither —
+    everything the model thought and every tool it ran was gone even
+    though the answer text survived. ``state`` (optional; the SAME
+    ``_state``/``_pstate`` dict the caller already mirrors
+    ``acc_reasoning``/``acc_tool_calls`` into) is read directly rather than
+    handed a duplicate accumulator — this class never buffers reasoning or
+    tool_calls itself, only tracks what it last WROTE, so a flush triggered
+    by content alone doesn't needlessly rewrite an unchanged reasoning/
+    tool_calls blob once either has stabilized. ``state=None`` (the old
+    call shape, still used by the two hygiene tests that only exercise
+    ``touch_activity()``) keeps this exactly as before.
     """
 
     def __init__(
-        self, *, engine: AsyncEngine, message_id: int, table: Table = messages
+        self,
+        *,
+        engine: AsyncEngine,
+        message_id: int,
+        table: Table = messages,
+        state: dict[str, object] | None = None,
     ) -> None:
         self._engine = engine
         self._message_id = message_id
         self._table = table
+        self._state = state
         self._buf: list[str] = []
         self._last_flush = monotonic()
         # Throttled separately from flush to avoid one DB transaction per
         # tool_call.arguments chunk (it streams like content deltas).
         self._last_touch = monotonic()
+        # What was last WRITTEN (not just accumulated) — see the class
+        # docstring. A fresh row starts with neither column populated, so 0 /
+        # None correctly treat the first non-empty value as "changed".
+        self._last_reasoning_len_written = 0
+        self._last_tool_calls_written: list[dict[str, object]] | None = None
 
     def add(self, text: str) -> None:
         """Append *text* to the accumulation buffer."""
         self._buf.append(text)
 
+    def _pending_reasoning_and_tool_calls(
+        self,
+    ) -> tuple[str | None, list[dict[str, object]] | None]:
+        """Return whichever of (reasoning, tool_calls) has changed since the
+        last write to this row — the other is ``None``, meaning "nothing new,
+        don't touch that column". ``(None, None)`` when ``state`` is unset or
+        neither has changed.
+        """
+        if self._state is None:
+            return None, None
+        reasoning: str | None = None
+        _r = self._state.get("acc_reasoning")
+        if isinstance(_r, str) and _r and len(_r) > self._last_reasoning_len_written:
+            reasoning = _r
+        tool_calls: list[dict[str, object]] | None = None
+        _t = self._state.get("acc_tool_calls")
+        if isinstance(_t, list) and _t and _t != self._last_tool_calls_written:
+            tool_calls = _t
+        return reasoning, tool_calls
+
     def should_flush(self) -> bool:
-        """Return True if the coalesce interval has elapsed since the last flush."""
-        return bool(self._buf) and (monotonic() - self._last_flush) >= _COALESCE_INTERVAL_SEC
+        """Return True if the interval elapsed AND there's something new to
+        write — buffered content, or reasoning that has grown since the last
+        write. This is the ONLY periodic touchpoint during a pure-reasoning
+        phase (no content yet): ``add()`` is never called for reasoning
+        deltas, so without this branch a turn killed before its first
+        content token would flush nothing, ever, regardless of how much
+        reasoning had accumulated. tool_calls-only growth is covered by
+        ``touch_activity()``'s own tool_call.* cadence, not this trigger.
+        """
+        if (monotonic() - self._last_flush) < _COALESCE_INTERVAL_SEC:
+            return False
+        if self._buf:
+            return True
+        reasoning, _ = self._pending_reasoning_and_tool_calls()
+        return reasoning is not None
 
     async def flush(self) -> None:
-        """Persist accumulated content to the draft row and reset the buffer.
+        """Persist accumulated content (+ reasoning/tool_calls if either has
+        changed) to the draft row and reset the buffer.
 
-        No-op if the buffer is empty. The buffer is cleared and
-        ``_last_flush`` advanced ONLY after the DB write succeeds, so a
-        transient non-lock DB error leaves the buffer intact for the next
-        flush attempt to retry — otherwise it would silently lose every
-        delta in the in-flight buffer.
+        No-op if there's nothing new anywhere. The buffer is cleared and
+        ``_last_flush``/the last-written trackers are advanced ONLY after the
+        DB write succeeds, so a transient non-lock DB error leaves everything
+        intact for the next flush attempt to retry — otherwise it would
+        silently lose every delta in the in-flight buffer.
         """
-        if not self._buf:
+        reasoning, tool_calls = self._pending_reasoning_and_tool_calls()
+        if not self._buf and reasoning is None and tool_calls is None:
             return
         content_to_append = "".join(self._buf)
 
@@ -516,11 +576,18 @@ class _CoalesceTimer:
                 ).fetchone()
                 if row is None:
                     return
-                new_content = (row[0] or "") + content_to_append
                 # Touch last_activity_at in the SAME UPDATE (hot path — do
                 # NOT add a second statement).
                 from datetime import UTC  # noqa: PLC0415
                 from datetime import datetime as _dt
+
+                values: dict[str, object] = {"last_activity_at": _dt.now(UTC)}
+                if content_to_append:
+                    values["content"] = (row[0] or "") + content_to_append
+                if reasoning is not None:
+                    values["reasoning_content"] = reasoning
+                if tool_calls is not None:
+                    values["tool_calls"] = tool_calls
 
                 await conn.execute(
                     table.update()
@@ -528,7 +595,7 @@ class _CoalesceTimer:
                         table.c.id == message_id,
                         table.c.state == PersistState.DRAFT.value,
                     )
-                    .values(content=new_content, last_activity_at=_dt.now(UTC))
+                    .values(**values)
                 )
 
         try:
@@ -547,16 +614,27 @@ class _CoalesceTimer:
 
         self._buf = []
         self._last_flush = monotonic()
+        if reasoning is not None:
+            self._last_reasoning_len_written = len(reasoning)
+        if tool_calls is not None:
+            self._last_tool_calls_written = tool_calls
 
     async def touch_activity(self) -> None:
-        """Touch ``last_activity_at`` without flushing buffered content.
+        """Touch ``last_activity_at`` (+ reasoning/tool_calls if either has
+        changed) without flushing buffered content.
 
         ``tool_call.*`` events never call ``add()``, so ``flush()`` is a
         no-op for them; without this, a long content-free tool chain never
         bumps ``last_activity_at`` and the reaper finalizes the row mid-
         stream at the 5-min threshold. Throttled to
         ``_COALESCE_INTERVAL_SEC`` since ``tool_call.arguments`` streams in
-        chunks like content deltas.
+        chunks like content deltas. This is also the periodic touchpoint for
+        a pure tool-call burst with no content or growing reasoning yet.
+
+        Now guarded ``WHERE state='draft'`` — unguarded before 2026-08-15,
+        harmless when the only column touched was ``last_activity_at``, but
+        not once reasoning_content/tool_calls share the same UPDATE (the
+        same corruption ``flush()``'s guard exists to prevent).
         """
         now = monotonic()
         if now - self._last_touch < _COALESCE_INTERVAL_SEC:
@@ -566,16 +644,25 @@ class _CoalesceTimer:
         message_id = self._message_id
         engine = self._engine
         table = self._table
+        reasoning, tool_calls = self._pending_reasoning_and_tool_calls()
 
         from datetime import UTC  # noqa: PLC0415
         from datetime import datetime as _dt
 
         async def _touch() -> None:
+            values: dict[str, object] = {"last_activity_at": _dt.now(UTC)}
+            if reasoning is not None:
+                values["reasoning_content"] = reasoning
+            if tool_calls is not None:
+                values["tool_calls"] = tool_calls
             async with engine.begin() as conn:
                 await conn.execute(
                     table.update()
-                    .where(table.c.id == message_id)
-                    .values(last_activity_at=_dt.now(UTC))
+                    .where(
+                        table.c.id == message_id,
+                        table.c.state == PersistState.DRAFT.value,
+                    )
+                    .values(**values)
                 )
 
         try:
@@ -586,6 +673,11 @@ class _CoalesceTimer:
                 message_id=message_id,
                 error=str(exc),
             )
+            return
+        if reasoning is not None:
+            self._last_reasoning_len_written = len(reasoning)
+        if tool_calls is not None:
+            self._last_tool_calls_written = tool_calls
 
 
 # ---------------------------------------------------------------------------
@@ -4727,7 +4819,9 @@ class StreamingService:
                 set and this generator yields the error frame on its next
                 iteration.
                 """
-                coalesce = _CoalesceTimer(engine=self._engine, message_id=msg_id)
+                coalesce = _CoalesceTimer(
+                    engine=self._engine, message_id=msg_id, state=_state
+                )
                 accumulated_content: str = ""
                 accumulated_reasoning: str = ""
                 # Persisted to messages.tool_calls at finalize (FE ToolCall
@@ -4903,12 +4997,19 @@ class StreamingService:
                             if coalesce.should_flush():
                                 await coalesce.flush()
                         elif event.type == "reasoning.delta" and event.content:
-                            # Not coalesced (not shown incrementally); graceful
-                            # terminals persist it via _finalize_message.
-                            # Mirrored into _state so a non-graceful terminal
-                            # salvages parked reasoning instead of dropping it.
+                            # The answer text itself is never coalesced
+                            # incrementally (not shown live) — but the
+                            # reasoning value now IS periodically persisted,
+                            # via the SAME _CoalesceTimer, so a kill during a
+                            # pure-reasoning phase (no content yet — the only
+                            # case message.delta's flush() trigger below
+                            # never reaches) doesn't lose it. Mirrored into
+                            # _state first so a non-graceful terminal's
+                            # salvage also sees the freshest value.
                             accumulated_reasoning += event.content
                             _state["acc_reasoning"] = accumulated_reasoning
+                            if coalesce.should_flush():
+                                await coalesce.flush()
 
                         if event.type == "chat.end" and event.response_id:
                             _state["response_id"] = event.response_id
