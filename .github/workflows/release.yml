@@ -68,7 +68,13 @@ jobs:
       - name: Trivy — container vulnerability scan
         # Pinned to a specific commit — never use @master (mutable, OpenSSF Scorecard finding).
         # Update via Dependabot.
-        uses: aquasecurity/trivy-action@314ff8b43182423b84c50b1670b0e10f858f2d98 # 0.34.0
+        uses: aquasecurity/trivy-action@314ff8b43182423b84c50b1670b0e10f858f2d98 # untagged, 1 commit past v0.36.0
+        # NOTE: this SHA is NOT a release tag — it is aquasecurity/trivy-action#565
+        # ("ci: migrate from PAT to GitHub App token", 2026-05-13). The comment here
+        # previously claimed 0.34.0, which is a different commit entirely (c1824fd6).
+        # The SHA is the security control and is unchanged; only the claim about it is
+        # corrected. Re-pinning to a genuine release tag is worth doing deliberately,
+        # not hours before a tag, since this workflow only executes on tag push.
         with:
           image-ref: ${{ steps.img.outputs.name }}:${{ steps.meta.outputs.version }}
           format: sarif
