@@ -1,0 +1,81 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": false,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"] },
+    // vitest.config.ts sets test.globals=true at RUNTIME (bare `vi`/
+    // `afterEach`/etc. work without importing them in a couple of files,
+    // e.g. tests/setup.ts) — vitest/globals tells the type-checker about
+    // the same surface so that's a real config gap closed, not a relaxed
+    // rule; most test files still explicitly `import { ... } from "vitest"`.
+    "types": ["node", "vitest/globals"]
+  },
+  // src/vite-env.d.ts: NOT "including src in this project" in any broad
+  // sense — it's a single ambient .d.ts (just `/// <reference types=
+  // "vite/client" />`) supplying the CSS/asset side-effect-import module
+  // declarations that ~93 tests/unit/*.spec.tsx files need because they
+  // import real src/ components. Removing it does NOT stop those src files
+  // from being type-checked (tsc reports diagnostics for every file it
+  // transitively reaches via a real import, regardless of what's in
+  // `include`) — it only brings back ~45 false "cannot find module for
+  // side-effect import of '*.css'" errors on exactly those files. Confirmed
+  // by removing it and re-running: errors went 193 -> 238, and did NOT
+  // remove the known artifact documented below (same file, same line) —
+  // so don't reach for "drop vite-env.d.ts" as a fix for that either.
+  "include": ["tests", "src/vite-env.d.ts"],
+  // tests/_manual-live is gitignored (web/.gitignore) — ad-hoc manual probe
+  // scripts, not tracked source and not wired into any playwright config's
+  // testDir/testMatch. Excluded so a local dev's scratch files don't gate
+  // typecheck; on a clean checkout the directory doesn't exist anyway.
+  "exclude": [
+    "tests/_manual-live"
+  ]
+  // ---------------------------------------------------------------------
+  // KNOWN, ACCEPTED ARTIFACT (do not "fix" by editing src/) —
+  // src/hooks/useStoppedStreamReconciliation.ts(122,7): error TS2322:
+  // Type 'number' is not assignable to type 'Timeout'.
+  //
+  // Mechanism: `types` above is program-wide, not per-file. @types/node's
+  // global `setTimeout`/`Timeout` declarations collide with DOM lib's
+  // `Window.setTimeout` (number-returning) ONLY for this hook's specific
+  // `ReturnType<typeof window.setTimeout>` pattern — 5 other src files use
+  // the same bare `ReturnType<typeof setTimeout>` idiom without colliding.
+  // The hook is reached because test_useStoppedStreamReconciliation_backoff
+  // .spec.ts imports it directly — true of ~93 tests/unit/*.spec.tsx files
+  // importing *something* from src/, so this isn't specific to this one
+  // import path.
+  //
+  // tsconfig.app.json — the file's ACTUAL build target — still typechecks
+  // it clean; this is a false positive of tsconfig.tests.json's view, not
+  // a real bug.
+  //
+  // Considered and rejected: a browser-context/node-context project split
+  // (no `types:["node"]` for files that reach src/, a separate project
+  // with it for the ~21 files that use `global`/`fs`/`path`/`process`)
+  // would remove it cleanly, but costs a 4th tsc invocation plus a
+  // hand-maintained file-classification list forever, to silence one known
+  // false positive. Not worth it (decided 2026-08-15) — accept the one
+  // artifact instead. Do NOT annotate src/hooks/useStoppedStreamReconciliation.ts
+  // to satisfy this project; that file doesn't belong to it.
+}

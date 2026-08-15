@@ -52,6 +52,10 @@ export default [
       "src/types/api.ts",
       "dist/**",
       "node_modules/**",
+      // Gitignored ad-hoc manual probe scripts (web/.gitignore) — not
+      // tracked source, not wired into any playwright config. Present only
+      // on a local dev's disk; excluded from tsconfig.tests.json too.
+      "tests/_manual-live/**",
     ],
   },
 
@@ -138,7 +142,14 @@ export default [
 
   // Scripts / config files that run under Node.
   {
-    files: ["scripts/**/*.ts", "vite.config.ts", "vitest.config.ts"],
+    files: [
+      "scripts/**/*.ts",
+      "vite.config.ts",
+      "vitest.config.ts",
+      "playwright.config.ts",
+      "playwright.live.config.ts",
+      "playwright.dogfood.config.ts",
+    ],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -167,12 +178,26 @@ export default [
     languageOptions: {
       parser: tsParser,
       parserOptions: {
-        project: "./tsconfig.app.json",
+        // NOT tsconfig.app.json — that project's `include` is `["src"]`
+        // only, which made this block parse-error on every file it
+        // matched (tests/** was never actually linted; `lint` = `eslint
+        // src` never triggered this block, so the mismatch went unnoticed).
+        project: "./tsconfig.tests.json",
         ecmaVersion: "latest",
         sourceType: "module",
       },
+      // browser: DOM (jsdom unit tests + Playwright page context).
+      // node: Playwright specs/helpers import real Node builtins (fs, path,
+      // process, Buffer) and a couple of vitest files use the bare `global`
+      // object (tsconfig.tests.json's `types` carries the matching TS-side
+      // fix). vitest: `globals: true` in vitest.config.ts already makes
+      // vi/describe/it/expect/etc. real runtime globals for these files —
+      // this just tells the linter the same thing tsconfig.tests.json's
+      // `vitest/globals` entry tells the type-checker.
       globals: {
         ...globals.browser,
+        ...globals.node,
+        ...globals.vitest,
         ...globals.es2024,
       },
     },

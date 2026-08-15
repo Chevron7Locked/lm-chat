@@ -23,5 +23,5 @@
     "ignoreDeprecations": "6.0",
     "types": ["node"]
   },
-  "include": ["scripts", "vite.config.ts", "vitest.config.ts", "playwright.config.ts", "playwright.live.config.ts"]
+  "include": ["scripts", "vite.config.ts", "vitest.config.ts", "playwright.config.ts", "playwright.live.config.ts", "playwright.dogfood.config.ts"]
 }

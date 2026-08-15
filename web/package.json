@@ -19,8 +19,8 @@
     "test:unit": "vitest",
     "test:e2e:stubbed": "playwright test",
     "test:e2e:live": "playwright test --config=playwright.live.config.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
-    "lint": "eslint src",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.tests.json",
+    "lint": "eslint src tests",
     "mutation:baseline": "stryker run stryker.conf.json"
   },
   "dependencies": {
