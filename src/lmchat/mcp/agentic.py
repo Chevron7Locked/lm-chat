@@ -25,6 +25,7 @@ per-call timeout).
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -43,8 +44,19 @@ from lmchat.services.builtin_tools import BuiltinToolContext, BuiltinToolRegistr
 
 log = get_logger(__name__)
 
-# Maximum agentic rounds when none specified.
-_DEFAULT_MAX_ROUNDS = 8
+# Maximum agentic rounds when none specified. This is a PATHOLOGICAL-LOOP
+# BACKSTOP, not a research limiter — a real turn that searches, reads several
+# sources and cross-checks them runs many rounds legitimately, and cutting it
+# short produces a worse answer, not a safer one. Kept in step with
+# ``streaming_service._MAX_TOOL_ROUNDS_PER_TURN`` (the equivalent cap on the
+# local/LM Studio path) so the two paths do not silently disagree about how
+# much work a turn is allowed to do. For reference, Open WebUI ships 256.
+# Was 8 from v1.0 until 2026-08-16 — indefensibly low, and the only one of the
+# four tool-loop caps with no override at all. It now takes an env override in
+# the same shape as its three siblings (``_MAX_TOOL_ROUNDS_PER_TURN``,
+# ``_MAX_IDENTICAL_TOOL_ROUNDS``, ``_REPEAT_WARNING_CUT_K``), so all four are
+# tunable the same way.
+_DEFAULT_MAX_ROUNDS = int(os.getenv("LM_CHAT_MAX_AGENTIC_ROUNDS", "256"))
 
 # Warning message when the loop cap is reached.
 _MAX_ROUNDS_WARNING = (

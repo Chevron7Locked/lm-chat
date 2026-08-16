@@ -368,7 +368,9 @@ async def _run_stream(
     payload = ChatStreamRequest(chat_id=1, payload=canonical)
 
     async def _stub_augment(*args: Any, **kwargs: Any) -> SimpleNamespace:
-        return SimpleNamespace(context_block=RAG_MARKER, memory_hits=1, doc_hits=1)
+        return SimpleNamespace(
+            context_block=RAG_MARKER, memory_hits=1, doc_hits=1, ctx_window=0
+        )
 
     from lmchat.services._token_budget import estimate_context_budget as _real_gate
 

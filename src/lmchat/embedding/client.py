@@ -21,9 +21,9 @@ The ``index`` field may not be in the same order as the input list.
 
 Timeout: reuses ``CHAT_TIMEOUT`` and ``CHAT_LIMITS`` from
 ``lmstudio_adapter`` — embedding calls on a warm model take
-~50–300 ms; cold-start can be longer.  The 600 s read timeout is
-the same ceiling used for streaming generations and is acceptable
-for embeddings too.
+~50–300 ms; cold-start can be longer.  The 1800 s read timeout is
+the same local-first ceiling used for streaming generations and is
+acceptable for embeddings too.
 """
 from __future__ import annotations
 

@@ -208,7 +208,6 @@ async def ab_compare_stream(
         and memory_service is not None
     ):
         try:
-            from lmchat.services.model_profile import resolve_profile
             from lmchat.services.rag_service import (
                 augment_prompt as _rag_augment,
             )
@@ -227,13 +226,24 @@ async def ab_compare_stream(
             )
             if augmented.context_block:
                 # A/B compare runs two models against the same context. Pick
-                # the SMALLER window of the two so neither pane overflows.
-                window_a = resolve_profile(model_a).context_window
-                window_b = resolve_profile(model_b).context_window
-                tighter_model = model_a if window_a <= window_b else model_b
+                # the SMALLER of the two models' LIVE-probed windows so
+                # neither pane overflows — no per-model-name table; each
+                # window comes from the same provider-agnostic probe every
+                # other RAG-budget site uses (ModelsService.
+                # get_max_context_length: LM Studio's live loaded_context_
+                # length, or a cloud/OpenRouter-shape catalog's own
+                # context_length). A pane whose probe is unresolved (0) is
+                # excluded from the comparison rather than treated as
+                # "smallest" — only compare what's actually known; if
+                # NEITHER resolves, trim_rag_context_for_model falls back
+                # to its own fixed "window unknown" floor.
+                window_a = await models_service.get_max_context_length(model_a)
+                window_b = await models_service.get_max_context_length(model_b)
+                resolved_windows = [w for w in (window_a, window_b) if w > 0]
+                tighter_ctx_window = min(resolved_windows) if resolved_windows else None
                 trimmed_block, original_chars, trim_fired = (
                     trim_rag_context_for_model(
-                        augmented.context_block, tighter_model
+                        augmented.context_block, ctx_window=tighter_ctx_window
                     )
                 )
                 # Compose [RAG][project_prompt]. Mirrors
@@ -253,7 +263,9 @@ async def ab_compare_stream(
                     trim_fired=trim_fired,
                     original_chars=original_chars,
                     trimmed_chars=len(trimmed_block),
-                    tighter_model=tighter_model,
+                    window_a=window_a,
+                    window_b=window_b,
+                    tighter_ctx_window=tighter_ctx_window,
                     project_prompt_chars=len(_project_prompt),
                 )
         except Exception as exc:  # noqa: BLE001

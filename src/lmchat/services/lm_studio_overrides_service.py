@@ -1207,7 +1207,11 @@ Raises:
         new_http_client = httpx.AsyncClient(
             base_url=new_base_url,
             headers=auth_headers,
-            timeout=httpx.Timeout(connect=10.0, read=600.0, write=60.0, pool=10.0),
+            # read must track lmstudio_adapter.CHAT_TIMEOUT's read leg (1800 s
+            # / 30 min, local-first) — this client replaces app_state.http_client,
+            # so a stale short value here would silently reintroduce a hard cap
+            # on every chat request after the next admin URL rewire.
+            timeout=httpx.Timeout(connect=10.0, read=1800.0, write=60.0, pool=10.0),
         )
 
         # rewire_lock → _cache_lock (invariant documented above).

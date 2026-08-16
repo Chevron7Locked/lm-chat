@@ -226,12 +226,17 @@ def _grammar_degrade_warning(integrations: list[str]) -> str:
 # loop backstop, not a research limiter (see `_MAX_IDENTICAL_TOOL_ROUNDS` for
 # the earlier-firing real signal). Override via
 # `LM_CHAT_MAX_TOOL_ROUNDS_PER_TURN` (<=0 disables).
-_MAX_TOOL_ROUNDS_PER_TURN: Final[int] = int(os.getenv("LM_CHAT_MAX_TOOL_ROUNDS_PER_TURN", "50"))
+_MAX_TOOL_ROUNDS_PER_TURN: Final[int] = int(os.getenv("LM_CHAT_MAX_TOOL_ROUNDS_PER_TURN", "256"))
 
 # The real degenerate-loop signal: the model re-issuing the SAME tool call
 # with no progress, not making many different calls (legitimate research).
-# Cuts after this many CONSECUTIVE identical calls; any different call resets
-# the streak. Override via `LM_CHAT_MAX_IDENTICAL_TOOL_ROUNDS` (<=0 disables).
+# Cuts after this many CONSECUTIVE identical SUCCESSFUL calls; any different
+# call — or any failure — resets/skips the streak (see
+# _apply_tool_call_delta): a flaky MCP server / transient network blip makes
+# identical-args retries legitimate, mirroring
+# lmstudio_streaming_client's own "match only against prior SUCCESSFUL
+# identical calls" repeat detector. Override via
+# `LM_CHAT_MAX_IDENTICAL_TOOL_ROUNDS` (<=0 disables).
 _MAX_IDENTICAL_TOOL_ROUNDS: Final[int] = int(os.getenv("LM_CHAT_MAX_IDENTICAL_TOOL_ROUNDS", "5"))
 
 # Fast-path cut driven by the streaming client's own repeat detector, which
@@ -1442,10 +1447,12 @@ async def _generate_followups_oob(
     model: str,
     conversation_messages: list[dict],  # type: ignore[type-arg]
     assistant_answer: str,
-    # Reasoning background-models can spend ~40s and ~1.3k tokens before the
-    # array lands in `content`; budget generously (matches the distill/title
-    # OOB calls) so it doesn't time out into empty content -> no chips.
-    timeout_sec: float = 120.0,
+    # Reasoning background-models can spend real time before the array lands
+    # in `content`; budget generously (matches the distill/title OOB calls) so
+    # it doesn't time out into empty content -> no chips. Every caller passes
+    # ``self._aux_model_timeout_sec`` (1800 s); this fallback tracks it so a
+    # directly-constructed call can't silently reintroduce a short cap.
+    timeout_sec: float = 1800.0,
 ) -> list[str]:
     """Make a separate lightweight call to generate follow-up question chips.
 
@@ -1611,8 +1618,9 @@ async def _infer_mode_oob(
     assistant_answer: str,
     # Same generous budget as _generate_followups_oob — a reasoning
     # background model can spend real time deliberating even over a
-    # one-word answer.
-    timeout_sec: float = 120.0,
+    # one-word answer. Callers pass ``self._aux_model_timeout_sec`` (1800 s);
+    # this fallback tracks it.
+    timeout_sec: float = 1800.0,
 ) -> str | None:
     """C3 — ask a separate lightweight call which role preset the NEXT turn should run under.
 
@@ -1877,9 +1885,10 @@ async def _distill_memory_oob(
     model: str,
     conversation_messages: list[dict],  # type: ignore[type-arg]
     assistant_answer: str,
-    # Fire-and-forget, so a generous ceiling is free; 120s clears the worst
-    # case of a slow reasoning background-model.
-    timeout_sec: float = 120.0,
+    # Fire-and-forget, so a generous ceiling is genuinely free — which is why
+    # it is 1800 s and not a number tuned to a measured worst case. Callers
+    # pass ``self._aux_model_timeout_sec``; this fallback tracks it.
+    timeout_sec: float = 1800.0,
 ) -> list[str]:
     """Out-of-band durable-fact extraction for the auto-memory feature.
 
@@ -2026,8 +2035,8 @@ class StreamingService:
         lm_client: LmstudioStreamingClient,
         memory_service: MemoryService,
         chat_locks: dict[int, asyncio.Lock],
-        idle_timeout_sec: int = 300,
-        aux_model_timeout_sec: float = 900.0,
+        idle_timeout_sec: int = 1800,
+        aux_model_timeout_sec: float = 1800.0,
         embedding_client: EmbeddingClient | None = None,
         models_service: ModelsService | None = None,
         projects_service: object | None = None,
@@ -3087,7 +3096,17 @@ class StreamingService:
 
                     trimmed_block, original_chars, trim_fired = trim_rag_context_for_model(
                         augmented.context_block,
-                        payload.payload.model,
+                        # Reuse the window `augment_prompt` already probed
+                        # LIVE (via _resolve_chat_ctx_window /
+                        # ModelsService.get_max_context_length — provider-
+                        # agnostic, no model-name table) for
+                        # rag_inject_budget, instead of re-deriving a
+                        # separate guess and trimming a correctly-budgeted
+                        # block back down. 0 (RAG disabled this turn /
+                        # probe failed) falls back to the fixed
+                        # "window unknown" floor inside
+                        # trim_rag_context_for_model.
+                        ctx_window=augmented.ctx_window,
                     )
                     if trim_fired:
                         log.warning(
@@ -3551,9 +3570,20 @@ class StreamingService:
         *accumulated_tool_calls* (mutated in place, mirrored into ``state``
         for the teardown salvage path). On a completed round
         (``tool_call.success``/``tool_call.failure``), bumps the cross-turn
-        round counter and this turn's round count, and tracks whether the
-        call signature (name + args) repeats the previous round — the
-        consecutive-identical-rounds backstop for the loop-cut decision.
+        round counter and this turn's round count, and — on SUCCESS only —
+        tracks whether the call signature (name + args) repeats the
+        previous successful round: the consecutive-identical-rounds
+        backstop for the loop-cut decision.
+
+        A failed call neither extends nor resets the streak: it's left
+        untouched, exactly mirroring ``lmstudio_streaming_client``'s own
+        repeat detector, which matches "only against prior SUCCESSFUL
+        identical calls (fail -> retry with same args is legitimate)". Model
+        hits a flaky MCP server / transient network blip and retries the
+        same valid call — that must not count toward the same cut a
+        hallucinating success-loop trips. The per-turn round cap
+        (``_MAX_TOOL_ROUNDS_PER_TURN``) and the client's own
+        ``failure_streak`` detector still bound a genuine failure loop.
 
         Returns the updated ``(turn_tool_rounds, last_tool_sig,
         consecutive_identical_rounds)`` since those are plain locals in the
@@ -3572,7 +3602,7 @@ class StreamingService:
             turn_tool_rounds += 1
             state["acc_tool_rounds"] = turn_tool_rounds
             _tc = event.tool_call
-            if _tc is not None:
+            if _tc is not None and event.type == "tool_call.success":
                 try:
                     _sig = f"{_tc.name}\x00" + json.dumps(
                         _tc.arguments,

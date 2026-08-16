@@ -3,7 +3,11 @@
  * useLmStudioHealth — live reachability probe for the LM Studio connection.
  *
  * Polls GET /api/lmstudio/health every 10 s to get a LIVE signal from the
- * ModelsService 5-second-TTL probe.  This is distinct from useModels, which
+ * ModelsService probe. The endpoint's own re-probe gate uses a 30-second
+ * TTL dedicated to this path (separate from the 5-second TTL chat turns
+ * use to resolve a loaded model) — sized at 3x this hook's poll interval
+ * so most polls are served from cache: ~2 upstream probes/minute for an
+ * idle tab instead of one per poll. This is distinct from useModels, which
  * reads the 30-minute catalog cache and cannot detect LM Studio going down
  * until the next scheduled full refresh.
  *

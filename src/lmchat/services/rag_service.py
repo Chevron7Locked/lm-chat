@@ -18,6 +18,7 @@ error is raised.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Final
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -51,6 +52,16 @@ class AugmentedPrompt(BaseModel):
             for surfaces whose retrieval raised and was swallowed — never
             for a surface that ran cleanly and simply returned nothing
             (the empty-vs-degraded distinction).
+        ctx_window: The active model's real loaded context window in
+            tokens, as resolved internally via ``_resolve_chat_ctx_window``
+            (same lookup ``rag_inject_budget`` above already consumed).
+            ``0`` when unresolved (RAG disabled for this turn, or the probe
+            failed) — callers must treat ``0`` as "unknown" and fall back
+            to a static profile, exactly like ``rag_inject_budget`` does.
+            Exposed so callers (``streaming_service._assemble_system_prompt``)
+            can reuse this single already-probed value for
+            ``trim_rag_context_for_model`` too, instead of re-deriving a
+            second, static-table guess for the same turn.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -60,6 +71,7 @@ class AugmentedPrompt(BaseModel):
     doc_hits: int
     pinned_hits: int = 0
     degraded_surfaces: list[str] = []
+    ctx_window: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +317,12 @@ async def augment_prompt(
     # retrieval), INLINE (small project corpus, inject all chunks, bypass
     # retrieve()), HYBRID (fall through to retrieve()).
     doc_sections: list[str] = []
+    # Hoisted above the try/rag_enabled gate (rather than left as a plain
+    # local inside it) so it's always bound by the time the return
+    # statements below build AugmentedPrompt — 0 when RAG is disabled for
+    # this turn or the probe fails, matching rag_inject_budget's "0 ==
+    # unresolved" contract.
+    chat_ctx_window: int = 0
     if rag_enabled:
         try:
             from lmchat.services.rag_mode_resolver import (  # noqa: PLC0415
@@ -462,6 +480,7 @@ async def augment_prompt(
             doc_hits=0,
             pinned_hits=0,
             degraded_surfaces=degraded_surfaces,
+            ctx_window=chat_ctx_window,
         )
 
     parts: list[str] = []
@@ -508,6 +527,7 @@ async def augment_prompt(
         doc_hits=len(doc_sections),
         pinned_hits=len(pinned_sections),
         degraded_surfaces=degraded_surfaces,
+        ctx_window=chat_ctx_window,
     )
 
 
@@ -520,29 +540,66 @@ async def augment_prompt(
 # fires before the model actually overflows; advisory only.
 _CHARS_PER_TOKEN: float = 3.0
 
+# Applied ONLY when a turn's live context-window probe is genuinely
+# unresolved (no model/embedding stack wired, or ModelsService.get_max_
+# context_length returned 0 — "unknown to the cache", not "small"). This
+# is NOT a guess about what any particular model looks like — LM Chat is a
+# public app and has no way to know what's loaded when the probe fails, so
+# this is a fixed, conservative cap to avoid overflowing whatever that
+# turns out to be, never a per-model-name assumption. Every model this app
+# talks to (LM Studio's live loaded_context_length, or a cloud/OpenRouter-
+# shape catalog's own context_length) reports its real window through
+# ModelsService.get_max_context_length; this floor is the exception path,
+# not the common one.
+_UNKNOWN_CTX_WINDOW_FLOOR_TOKENS: Final[int] = 16_384
 
-def compute_rag_budget_chars(model_id: str | None) -> int:
+
+def compute_rag_budget_chars(ctx_window: int | None) -> int:
     """Char budget for the RAG context block, derived from the model's window.
 
-    Resolves ``model_id`` via :func:`resolve_profile` (out-of-band import to
-    avoid a circular import). Shares ``_RAG_CONTEXT_BUDGET_FRACTION`` — the
-    "how much of the window RAG may occupy" ratio — with
-    ``rag_mode_resolver.rag_inject_budget`` as the single source of truth
-    for occupancy. Returns a char count to compare ``context_block`` length
-    against.
+    ``ctx_window`` is the caller's already-probed LIVE context length (see
+    ``AugmentedPrompt.ctx_window`` / ``ModelsService.get_max_context_length``
+    — provider-agnostic: LM Studio's per-instance loaded window or a cloud
+    catalog's reported ``context_length``). Used directly when resolved
+    (``> 0``). Falls back to ``_UNKNOWN_CTX_WINDOW_FLOOR_TOKENS`` only when
+    ``ctx_window`` is ``None`` or unresolved (``<= 0``) — never to a
+    model-name lookup; this app has no per-model table for context window.
+
+    Deliberately does NOT mirror ``rag_mode_resolver.rag_inject_budget``'s
+    ``sys.maxsize``-when-unresolved contract: that function's own docstring
+    says returning "no cap" is safe only because *this* function keeps
+    applying a REAL cap in the same situation. Making both uncapped
+    simultaneously would remove the only backstop for a turn whose window
+    is genuinely unknown.
+
+    Shares ``_RAG_CONTEXT_BUDGET_FRACTION`` — the "how much of the window
+    RAG may occupy" ratio — with ``rag_mode_resolver.rag_inject_budget`` as
+    the single source of truth for occupancy. Returns a char count to
+    compare ``context_block`` length against.
     """
-    from lmchat.services.model_profile import resolve_profile
     from lmchat.services.rag_mode_resolver import _RAG_CONTEXT_BUDGET_FRACTION
 
-    profile = resolve_profile(model_id)
-    return int(profile.context_window * _RAG_CONTEXT_BUDGET_FRACTION * _CHARS_PER_TOKEN)
+    window = (
+        ctx_window
+        if ctx_window is not None and ctx_window > 0
+        else _UNKNOWN_CTX_WINDOW_FLOOR_TOKENS
+    )
+    return int(window * _RAG_CONTEXT_BUDGET_FRACTION * _CHARS_PER_TOKEN)
 
 
 def trim_rag_context_for_model(
     context_block: str,
-    model_id: str | None,
+    ctx_window: int | None,
 ) -> tuple[str, int, bool]:
     """Cap ``context_block`` length to the model's RAG budget.
+
+    ``ctx_window``, when resolved (``> 0``), is the caller's already-probed
+    LIVE context length — pass ``AugmentedPrompt.ctx_window`` through here
+    so this trim uses the same real window ``rag_inject_budget`` used to
+    build ``context_block`` in the first place, instead of trimming a
+    correctly-budgeted block back down to a guess. ``None``/unresolved
+    falls back to :data:`_UNKNOWN_CTX_WINDOW_FLOOR_TOKENS` — no model_id
+    parameter here; nothing in this function looks a model up by name.
 
     Returns ``(trimmed_block, original_chars, trim_fired)``. Keeps the head
     (pinned-context + retrieval headers) intact and truncates the tail — a
@@ -552,7 +609,7 @@ def trim_rag_context_for_model(
     """
     if not context_block:
         return ("", 0, False)
-    budget = compute_rag_budget_chars(model_id)
+    budget = compute_rag_budget_chars(ctx_window)
     original_chars = len(context_block)
     if original_chars <= budget:
         return (context_block, original_chars, False)

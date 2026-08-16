@@ -210,9 +210,9 @@ async def _capture_outbound_sys_prompt(
 
     async def _stub_augment(*args: Any, **kwargs: Any):
         # Return an AugmentedPrompt-shape; the streaming service reads
-        # ``.context_block``, ``.memory_hits``, ``.doc_hits``.
+        # ``.context_block``, ``.memory_hits``, ``.doc_hits``, ``.ctx_window``.
         return SimpleNamespace(
-            context_block=RAG_MARKER, memory_hits=1, doc_hits=1
+            context_block=RAG_MARKER, memory_hits=1, doc_hits=1, ctx_window=0
         )
 
     # streaming_service.py imports ``get_settings`` AND

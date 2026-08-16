@@ -1,92 +1,123 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the A/B compare RAG window-pick branch + project_prompt hoist.
 
-The wiring in ``ab_compare.py:183-185`` (pick the smaller window of the two
-models) and the project system_prompt hoist (mirrors
+The wiring in ``ab_compare.py`` (pick the smaller LIVE-probed window of the
+two models) and the project system_prompt hoist (mirrors
 ``streaming_service.py:829-863``) are both cross-file glue that the
 per-function unit tests don't cover. These tests exercise the route-level
 composition directly.
+
+2026-08-15: the window pick moved off ``resolve_profile(...).context_window``
+(a per-model-name static table) onto
+``ModelsService.get_max_context_length`` — the same provider-agnostic live
+probe every other RAG-budget site uses. No model name drives the result
+anymore; only what each pane's model actually reports live.
 """
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
-from lmchat.services.model_profile import (
-    PROFILE_NEMOTRON_CASCADE_2,
-    PROFILE_QWEN_DISTILL,
-    PROFILE_QWEN_POLARIS_9B,
-    resolve_profile,
-)
+
+async def _pick_tighter_ctx_window(
+    models_service: AsyncMock, model_a: str, model_b: str
+) -> int | None:
+    """Replicate the route's inline pick (same expression as ab_compare.py)."""
+    window_a = await models_service.get_max_context_length(model_a)
+    window_b = await models_service.get_max_context_length(model_b)
+    resolved_windows = [w for w in (window_a, window_b) if w > 0]
+    return min(resolved_windows) if resolved_windows else None
 
 
 class TestSmallerWindowWins:
-    """The "pick the SMALLER window of the two models" branch.
+    """The "pick the SMALLER live-probed window of the two models" branch."""
 
-    Encoded inline in ``ab_compare.py:183-185``:
+    @pytest.mark.asyncio
+    async def test_smaller_of_two_resolved_windows_wins(self) -> None:
+        models_service = AsyncMock()
+        models_service.get_max_context_length = AsyncMock(
+            side_effect=lambda model_id: {"model-a": 131_072, "model-b": 262_144}[model_id]
+        )
 
-        window_a = resolve_profile(model_a).context_window
-        window_b = resolve_profile(model_b).context_window
-        tighter_model = model_a if window_a <= window_b else model_b
-    """
+        tighter = await _pick_tighter_ctx_window(models_service, "model-a", "model-b")
 
-    @pytest.mark.parametrize(
-        "model_a, model_b, expected_tighter",
-        [
-            # qwen3.5-122b (131K) vs qwen3.5-9b-polaris (256K) → 122b wins
-            (
-                "qwen3.5-122b-a10b-claude-distill-v2-i1",
-                "qwen3.5-9b-polaris-highiq-thinking-i1",
-                "qwen3.5-122b-a10b-claude-distill-v2-i1",
-            ),
-            # Reverse: polaris first, 122b second — still 122b wins
-            (
-                "qwen3.5-9b-polaris-highiq-thinking-i1",
-                "qwen3.5-122b-a10b-claude-distill-v2-i1",
-                "qwen3.5-122b-a10b-claude-distill-v2-i1",
-            ),
-            # Equal windows (both Qwen distill, 131K): tie goes to model_a
-            (
-                "qwen3.5-122b-a10b-claude-distill-v2-i1",
-                "qwen3.6-35b-a3b",
-                "qwen3.5-122b-a10b-claude-distill-v2-i1",
-            ),
-            # Nemotron (131K) vs polaris (256K) → nemotron wins
-            (
-                "nemotron-cascade-2-30b-a3b",
-                "qwen3.5-9b-polaris-highiq-thinking-i1",
-                "nemotron-cascade-2-30b-a3b",
-            ),
-            # Unknown model A (resolves to DEFAULT_PROFILE 16K) vs polaris
-            # (256K) → the unknown wins because it's the most conservative
-            (
-                "some-unknown-model-id",
-                "qwen3.5-9b-polaris-highiq-thinking-i1",
-                "some-unknown-model-id",
-            ),
-        ],
-    )
-    def test_smaller_window_wins(
-        self, model_a: str, model_b: str, expected_tighter: str
+        assert tighter == 131_072
+
+    @pytest.mark.asyncio
+    async def test_order_does_not_matter(self) -> None:
+        models_service = AsyncMock()
+        models_service.get_max_context_length = AsyncMock(
+            side_effect=lambda model_id: {"model-a": 262_144, "model-b": 131_072}[model_id]
+        )
+
+        tighter = await _pick_tighter_ctx_window(models_service, "model-a", "model-b")
+
+        assert tighter == 131_072
+
+    @pytest.mark.asyncio
+    async def test_equal_windows_pick_that_shared_value(self) -> None:
+        models_service = AsyncMock()
+        models_service.get_max_context_length = AsyncMock(return_value=131_072)
+
+        tighter = await _pick_tighter_ctx_window(models_service, "model-a", "model-b")
+
+        assert tighter == 131_072
+
+    @pytest.mark.asyncio
+    async def test_one_unresolved_uses_the_other_resolved_window(self) -> None:
+        """A pane whose probe comes back 0 (unknown to the cache) is
+        excluded from the comparison rather than treated as "smallest" —
+        the known window wins, not a guess about the unknown one."""
+        models_service = AsyncMock()
+        models_service.get_max_context_length = AsyncMock(
+            side_effect=lambda model_id: {"model-a": 0, "model-b": 262_144}[model_id]
+        )
+
+        tighter = await _pick_tighter_ctx_window(models_service, "model-a", "model-b")
+
+        assert tighter == 262_144
+
+    @pytest.mark.asyncio
+    async def test_both_unresolved_yields_none(self) -> None:
+        """Neither pane's window resolves -> None, so
+        ``trim_rag_context_for_model`` falls back to its own fixed
+        "window unknown" floor — never a per-model-name guess."""
+        models_service = AsyncMock()
+        models_service.get_max_context_length = AsyncMock(return_value=0)
+
+        tighter = await _pick_tighter_ctx_window(models_service, "model-a", "model-b")
+
+        assert tighter is None
+
+    @pytest.mark.asyncio
+    async def test_no_model_name_drives_the_result_only_the_reported_numbers(
+        self,
     ) -> None:
-        # Replicate the inline pick (same expression as the route).
-        window_a = resolve_profile(model_a).context_window
-        window_b = resolve_profile(model_b).context_window
-        tighter_model = model_a if window_a <= window_b else model_b
-        assert tighter_model == expected_tighter
+        """Same two reported numbers, completely different (nonsense) model
+        id strings — the result is identical. Locks in that this pick is
+        name-independent, unlike the removed ``resolve_profile``-based
+        version this replaced."""
+        models_service_1 = AsyncMock()
+        models_service_1.get_max_context_length = AsyncMock(
+            side_effect=lambda model_id: {"qwen3.5-9b-polaris": 131_072, "nemotron": 262_144}[
+                model_id
+            ]
+        )
+        tighter_1 = await _pick_tighter_ctx_window(
+            models_service_1, "qwen3.5-9b-polaris", "nemotron"
+        )
 
-    def test_known_profile_pairs_resolve_to_actual_windows(self) -> None:
-        # Sanity — assert the resolved windows for the seats used in
-        # production so a future ModelProfile change that flips them
-        # gets caught at this test, not via a downstream RAG-overflow.
-        assert resolve_profile(
-            "qwen3.5-122b-a10b-claude-distill-v2-i1"
-        ).context_window == PROFILE_QWEN_DISTILL.context_window  # 131K
-        assert resolve_profile(
-            "qwen3.5-9b-polaris-highiq-thinking-i1"
-        ).context_window == PROFILE_QWEN_POLARIS_9B.context_window  # 256K
-        assert resolve_profile(
-            "nemotron-cascade-2-30b-a3b"
-        ).context_window == PROFILE_NEMOTRON_CASCADE_2.context_window  # 131K
+        windows_2 = {"totally-unknown-model-x": 131_072, "gpt-mystery": 262_144}
+        models_service_2 = AsyncMock()
+        models_service_2.get_max_context_length = AsyncMock(
+            side_effect=lambda model_id: windows_2[model_id]
+        )
+        tighter_2 = await _pick_tighter_ctx_window(
+            models_service_2, "totally-unknown-model-x", "gpt-mystery"
+        )
+
+        assert tighter_1 == tighter_2 == 131_072
 
 
 class TestRagCompositionOrder:

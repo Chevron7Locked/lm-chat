@@ -23,6 +23,7 @@ model can read as the tool result — the same non-fatal-degradation contract
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -43,9 +44,18 @@ __all__ = [
 ]
 
 # Clamp so a misbehaving (or adversarial) tool call can't ask for an
-# unreasonable number of results.
+# unreasonable number of results. LM Chat is built for local models doing
+# deep, tool-heavy research (256-round tool budgets, sub-sessions, quality
+# modes) — 10 was a low ceiling for that kind of turn, not a meaningful
+# safety margin; 25 is the new default ceiling. _WEB_SEARCH_HARD_MAX_TOP_N
+# is the actual backstop against the genuinely adversarial case (an
+# absurd requested count) this comment used to describe — it is never
+# overridable past 100, even via LM_CHAT_WEB_SEARCH_MAX_TOP_N.
 _WEB_SEARCH_MIN_TOP_N = 1
-_WEB_SEARCH_MAX_TOP_N = 10
+_WEB_SEARCH_HARD_MAX_TOP_N = 100
+_WEB_SEARCH_MAX_TOP_N = min(
+    int(os.getenv("LM_CHAT_WEB_SEARCH_MAX_TOP_N", "25")), _WEB_SEARCH_HARD_MAX_TOP_N
+)
 _WEB_SEARCH_DEFAULT_TOP_N = 5
 
 

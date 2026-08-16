@@ -60,6 +60,22 @@ _AUTH_FAILED_BACKOFF_SEC: float = 60.0
 # flood of resolution misses from triggering N upstream probes.
 _FORCED_REPROBE_MIN_INTERVAL: float = 5.0
 
+# TTL for GET /api/lmstudio/health's own re-probe gate (live_health()).
+# Deliberately INDEPENDENT of loaded_models_ttl (default 5 s, used by
+# resolve_to_loaded_or_fallback) — that TTL must stay tight because it
+# guards chat-turn correctness (detecting an externally-unloaded model
+# before dispatch). The health badge has no such per-request correctness
+# requirement, so it uses its own, coarser TTL sized against the FE
+# poll cadence (useLmStudioHealth.ts polls every 10 s): a TTL of 3x the
+# poll interval means ~2 of every 3 polls are served from cache, cutting
+# a continuously-open browser tab from ~6 upstream catalog probes/minute
+# down to ~2/minute, while still detecting an LM Studio outage within
+# one TTL window plus at most one poll interval (~40 s worst case, not
+# minutes). Both TTLs gate the SAME underlying cache/timestamp — a probe
+# triggered by one path also satisfies the other's freshness check, so
+# this never causes a second, duplicate probe.
+_HEALTH_PROBE_TTL_SEC: float = 30.0
+
 log = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -367,7 +383,7 @@ class ModelsService:
         *,
         http_client: httpx.AsyncClient,
         base_url: str,
-        long_op_timeout_seconds: float = 600.0,
+        long_op_timeout_seconds: float = 1800.0,
         params_service: ParamsService | None = None,
         loaded_models_ttl: float = _FORCED_REPROBE_MIN_INTERVAL,
     ) -> None:
@@ -378,7 +394,7 @@ class ModelsService:
                                       with the LM Studio API key by the caller).
             base_url:                 LM Studio base URL, e.g. ``"http://localhost:1234"``.
             long_op_timeout_seconds:  httpx timeout for load/download operations (seconds).
-                                      Default 600 s (10 min).  Sourced from
+                                      Default 1800 s (30 min).  Sourced from
                                       ``Settings.lm_chat_lmstudio_long_op_timeout_seconds``.
             params_service:           Rejected-param cache.  When set,
                                       ``refresh()`` clears a model's rejected params
@@ -470,9 +486,10 @@ class ModelsService:
     async def live_health(self) -> dict[str, object]:
         """Return a live reachability snapshot for GET /api/lmstudio/health.
 
-        Calls :meth:`_refresh_if_loaded_cache_stale` to trigger an upstream
-        probe if the cache is stale (honouring the TTL and 401 backoff),
-        then returns the most recently observed probe state::
+        Calls :meth:`_refresh_if_loaded_cache_stale` with the health-only
+        ``_HEALTH_PROBE_TTL_SEC`` (30 s) to trigger an upstream probe if the
+        cache is stale (honouring the TTL and 401 backoff), then returns the
+        most recently observed probe state::
 
             {
                 "reachable":    bool,        # True = LM Studio answered the probe
@@ -485,9 +502,14 @@ class ModelsService:
         / timeout / DNS failure), even if the catalog cache still holds
         stale data. ``auth_failed=True`` is a separate dimension — LM
         Studio IS reachable but rejected the API key.
+
+        This TTL is intentionally separate from ``self._loaded_models_ttl``
+        (used by ``resolve_to_loaded_or_fallback`` for chat-turn model
+        resolution) — see ``_HEALTH_PROBE_TTL_SEC`` for why. Both gate the
+        same cache, so a probe triggered from either path freshens both.
         """
         # Re-probe if stale (respects TTL and 401 backoff).
-        await self._refresh_if_loaded_cache_stale(self._loaded_models_ttl)
+        await self._refresh_if_loaded_cache_stale(_HEALTH_PROBE_TTL_SEC)
         models = list(self._cache or [])
         loaded_count = sum(
             1 for m in models if m.type == "llm" and m.loaded_instance_ids
@@ -1441,7 +1463,7 @@ class ModelsService:
 def make_models_service(
     http_client: httpx.AsyncClient,
     base_url: str,
-    long_op_timeout_seconds: float = 600.0,
+    long_op_timeout_seconds: float = 1800.0,
     params_service: ParamsService | None = None,
     loaded_models_ttl: float = _FORCED_REPROBE_MIN_INTERVAL,
 ) -> ModelsService:
@@ -1451,7 +1473,7 @@ def make_models_service(
         http_client:              Shared ``httpx.AsyncClient`` with auth headers set.
         base_url:                 LM Studio base URL.
         long_op_timeout_seconds:  Timeout for load/download operations in seconds.
-                                  Sourced from
+                                  Default 1800 s (30 min).  Sourced from
                                   ``Settings.lm_chat_lmstudio_long_op_timeout_seconds``.
         params_service:           Optional rejected-param cache; see
                                   :meth:`ModelsService.__init__`.

@@ -346,7 +346,7 @@ def test_oob_aux_timeouts_generous_for_slow_reasoning_models() -> None:
 
     Auto-title and compaction-summary now source their budget from
     ``ChatService._aux_model_timeout_sec`` (wired from
-    ``settings.lm_chat_aux_model_timeout_sec``, default 900.0) rather than a
+    ``settings.lm_chat_aux_model_timeout_sec``, default 1800.0) rather than a
     module constant — local models are naturally slow and nothing waits on
     these background calls, so the default is generous by design.
     """

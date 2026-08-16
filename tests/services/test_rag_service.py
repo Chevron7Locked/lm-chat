@@ -1344,3 +1344,148 @@ async def test_augment_prompt_focused_enforces_budget_drops_overflow(
     # the ~94-token UNCAPPED chunk size this would be without
     # enforcement.
     assert len(enc.encode(doc_section)) <= budget_tokens + 20
+
+
+# ---------------------------------------------------------------------------
+# ctx_window threading (2026-08-15) — AugmentedPrompt exposes the LIVE-probed
+# context window (the same value rag_inject_budget already used to build
+# context_block) so trim_rag_context_for_model can reuse it instead of
+# re-deriving a smaller static ModelProfile guess for the same turn.
+# ---------------------------------------------------------------------------
+
+
+async def test_ctx_window_reflects_live_probe_not_static_default(
+    engine: AsyncEngine,
+) -> None:
+    """AugmentedPrompt.ctx_window carries the model's REAL loaded context
+    length (262_144), sourced purely from the live probe
+    (``ModelsService.get_max_context_length``) — ``ModelProfile`` no longer
+    has a ``context_window`` field at all, so there is no static table to
+    have fallen back to; this is the only source of truth.
+    """
+    await _insert_user(engine, 1)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT OR IGNORE INTO chats (id, user_id, title, settings, model_id)"
+                " VALUES (:id, :uid, :t, :s, :mid)"
+            ),
+            {
+                "id": 30,
+                "uid": 1,
+                "t": "live window chat",
+                "s": '{"rag_enabled": true}',
+                "mid": "some-unprofiled-model-id",
+            },
+        )
+
+    memory_svc = _make_memory_service(recalled=[])
+    memory_svc.list_pinned = AsyncMock(return_value=[])
+    memory_svc.recall_insights = AsyncMock(return_value=[])
+    models_svc = _make_models_service()
+    # The operator's own fleet reports loaded_context_length: 262144 for a
+    # real model with no static ModelProfile row — this is that shape.
+    models_svc.get_max_context_length = AsyncMock(return_value=262_144)
+
+    with patch(
+        "lmchat.services.rag_service.retrieve",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        result = await augment_prompt(
+            chat_id=30,
+            user_id=1,
+            current_message="hello",
+            engine=engine,
+            embedding_client=_make_embedding_client(),
+            models_service=models_svc,
+            memory_service=memory_svc,
+            top_k=5,
+        )
+
+    assert result.ctx_window == 262_144
+
+
+async def test_trim_uses_threaded_ctx_window_not_static_default(
+    engine: AsyncEngine,
+) -> None:
+    """End-to-end regression for the fix: probe -> AugmentedPrompt.ctx_window
+    -> trim_rag_context_for_model. The fixed "unknown window" floor
+    (~12_288 chars) would trim a ~30K-char block; threading the live
+    262_144-token window through (~196_608-char budget) lets the SAME block
+    pass untouched — proportionally larger, not just numerically different,
+    and driven entirely by the live number, not a model_id lookup.
+    """
+    from datetime import UTC, datetime
+
+    from lmchat.services.memory_service import MemoryInsight
+    from lmchat.services.rag_service import trim_rag_context_for_model
+
+    await _insert_user(engine, 1)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT OR IGNORE INTO chats (id, user_id, title, settings, model_id)"
+                " VALUES (:id, :uid, :t, :s, :mid)"
+            ),
+            {
+                "id": 31,
+                "uid": 1,
+                "t": "live window chat 2",
+                "s": '{"rag_enabled": true}',
+                "mid": "some-unprofiled-model-id",
+            },
+        )
+
+    # Pinned insights are injected verbatim (no per-hit excerpt cap, unlike
+    # memory/doc hits) — the simplest way to build a single context block
+    # large enough to actually exercise the trim boundary.
+    big_insight = MemoryInsight(
+        id=1,
+        user_id=1,
+        text="X" * 30_000,
+        pinned=True,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    memory_svc = _make_memory_service(recalled=[])
+    memory_svc.list_pinned = AsyncMock(return_value=[big_insight])
+    memory_svc.recall_insights = AsyncMock(return_value=[])
+    models_svc = _make_models_service()
+    models_svc.get_max_context_length = AsyncMock(return_value=262_144)
+
+    with patch(
+        "lmchat.services.rag_service.retrieve",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        result = await augment_prompt(
+            chat_id=31,
+            user_id=1,
+            current_message="hello",
+            engine=engine,
+            embedding_client=_make_embedding_client(),
+            models_service=models_svc,
+            memory_service=memory_svc,
+            top_k=5,
+        )
+
+    assert result.ctx_window == 262_144
+    assert len(result.context_block) > 12_288  # over the unresolved-floor budget
+
+    # Unresolved-floor budget (as if ctx_window were never threaded
+    # through, e.g. before this fix) — the fixed 16_384-token floor fires
+    # the trim on this block.
+    stale_trimmed, _, stale_fired = trim_rag_context_for_model(
+        result.context_block, None
+    )
+    assert stale_fired is True
+
+    # Threaded live window (the fix) — the same block passes through
+    # untouched, and its untrimmed length is strictly greater than what the
+    # unresolved-floor path kept.
+    live_trimmed, _, live_fired = trim_rag_context_for_model(
+        result.context_block, result.ctx_window
+    )
+    assert live_fired is False
+    assert live_trimmed == result.context_block
+    assert len(live_trimmed) > len(stale_trimmed)

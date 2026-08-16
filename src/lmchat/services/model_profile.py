@@ -11,18 +11,20 @@ The registry exists so per-model quirks for LM Studio integrations live in
 ONE row, not scattered ``"<name>" in model_id`` conditionals. One file a
 contributor can read to understand all model-family wire-knob decisions.
 
-**Context-window discipline.** The ``context_window`` field on the
-DEFAULT_PROFILE stays conservatively LOW (16K) — when a request arrives
-for a model we haven't explicitly profiled, we assume small. This
-drives the RAG budget calculation in
-:func:`lmchat.services.rag_service.compute_rag_budget_chars` directly:
-``window * 0.25 * 3.0 chars/token``. Explicit profiles override with
-the actual window — they are the place to be generous, not the default.
-The 0.25×3.0 fraction is correct for web-chat (system prompt + chat
-history + user message + response budget all compete with retrieval —
-unlike an agentic tool-loop eviction shape where the tool corpus owns the
-entire window). The right correction was lowering DEFAULT, not changing
-the fraction.
+**No context-window field.** This registry does NOT carry a
+``context_window`` — every provider LM Chat talks to already reports its
+own context window live (LM Studio's per-instance
+``loaded_context_length``; the cloud/OpenRouter-shape catalog's own
+``context_length``), surfaced through
+:meth:`lmchat.services.models_service.ModelsService.get_max_context_length`.
+A per-model-family substring table would be redundant with that live
+signal at best, and silently wrong for the many real models this
+registry has no row for at worst — this is a public app, not a fleet
+roster. RAG's context-budget calculation
+(:func:`lmchat.services.rag_service.compute_rag_budget_chars`) consumes
+the live-probed window directly and falls back to a fixed, provider-
+agnostic floor only when a turn's probe is genuinely unresolved — never
+to a name-matched guess. See that module for the floor and its rationale.
 """
 from __future__ import annotations
 
@@ -39,17 +41,6 @@ class ModelProfile:
 
     #: Output budget to inject. ``None`` = leave unset (LM Studio default).
     max_tokens: int | None = None
-
-    #: Hard ceiling on the seat's context window. Informational for now;
-    #: a future finish=length+empty auto-retry path consumes it. Also
-    #: drives ``rag_service.compute_rag_budget_chars`` — the fraction of
-    #: the window allocated to retrieval. **Default kept conservatively
-    #: LOW** (16K) so an unknown small-window model gets a safe RAG
-    #: budget. A higher default would over-budget RAG on small seats,
-    #: starving the response budget. Explicit profiles override with
-    #: the actual window — they are the place to be generous, not the
-    #: default.
-    context_window: int = 16_384
 
     #: NAME of the sampler bundle to inject. Resolved against
     #: :mod:`lmchat.services.sampler_profiles`. ``"none"`` = inject nothing.
@@ -90,7 +81,6 @@ DEFAULT_PROFILE: Final[ModelProfile] = ModelProfile()
 
 PROFILE_NEMOTRON_CASCADE_2: Final[ModelProfile] = ModelProfile(
     max_tokens=16_384,
-    context_window=131_072,
     sampler_family="none",  # NVIDIA recommends temp 1.0; llama-server default
     strip_reasoning_from_history=True,
     substance_fold=True,
@@ -102,7 +92,6 @@ PROFILE_QWEN_DISTILL: Final[ModelProfile] = ModelProfile(
     # answers in reasoning_content and degrade if prior
     # reasoning bytes ride forward.
     max_tokens=None,
-    context_window=131_072,
     sampler_family="qwen_vendor",
     strip_reasoning_from_history=True,
     substance_fold=True,
@@ -113,7 +102,6 @@ PROFILE_DEEPSEEK_R1_DISTILL: Final[ModelProfile] = ModelProfile(
     # R1-distill chains degrade if prior reasoning_content rides forward
     # in history.
     max_tokens=None,
-    context_window=131_072,
     sampler_family="none",
     strip_reasoning_from_history=True,
     substance_fold=True,
@@ -122,15 +110,13 @@ PROFILE_DEEPSEEK_R1_DISTILL: Final[ModelProfile] = ModelProfile(
 
 PROFILE_QWEN_POLARIS_9B: Final[ModelProfile] = ModelProfile(
     # Qwen3.5-9B-Polaris-HighIQ-Thinking — small local reasoning model.
-    # 256K context window. Generous
-    # ``max_tokens`` because thinking eats budget aggressively and the
-    # silent-empty-content failure mode (substance_fold + auto-retry
+    # Generous ``max_tokens`` because thinking eats budget aggressively and
+    # the silent-empty-content failure mode (substance_fold + auto-retry
     # safety net) needs room before the doubled-budget retry fires.
     # Standard Qwen chat template, no vendor sampler (only the 35b-a3b
     # has published per-task profiles), reasoning-content carried like
     # other thinking Qwens.
     max_tokens=16_384,
-    context_window=262_144,
     sampler_family="none",
     strip_reasoning_from_history=True,
     substance_fold=True,

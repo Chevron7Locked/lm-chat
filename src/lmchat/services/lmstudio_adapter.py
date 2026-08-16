@@ -86,13 +86,20 @@ MTP_SUSPECT_THRESHOLD = int(os.getenv("LM_CHAT_MTP_SUSPECT_THRESHOLD", "20"))
 log = get_logger(__name__)
 
 # Timeout for streaming chat requests.  The connect/write legs are short;
-# the read leg is long to accommodate slow models and long generations.
+# the read leg is 1800 s (30 min) to match settings.lm_chat_stream_idle_timeout_sec
+# — LM Chat is built FOR local models, where slow prompt-processing and long
+# generations are EXPECTED, never a fault. This is the transport-level
+# counterpart to that app-level idle-stall watcher: httpx's own read timeout
+# fires on silence between chunks regardless of what the app-level watcher
+# is configured to, so a shorter value here would abort a legitimately-slow
+# turn before the app's own graceful upstream_stall handling ever sees it.
+# Keep the two in step.
 # This is the SINGLE source of truth — app.py imports it for the lifespan-
 # scoped AsyncClient construction so timeout changes don't require editing
 # two files.
 CHAT_TIMEOUT: Final[httpx.Timeout] = httpx.Timeout(
     connect=5.0,
-    read=600.0,
+    read=1800.0,
     write=10.0,
     pool=5.0,
 )

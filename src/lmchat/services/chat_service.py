@@ -504,7 +504,7 @@ class ChatService:
         memory_service: MemoryService,
         models_service: ModelsService,
         chat_locks: dict[int, asyncio.Lock],
-        aux_model_timeout_sec: float = 900.0,
+        aux_model_timeout_sec: float = 1800.0,
     ) -> None:
         self._engine = engine
         self._memory_service = memory_service

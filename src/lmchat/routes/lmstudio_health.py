@@ -30,10 +30,13 @@ router: APIRouter = APIRouter(prefix="/api", tags=["lmstudio-health"])
     summary="Live LM Studio reachability probe",
     description=(
         "Returns a real-time reachability snapshot from the ModelsService "
-        "5-second-TTL probe.  ``reachable`` is ``false`` when LM Studio "
+        "30-second-TTL probe.  ``reachable`` is ``false`` when LM Studio "
         "is not responding (connection refused / timeout); ``auth_failed`` "
-        "is ``true`` when the upstream returns 401.  Rate-limited by the "
-        "existing 5-second TTL — this endpoint does NOT hammer LM Studio."
+        "is ``true`` when the upstream returns 401.  Rate-limited by a "
+        "30-second TTL dedicated to this endpoint (independent of the "
+        "5-second TTL chat turns use to resolve a loaded model) — the FE "
+        "badge polls every 10 s, so at most 1 in 3 polls reaches LM "
+        "Studio; this endpoint does NOT hammer LM Studio."
     ),
 )
 async def get_lmstudio_health(
@@ -42,8 +45,9 @@ async def get_lmstudio_health(
 ) -> dict[str, Any]:
     """Return the live reachability state of the configured LM Studio instance.
 
-    Callers (the FE badge) should poll at ≥5 s intervals — tighter intervals
-    return the cached probe result without triggering a new upstream request.
+    Callers (the FE badge) poll every 10 s; this endpoint's own 30-second
+    TTL means only about 1 in 3 polls triggers a fresh upstream probe —
+    the rest are served from the cached probe result.
 
     Returns:
         A dict with keys ``reachable`` (bool), ``loaded_count`` (int),

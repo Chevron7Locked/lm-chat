@@ -18,7 +18,7 @@ def test_aux_model_timeout_defaults_generous() -> None:
     auto-memory distillation, follow-up chips) get a generous default budget
     since nothing waits on them."""
     settings = Settings(lm_chat_secret=_SECRET)  # type: ignore[call-arg]
-    assert settings.lm_chat_aux_model_timeout_sec == 900.0
+    assert settings.lm_chat_aux_model_timeout_sec == 1800.0
 
 
 def test_mcp_tool_call_timeout_defaults_local_first() -> None:
@@ -26,7 +26,7 @@ def test_mcp_tool_call_timeout_defaults_local_first() -> None:
     ``lm_chat_stream_idle_timeout_sec`` rather than a short cloud-latency
     number."""
     settings = Settings(lm_chat_secret=_SECRET)  # type: ignore[call-arg]
-    assert settings.lm_chat_mcp_tool_call_timeout_sec == 300.0
+    assert settings.lm_chat_mcp_tool_call_timeout_sec == 1800.0
     assert (
         settings.lm_chat_mcp_tool_call_timeout_sec
         == settings.lm_chat_stream_idle_timeout_sec

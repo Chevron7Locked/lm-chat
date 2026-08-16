@@ -452,6 +452,7 @@ async def test_replay_rag_block_in_system_prompt(engine: AsyncEngine) -> None:
         context_block = RAG_BLOCK
         memory_hits = 1
         doc_hits = 1
+        ctx_window = 0
 
     # We also need a fake embedding_client so the `if self._embedding_client`
     # guard is True, and a models_service for the same guard.

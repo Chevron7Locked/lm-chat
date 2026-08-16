@@ -82,7 +82,11 @@ _CONNECT_TIMEOUT_SEC: float = 30.0
 #: Call timeout per tool invocation (seconds). Mirrors
 #: settings.lm_chat_mcp_tool_call_timeout_sec — a slow local tool (or one
 #: that itself calls a model) shouldn't be cut at a cloud-latency number.
-_CALL_TIMEOUT_SEC: float = 300.0
+#: Keep this in step with that setting's default: app.py always passes the
+#: configured value, so this constant is only the fallback for a directly
+#: constructed McpHost, and a stale value here would reintroduce a short cap
+#: on exactly the path the setting exists to keep generous.
+_CALL_TIMEOUT_SEC: float = 1800.0
 
 #: Grace period to await a session task's clean self-teardown before cancelling.
 PROCESS_REAP_TIMEOUT: float = 5.0

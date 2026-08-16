@@ -409,3 +409,59 @@ async def test_live_health_down_state_rate_limits_probes() -> None:
         "Down-state probe storm: expected exactly 1 upstream GET, "
         f"got {mock_client.get.call_count}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Poll-storm fix: live_health() uses its OWN TTL, decoupled from the
+# 5-second loaded_models_ttl chat turns rely on for resolution freshness.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_live_health_ttl_survives_realistic_fe_poll_cadence() -> None:
+    """Pins the FE poll-storm fix: 10 s polls hit LM Studio ~2x/minute.
+
+    Reproduces the production scenario directly: useLmStudioHealth.ts polls
+    GET /api/lmstudio/health every 10 s from an idle tab. Before the fix,
+    live_health() shared the 5-second loaded_models_ttl with chat-turn model
+    resolution, so EVERY 10 s poll found the cache stale (10 s > 5 s) and
+    re-probed LM Studio — ~6 probes/minute forever from one idle tab. The
+    fix gives live_health() its own 30-second TTL (_HEALTH_PROBE_TTL_SEC),
+    independent of loaded_models_ttl, so only 1 in 3 polls reaches LM
+    Studio.
+
+    Simulates 8 polls spaced 10 s apart (70 s of wall-clock, matching the
+    real poll interval) against a deterministic monotonic clock and asserts
+    EXACTLY 3 upstream probes fire (at t=0, t=30, t=60) — pinning both
+    halves of the fix: load is down from 8 (one per poll) to 3, and the
+    badge still re-probes at least once every 30 s rather than going stale
+    for minutes.
+    """
+    from unittest.mock import patch
+
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json = MagicMock(return_value={"models": []})
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get = AsyncMock(return_value=mock_response)
+
+    svc = ModelsService(http_client=mock_client, base_url="http://localhost:1234")
+
+    # Monotonic clock starts at a realistic (nonzero) process-uptime value
+    # — matches real time.monotonic() semantics, where the cache's initial
+    # "never probed" sentinel (0.0) is always in the far past, so the very
+    # first poll always triggers a probe (as it would in production).
+    fake_time = 1_000.0
+
+    with patch("lmchat.services.models_service.time") as mock_time:
+        mock_time.monotonic.side_effect = lambda: fake_time
+
+        for _ in range(8):  # polls at t = 1000, 1010, ..., 1070
+            await svc.live_health()
+            fake_time += 10.0
+
+    assert mock_client.get.call_count == 3, (
+        "Expected exactly 3 upstream probes for 8 polls @ 10 s over a "
+        "30 s TTL (probes at t=0, 30, 60); got "
+        f"{mock_client.get.call_count}"
+    )

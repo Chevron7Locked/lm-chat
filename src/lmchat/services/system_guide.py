@@ -153,7 +153,11 @@ _EMBED_CHUNK_SIZE = 8
 # turn-scoped timeout on this exact work is what made the semantic engine
 # permanently dead in production before this background split — every
 # turn cancelled it before it could finish, so the matrix never cached.
-_BACKGROUND_EMBED_TIMEOUT_SEC = 300.0
+# 1800 s (30 min) matches the app-wide local-first posture: the measured
+# ~34s is nowhere near this ceiling, but each chunk is itself a call to a
+# local embedding model, and this timeout must never be the thing that
+# re-kills the semantic engine on slow hardware or a large corpus.
+_BACKGROUND_EMBED_TIMEOUT_SEC = 1800.0
 
 # Cap on the total size of a search_guide() result — generous (top sections
 # are usually far smaller), but bounds a pathological very-large section.

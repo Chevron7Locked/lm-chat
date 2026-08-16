@@ -123,12 +123,15 @@ class Settings(BaseSettings):
     lm_chat_reaper_finalization_timeout_sec: int = Field(default=5, ge=1)
     lm_chat_reaper_draft_max_age_hours: int = Field(default=24, ge=1)
     # Seconds with no content-bearing OR heartbeat (prompt_processing.*) event
-    # before an ``upstream_stall`` frame is emitted. Generous by default: a
+    # before an ``upstream_stall`` frame is emitted. LM Chat is built FOR local
+    # models, where a slow turn is EXPECTED behaviour and never a fault: a
     # LOCAL model's prompt-processing (time-to-first-token) scales with context
-    # and can take minutes on a large conversation, so a short cap would abort
-    # legitimately-slow generation. Env-overridable (raise it further for very
-    # large contexts / slow hardware).
-    lm_chat_stream_idle_timeout_sec: int = Field(default=300, ge=1)
+    # and routinely takes many minutes on a large conversation. The default is
+    # therefore 1800 s (30 min) — large enough that this only ever catches a
+    # genuinely wedged stream, never legitimately-slow generation. The previous
+    # 300 s default cut real turns in production (2026-08-16, media-server:
+    # ``stream.idle_timeout idle_s=300.0``). Env-overridable.
+    lm_chat_stream_idle_timeout_sec: int = Field(default=1800, ge=1)
     # Per-user stream rate limit (POST /api/chat/stream).
     # Default: 30 streams per minute (rate=0.5/s, burst=30).
     lm_chat_stream_rate_limit_per_min: int = Field(default=30, ge=1)
@@ -138,12 +141,12 @@ class Settings(BaseSettings):
     # waits on these turns, so give them a generous local-first budget — the
     # only reason to bound at all is so a wedged call can't hold the
     # background-aux queue forever. Override via LM_CHAT_AUX_MODEL_TIMEOUT_SEC.
-    lm_chat_aux_model_timeout_sec: float = Field(default=900.0, ge=1)
+    lm_chat_aux_model_timeout_sec: float = Field(default=1800.0, ge=1)
     # MCP tool-call budget. A slow local tool (or one that itself calls a
     # model) shouldn't be cut at a cloud-latency number. Aligned with
     # lm_chat_stream_idle_timeout_sec since MCP calls are on the turn path.
     # Override via LM_CHAT_MCP_TOOL_CALL_TIMEOUT_SEC.
-    lm_chat_mcp_tool_call_timeout_sec: float = Field(default=300.0, ge=1)
+    lm_chat_mcp_tool_call_timeout_sec: float = Field(default=1800.0, ge=1)
 
     # Per-admin-user rate limit for admin routes.
     # Default: 30 requests per minute (rate=0.5/s, burst=30).
@@ -263,17 +266,20 @@ class Settings(BaseSettings):
     lm_chat_sub_session_output_max_chars: int = Field(default=8000)
 
     # Long-operation timeout for model load / download upstream calls.
-    # Model loading can take 10–120 s (7B–120B range on MLX/GGUF).
-    # Download of large models can take many minutes.
+    # Model loading can take 10-120 s (7B-120B range on MLX/GGUF).
+    # Download of large models over a slow connection can take far longer
+    # than "many minutes". LM Chat is built FOR local models, so this is
+    # generous by design (1800 s / 30 min) rather than a cloud-latency
+    # number — a too-short timeout here is an app bug, not a slow model.
     # This timeout governs the httpx request timeout for those endpoints.
     # Unload uses the standard 30 s timeout (fast operation).
     # Override via LM_CHAT_LMSTUDIO_LONG_OP_TIMEOUT_SECONDS.
     lm_chat_lmstudio_long_op_timeout_seconds: float = Field(
-        default=600.0,
+        default=1800.0,
         ge=1.0,
         description=(
             "httpx timeout (seconds) for long-running LM Studio operations "
-            "(model load and download). Default 600 s (10 min)."
+            "(model load and download). Default 1800 s (30 min)."
         ),
     )
 
