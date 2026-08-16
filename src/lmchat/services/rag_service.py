@@ -56,12 +56,12 @@ class AugmentedPrompt(BaseModel):
             tokens, as resolved internally via ``_resolve_chat_ctx_window``
             (same lookup ``rag_inject_budget`` above already consumed).
             ``0`` when unresolved (RAG disabled for this turn, or the probe
-            failed) — callers must treat ``0`` as "unknown" and fall back
-            to a static profile, exactly like ``rag_inject_budget`` does.
-            Exposed so callers (``streaming_service._assemble_system_prompt``)
-            can reuse this single already-probed value for
-            ``trim_rag_context_for_model`` too, instead of re-deriving a
-            second, static-table guess for the same turn.
+            failed) — callers must treat ``0`` as "unknown" and fall back to
+            a fixed conservative floor, exactly like ``rag_inject_budget``
+            does. Exposed so callers (``streaming_service._assemble_system_
+            prompt``) can reuse this single already-probed value for
+            ``trim_rag_context_for_model`` too, instead of probing again for
+            the same turn.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -84,11 +84,18 @@ async def _resolve_chat_ctx_window(
     chat_model_id: str | None,
     models_service: ModelsService,
 ) -> int:
-    """Resolve the active model's real context window for RAG-mode selection.
+    """Resolve the active model's real context window.
 
-    Reuses :meth:`ModelsService.get_max_context_length` — the same lookup the
-    streaming service's integrations budget gate uses. Prefers the chat's
-    persisted ``chats.model_id``; falls back to the first loaded LLM instance.
+    Drives RAG-mode selection (``resolve_rag_mode``) AND the RAG char/token
+    budget (``compute_rag_budget_chars`` / ``rag_inject_budget``, via
+    ``AugmentedPrompt.ctx_window`` — see ``augment_prompt``, which calls this
+    unconditionally, not only when ``rag_enabled``). Reuses
+    :meth:`ModelsService.get_max_context_length` — the same lookup the
+    streaming service's integrations budget gate uses; provider-agnostic
+    (LM Studio's live ``loaded_context_length`` or a cloud/OpenRouter-shape
+    catalog's own ``context_length``), never a model-name table. Prefers the
+    chat's persisted ``chats.model_id``; falls back to the first loaded LLM
+    instance.
 
     Fail-soft: any resolution failure returns 0. Callers treat 0 as "context
     window unknown" and skip INLINE eligibility — :func:`compute_rag_threshold`
@@ -224,6 +231,20 @@ async def augment_prompt(
     chat_project_id: int | None = row.project_id  # type: ignore[assignment]
     chat_model_id: str | None = row.model_id  # type: ignore[assignment]
 
+    # The active model's real loaded context window — resolved ONCE, here,
+    # UNCONDITIONALLY (not gated on rag_enabled below): pinned insights and
+    # auto-distilled insights are injected regardless of rag_enabled, so a
+    # turn that only carries those still needs a real window to budget
+    # against in the AugmentedPrompt.ctx_window returned at the bottom of
+    # this function. models_service is always provided (non-Optional
+    # param), so this probe is always cheap to attempt — see
+    # _resolve_chat_ctx_window for the fallback chain and the fail-soft
+    # "0 == unknown" contract it already implements internally.
+    chat_ctx_window = await _resolve_chat_ctx_window(
+        chat_model_id=chat_model_id,
+        models_service=models_service,
+    )
+
     # rag_enabled: an explicit per-chat toggle always wins; unset defaults ON
     # when an embedding model is available. Fail-soft: resolver error → False.
     if "rag_enabled" in settings:
@@ -317,12 +338,6 @@ async def augment_prompt(
     # retrieval), INLINE (small project corpus, inject all chunks, bypass
     # retrieve()), HYBRID (fall through to retrieve()).
     doc_sections: list[str] = []
-    # Hoisted above the try/rag_enabled gate (rather than left as a plain
-    # local inside it) so it's always bound by the time the return
-    # statements below build AugmentedPrompt — 0 when RAG is disabled for
-    # this turn or the probe fails, matching rag_inject_budget's "0 ==
-    # unresolved" contract.
-    chat_ctx_window: int = 0
     if rag_enabled:
         try:
             from lmchat.services.rag_mode_resolver import (  # noqa: PLC0415
@@ -347,13 +362,8 @@ async def augment_prompt(
                 if threshold_row is not None:
                     project_rag_threshold = threshold_row.rag_threshold
 
-            # ctx_window: the active model's real loaded context window; see
-            # _resolve_chat_ctx_window for the fallback chain and the
-            # fail-soft "0 == unknown" contract.
-            chat_ctx_window = await _resolve_chat_ctx_window(
-                chat_model_id=chat_model_id,
-                models_service=models_service,
-            )
+            # chat_ctx_window is resolved ONCE, unconditionally, above —
+            # reused here rather than re-probed.
 
             # Only estimated when ctx_window is known — an unresolved
             # ctx_window must not be treated as a real 1-token threshold;

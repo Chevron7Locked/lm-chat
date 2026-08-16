@@ -346,3 +346,98 @@ test(
     assertNoConsoleErrors(collectErrors(), "j13b");
   },
 );
+
+test(
+  "j13c: submitting a NEW turn in chat B while chat A is mid-stream must not " +
+    "abort A's generation (shared-AbortController cross-chat abort)",
+  async ({ page, backendURL, adminUsername, adminPassword }) => {
+    test.setTimeout(3_600_000);
+    const collectErrors = attachErrorCollector(page);
+
+    await loginAndWait(page, backendURL, adminUsername, adminPassword);
+    const fleet = await classifyFleet(page, backendURL);
+    await configureLmStudio(page, backendURL, fleet.fastId);
+
+    const chatIdA = await createChatViaRequest(page, backendURL, "J13c Cross-abort A");
+    const chatIdB = await createChatViaRequest(page, backendURL, "J13c Cross-abort B");
+
+    await page.goto(`${backendURL}/chats/${String(chatIdA)}`);
+    await waitForModelSelector(page);
+    await sendPromptUntilStreaming(page, LONG_PROMPT);
+    await expect(
+      page.getByRole("button", { name: "Stop generation" }),
+    ).toBeVisible({ timeout: 5_000 });
+
+    // Baseline: how much of A had already streamed into the DOM before the
+    // switch. A is still 'draft' at this point (excluded from GET
+    // /api/chats/{id} — see message_service.py's list_for_chat), so the DOM
+    // is the only readable signal here; it becomes the floor A's FINAL
+    // persisted content must clear, below.
+    const domLenBeforeSwitch = (
+      await page.locator('[data-message-role="assistant"]').last().innerText()
+    ).length;
+
+    // --- THE ACT — navigate to B and ACTUALLY SUBMIT A NEW TURN THERE,
+    // while A is still generating. This is the exact gap J13a/J13b don't
+    // cover: they navigate and dwell/queue, but never submit in B. Before
+    // the per-chat AbortController fix (streamStore.ts start(): `const
+    // abortControllers = new Map<number, AbortController>()`), starting B's
+    // stream called the SHARED module-level AbortController's abort(),
+    // killing A's in-flight fetch too — work lost, no warning.
+    await navigateToChatInSpa(page, chatIdB);
+    expect(await page.locator("[data-message-role]").count()).toBe(0);
+    const shortPrompt = "In one short sentence, name the capital of France.";
+    await sendPromptUntilStreaming(page, shortPrompt);
+
+    // B's own turn must complete normally — proves B wasn't collaterally
+    // broken by whatever guard fixes A.
+    await expect
+      .poll(
+        async () => (await getChat(page, backendURL, chatIdB)).messages.length,
+        { timeout: TURN_TIMEOUT_MS },
+      )
+      .toBe(2);
+    const finalB = await getChat(page, backendURL, chatIdB);
+    expect(finalB.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(
+      (finalB.messages[1]?.content ?? "").length,
+      "B's own turn produced empty content",
+    ).toBeGreaterThan(0);
+
+    // --- GROUND TRUTH — A survived the whole detour through B and
+    // completed with GROWING content, not frozen at whatever it had when B
+    // fired. A frozen/short final length is exactly what an abort looks
+    // like (A stops receiving deltas the instant B's fetch aborts the
+    // shared controller); a non-empty-but-short answer would still pass a
+    // bare ">0 chars" check, so the load-bearing comparison is against the
+    // pre-switch DOM floor, not zero. ---
+    await navigateToChatInSpa(page, chatIdA);
+    await expect(page.getByTestId("composer-send-btn")).toHaveText(/Send$/, {
+      timeout: TURN_TIMEOUT_MS,
+    });
+    expect(
+      await page.getByTestId("chat-stream-error").count(),
+      "chat A shows a stream-error banner after the detour through B — " +
+        "A's fetch was aborted/errored by B's submit",
+    ).toBe(0);
+    const afterA = await getChat(page, backendURL, chatIdA);
+    expect(
+      afterA.messages.map((m) => m.role),
+      `expected [user, assistant] in A, got: ${JSON.stringify(afterA.messages.map((m) => m.role))}`,
+    ).toEqual(["user", "assistant"]);
+    const aFinalLen = afterA.messages[1]?.content.length ?? 0;
+    expect(
+      aFinalLen,
+      "A's assistant content is empty — B's submit killed A's stream " +
+        "(the exact shared-AbortController cross-chat abort bug)",
+    ).toBeGreaterThan(0);
+    expect(
+      aFinalLen >= domLenBeforeSwitch,
+      `A's final persisted content (${String(aFinalLen)} chars) is SHORTER than what had ` +
+        `already streamed before the switch to B (${String(domLenBeforeSwitch)} chars) — ` +
+        "A's generation was cut short by B's submit, not merely still finishing",
+    ).toBe(true);
+
+    assertNoConsoleErrors(collectErrors(), "j13c");
+  },
+);

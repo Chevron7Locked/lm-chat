@@ -183,3 +183,116 @@ test(
     assertNoConsoleErrors(collectErrors(), "j6");
   },
 );
+
+// A shipped defect clamped top_n to 10 regardless of what the model asked
+// for (builtin_tools.py's _coerce_top_n against a stale _WEB_SEARCH_MAX_TOP_N).
+// j6 above proves the tool fires and succeeds — a binary check that cannot
+// see a smaller-than-requested result set. j6b proves MAGNITUDE: an
+// explicit, well-above-10 top_n request is actually honored.
+const MAGNITUDE_TOP_N_REQUEST = 20;
+// The exact value of the old, shipped, broken clamp — a result count AT or
+// UNDER this for a broad query is the regression signature (real DDG
+// scarcity for a broad news query is possible but unlikely).
+const OLD_BROKEN_TOP_N_CLAMP = 10;
+
+test(
+  "j6b: an explicit top_n well above the OLD broken clamp (10) is honored, " +
+    "not silently re-clamped (grey-box magnitude check)",
+  async ({ page, backendURL, backendLogPath, adminUsername, adminPassword }) => {
+    test.setTimeout(3_600_000);
+    const collectErrors = attachErrorCollector(page);
+
+    await loginAndWait(page, backendURL, adminUsername, adminPassword);
+    const fleet = await classifyFleet(page, backendURL);
+    const _rawSearchProvider =
+      process.env["LMCHAT_DOGFOOD_SEARCH_PROVIDER"] ?? "ddg";
+    const searchProvider: "searxng" | "ddg" | "brave" | "brave_llm" =
+      _rawSearchProvider === "searxng" ||
+      _rawSearchProvider === "ddg" ||
+      _rawSearchProvider === "brave" ||
+      _rawSearchProvider === "brave_llm"
+        ? _rawSearchProvider
+        : "ddg";
+    await configureLmStudio(page, backendURL, fleet.fastId);
+    await setWebSearchProvider(page, backendURL, searchProvider);
+
+    const modeResp = await page.request.patch(
+      `${backendURL}/api/settings/lmstudio/endpoint-mode`,
+      { data: { endpoint_mode: "openai_compat" } },
+    );
+    expect(
+      modeResp.ok(),
+      `endpoint-mode=openai_compat → HTTP ${String(modeResp.status())}`,
+    ).toBe(true);
+
+    const chatId = await createChatViaRequest(page, backendURL, "J6b web_search top_n");
+    await page.goto(`${backendURL}/chats/${String(chatId)}`);
+    await page.waitForFunction(
+      () => {
+        const sel = document.querySelector<HTMLSelectElement>(
+          '[data-testid="chat-header-model-select"]',
+        );
+        if (sel === null) return false;
+        return sel.value !== "" && sel.options.length > 1;
+      },
+      null,
+      { timeout: 30_000 },
+    );
+
+    // Explicit, forceful top_n instruction — comfortably above the OLD
+    // broken clamp and under the CURRENT one (builtin_tools.py
+    // _WEB_SEARCH_MAX_TOP_N, default 25 unless LM_CHAT_WEB_SEARCH_MAX_TOP_N
+    // is set lower — this journey does not assume a specific value beyond
+    // "greater than the old broken 10").
+    await sendTurnAndWait(
+      page,
+      `Call the web_search tool with top_n set to exactly ${String(MAGNITUDE_TOP_N_REQUEST)}. ` +
+        "Search for: recent technology industry news headlines. Do not " +
+        "narrate — just call the tool with that top_n value.",
+      TURN_TIMEOUT_MS,
+    );
+
+    assertNoLogLine(
+      backendLogPath,
+      ["builtin_tools.web_search.unavailable"],
+      "web_search executor reported unavailable (config/env not wired)",
+    );
+    assertNoLogLine(
+      backendLogPath,
+      ["builtin_tools.web_search.error"],
+      "web_search executor raised (WebSearchService call failed)",
+    );
+
+    // Read the PERSISTED tool result body verbatim — ProcessStream.tsx
+    // renders toolCall.result unmodified into this <pre>, so this is the
+    // real returned result count, not a UI approximation.
+    const resultPre = page
+      .locator(".lmchat-process-tool")
+      .filter({ has: page.locator('.lmchat-process-tool__name[title="web_search"]') })
+      .first()
+      .locator(".lmchat-process-tool__pre--result");
+    await expect(resultPre).toBeVisible({ timeout: TURN_TIMEOUT_MS });
+    const resultText = await resultPre.innerText();
+    // _web_search_executor formats each hit as "N. title — url — snippet".
+    const resultLines = resultText
+      .split("\n")
+      .filter((line) => /^\d+\.\s/.test(line));
+
+    test.info().annotations.push({
+      type: "j6b-result-count",
+      description:
+        `web_search returned ${String(resultLines.length)} result line(s) for an explicit ` +
+        `top_n=${String(MAGNITUDE_TOP_N_REQUEST)} request`,
+    });
+
+    expect(
+      resultLines.length,
+      `web_search returned only ${String(resultLines.length)} result(s) for an explicit ` +
+        `top_n=${String(MAGNITUDE_TOP_N_REQUEST)} request on a broad query — at or under the ` +
+        `OLD broken hardcoded clamp of ${String(OLD_BROKEN_TOP_N_CLAMP)}. Real DDG scarcity for ` +
+        "a broad news query is possible but unlikely; treat this as a top_n-clamp regression.",
+    ).toBeGreaterThan(OLD_BROKEN_TOP_N_CLAMP);
+
+    assertNoConsoleErrors(collectErrors(), "j6b");
+  },
+);

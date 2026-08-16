@@ -215,6 +215,22 @@ export function assertNoLogLine(logPath: string, needles: string[], why: string)
   expect(hit, `[dogfood] ${why}\noffending line: ${hit ?? ""}`).toBeUndefined();
 }
 
+
+/**
+ * Count backend log lines matching every substring in `needles` (AND
+ * semantics), read at the moment of the call — a synchronous snapshot, not a
+ * poll. `waitForLogLine`/`assertNoLogLine` only answer "did it ever
+ * happen" / "did it never happen"; some regressions (a cache TTL silently
+ * dropped, a poll firing more often than it should) only show up as a
+ * COUNT over a fixed window, which this supports.
+ */
+export function countLogLines(logPath: string, needles: string[]): number {
+  const log = readBackendLog(logPath);
+  return log
+    .split("\n")
+    .filter((line) => needles.every((n) => line.includes(n))).length;
+}
+
 /**
  * Grey-box assertion that fail-soft AUTO-MEMORY distillation actually SUCCEEDED
  * — the exact thing that silently died in the dogfood. Asserts on the REAL
