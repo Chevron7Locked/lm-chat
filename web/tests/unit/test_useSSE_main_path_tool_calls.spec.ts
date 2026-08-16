@@ -142,7 +142,7 @@ describe("useSSE — main-path tool_call wire codec (BE nested shape)", () => {
       beLifecycleFrame("chat.end", 6);
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [] });
     });
@@ -187,7 +187,7 @@ describe("useSSE — main-path tool_call wire codec (BE nested shape)", () => {
       beLifecycleFrame("chat.end", 7);
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [] });
     });
@@ -230,7 +230,7 @@ describe("useSSE — main-path tool_call wire codec (BE nested shape)", () => {
       beLifecycleFrame("chat.end", 8);
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [] });
     });

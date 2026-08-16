@@ -86,7 +86,7 @@ describe("test_stop_preserves_partial_with_flush_lag_fallback", () => {
       })
     );
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(1));
 
     // Start — kick off the fetch.
     await act(async () => {
@@ -132,7 +132,7 @@ describe("test_stop_preserves_partial_with_flush_lag_fallback", () => {
     const { renderHook, act } = await import("@testing-library/react");
     const { useSSE } = await import("@/hooks/useSSE");
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(1));
 
     // Initial state has no deltas — stop() from idle → idle.
     expect(result.current.state.contentDeltas).toHaveLength(0);
@@ -442,7 +442,7 @@ describe("test_stop_flush_lag_refetch_comparison", () => {
     const { renderHook, act } = await import("@testing-library/react");
     const { useSSE } = await import("@/hooks/useSSE");
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(1));
 
     // Initial state has no deltas.
     expect(result.current.state.status).toBe("idle");

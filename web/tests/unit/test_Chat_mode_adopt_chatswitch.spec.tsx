@@ -102,9 +102,15 @@ const idleSSEState: StreamState = {
 
 let mockSSEState: StreamState = { ...idleSSEState };
 
+// useSSE(chatId) is a per-chat selector in the real implementation (a
+// chat-keyed streamStore slot) — this mock reflects that: only chat 1's
+// view reads `mockSSEState` (every test in this file tags its verdict
+// chatId: 1 — see the comment above), every OTHER chatId reads a plain
+// idle slot with no modeAdopt verdict, mirroring the store's guarantee
+// that chat 1's verdict never appears in chat 2's slot.
 vi.mock("@/hooks/useSSE", () => ({
-  useSSE: () => ({
-    state: mockSSEState,
+  useSSE: (chatId: number | null) => ({
+    state: chatId === 1 ? mockSSEState : idleSSEState,
     start: vi.fn(),
     stop: vi.fn(),
     reset: vi.fn(),

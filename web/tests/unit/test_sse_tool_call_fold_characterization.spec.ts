@@ -146,7 +146,7 @@ describe("tool_call.start fold — CURRENT (pre-fix) divergence between hooks", 
       frame("chat.end", { msg_id: 1 });
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [] });
     });

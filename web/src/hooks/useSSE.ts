@@ -1,46 +1,39 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /**
- * useSSE — fetch-based Server-Sent Events state machine for lm-chat streaming.
+ * useSSE — chat-scoped selector wrapper around the streamStore.
  *
- * WHY fetch, not EventSource:
- *   EventSource cannot send custom headers (CSRF) and doesn't support POST
- *   requests. Manual SSE parsing over a ReadableStream is the standard
- *   2025-2026 pattern for credentialed POST SSE (MDN WHATWG issue #2177).
+ * Historically this hook owned a fetch-based SSE state machine directly
+ * (one `useState<StreamState>`, one `AbortController`, one run-generation
+ * guard — see git history for the pre-2026-08-15 implementation). That
+ * design meant exactly ONE hook instance backed EVERY chat (Chat.tsx
+ * mounts `useSSE` once): starting a stream in chat B would unconditionally
+ * abort whatever chat A still had in flight, and every consumer had to
+ * defensively compare a `chatId` TAG on the shared state against its own
+ * chatId to avoid attributing a background chat's frames to whatever chat
+ * happened to be on screen.
  *
- * State machine transitions:
- *   idle ──[start()]──► streaming
- *   streaming ──[chat.start]──► streaming (sets messageId, responseId)
- *   streaming ──[message.delta]──► streaming (appends content)
- *   streaming ──[reasoning.delta]──► streaming (appends reasoning)
- *   streaming ──[tool_call.*]──► streaming (accumulates ToolCall)
- *   streaming ──[chat.end]──► complete
- *   streaming ──[error frame]──► error
- *   streaming ──[stop()]──► stopped (partial visible, refetch pending)
- *   stopped ──[reset()]──► idle
- *   stopped ──[start()]──► streaming (new turn)
- *   error ──[start()]──► streaming (retry)
- *   complete ──[start()]──► streaming (new turn)
+ * The state machine (fetch/SSE-parsing loop, per-event fold, wire types)
+ * now lives in `@/stores/streamStore` as a chat-keyed Zustand store
+ * (`streams: Record<chatId, StreamState>`), with per-chat AbortControllers
+ * and run-generation guards kept beside it. This hook is now a THIN
+ * selector: `useSSE(chatId)` reads `streams[chatId]` (or the idle default
+ * when that chat has never streamed) and forwards `start`/`stop`/`reset`
+ * to the store's actions. `start` still takes an explicit `chatId`
+ * argument — callers use it to target a chat OTHER than the one currently
+ * on screen (e.g. draining a queued message into its origin chat while a
+ * different chat is being viewed); `stop`/`reset` act on the chat this
+ * hook instance was called with.
  *
- * Multi-tab coordination:
- *   - msg_id for in-flight streams stored in localStorage under
- *     `lmchat:sse:<chat_id>:msg_id` (cross-tab visible).
- *   - BroadcastChannel('lmchat-streams') broadcasts stream lifecycle events
- *     so peer tabs on the same chat can show "streaming in another tab" UI.
- *   - Graceful degradation: if BroadcastChannel is unavailable, the storage
- *     event on window covers tab-to-tab notification.
- *
- * Response-ID reconciliation:
- *   On chat.start the server sends response_id. This is stored locally and
- *   passed as previous_response_id on the next message in the same chat
- *   (LM Studio native multi-turn).
- *
- * SSE wire format (per streaming.py / streaming_service.py):
- *   event: <type>\n
- *   data: {"type":"<type>","msg_id":<int>,...}\n\n
+ * See `@/stores/streamStore`'s module doc for the wire format / event
+ * fold / cross-tab BroadcastChannel design this file doesn't repeat.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
-import { createRunGuard, foldToolCallStart, readSseStream } from "@/lib/sseStream";
+import { useCallback, useEffect } from "react";
+import {
+  useStreamStore,
+  INITIAL_STREAM_STATE,
+  getStreamChannel,
+} from "@/stores/streamStore";
+import type { StreamLifecycleMsg } from "@/stores/streamStore";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -82,24 +75,22 @@ export interface LoadPhase {
 export interface StreamState {
   status: "idle" | "streaming" | "complete" | "error" | "stopped";
   /**
-   * The chat this state actually belongs to — the `chatId` argument the
-   * CURRENT (or most recent) `start(chatId, …)` call was made with, or
-   * `null` before any stream has ever started / after `reset()`.
+   * The chat this slot belongs to — the `chatId` argument the CURRENT (or
+   * most recent) `start(chatId, …)` call was made with, or `null` before
+   * any stream has ever started for this slot / after `reset()`.
    *
-   * `state` is a SINGLE instance shared across chat navigation (see the
-   * Chat.tsx doc comment near `followupSuggestions`) — it is NOT
-   * remounted or reset when the user switches chats, so a stream started
-   * for chat A keeps updating this same object while the user is looking
-   * at chat B. Every consumer that pairs a field of this state with
-   * "the chat currently on screen" (the response-id/cache-invalidation
-   * effect, the streaming bubble in `deriveMessageList`, the `streaming`
-   * prop handed to Composer, the MTP-suspected dedupe, the followups/
-   * auto-title effects, …) MUST compare this against its own chatId and
-   * no-op on a mismatch — otherwise a background stream for one chat gets
-   * silently attributed to whatever chat happens to be open when its
-   * frames arrive. See the cross-chat leaks this field was added to close
-   * (queue drain, C3 mode-adoption, response-id/message-cache corruption,
-   * the live streaming bubble itself).
+   * `state` now comes from `streamStore`'s chat-keyed `streams` record
+   * (see that module's doc) — a slot for chat 5 only ever holds chat 5's
+   * frames, so this field is normally redundant with the slot's own key.
+   * It is kept for two reasons: (1) backward compatibility with consumers
+   * written against the pre-2026-08-15 single-shared-instance design that
+   * still defensively compare it against their own chatId
+   * (useMtpSuspectedDedupe, useAutotitleEffect,
+   * useStoppedStreamReconciliation, deriveMessageList — untouched by this
+   * refactor, their checks are now provably redundant but remain valid
+   * defense-in-depth); and (2) the cross-tab BroadcastChannel path, where
+   * a peer tab's `stream_started` message sets it explicitly rather than
+   * inferring it from which slot got written.
    */
   chatId: number | null;
   messageId: number | null;
@@ -153,7 +144,8 @@ export interface StreamState {
   /**
    * The unified Continue affordance:
    * `stop_reason === "length" || truncated_without_terminal`. Computed
-   * here (not in Chat.tsx) so both chip sources share one state machine.
+   * in streamStore (not in Chat.tsx) so both chip sources share one state
+   * machine.
    */
   showContinue: boolean;
   /**
@@ -188,10 +180,7 @@ export interface StreamState {
    * turn or the feature is disabled server-side — Chat.tsx treats `null`
    * as a no-op. Reset to `undefined` on every start()/reset(); consumed by
    * an effect in Chat.tsx that applies it via `useChatPreset`'s
-   * `adoptModelPreset`, gated on the top-level `chatId` field above (this
-   * object used to carry its own duplicate `chatId` — folded into the
-   * single top-level mechanism so there's one way to ask "does this state
-   * belong to the chat on screen", not two).
+   * `adoptModelPreset`.
    */
   modeAdopt: { presetId: string | null; msgId: number } | undefined;
 }
@@ -216,55 +205,13 @@ interface UseSSEReturn {
   reset: () => void;
 }
 
-// ─── BroadcastChannel wrapper ───────────────────────────────────────────────
-
-type StreamLifecycleMsg =
-  | { type: "stream_started"; chat_id: number; msg_id: number }
-  | { type: "chat_end"; chat_id: number }
-  | { type: "aborted"; chat_id: number }
-  | { type: "stream_handoff"; chat_id: number };
-
-function openChannel(): BroadcastChannel | null {
-  try {
-    return new BroadcastChannel("lmchat-streams");
-  } catch {
-    return null;
-  }
-}
-
-// ─── localStorage helpers ───────────────────────────────────────────────────
-
-const LS_PREFIX = "lmchat:sse";
-
-function lsKey(chatId: number): string {
-  return `${LS_PREFIX}:${String(chatId)}:msg_id`;
-}
-
-function storeMsgId(chatId: number, msgId: number): void {
-  try {
-    localStorage.setItem(lsKey(chatId), String(msgId));
-  } catch {
-    // Ignore write failures.
-  }
-}
-
-function clearMsgId(chatId: number): void {
-  try {
-    localStorage.removeItem(lsKey(chatId));
-  } catch {
-    // Ignore.
-  }
-}
-
-// ─── SSE event dispatcher ───────────────────────────────────────────────────
-
 /**
  * Every SSE event name the BE can put on the wire. One value-level artifact
  * so the type union AND the runtime contract test share a single source:
  *
  *   - the type `CanonicalEventType` is derived from this array, so
- *     `handleEvent`'s assertNever default makes the switch exhaustive
- *     over exactly these names;
+ *     streamStore's `handleEvent` assertNever default makes the switch
+ *     exhaustive over exactly these names;
  *   - the contract test (test_sse_event_names_contract.spec.ts) asserts
  *     this array matches web/src/types/sse-event-names.json, which the BE
  *     pytest (tests/contracts/test_sse_event_names_contract.py) asserts
@@ -326,748 +273,58 @@ export const CANONICAL_EVENT_TYPES = [
 /** Known SSE event types emitted by streaming_service.py. */
 export type CanonicalEventType = (typeof CANONICAL_EVENT_TYPES)[number];
 
-interface RawEvent {
-  type: CanonicalEventType;
-  msg_id?: number | undefined;
-  response_id?: string | undefined;
-  /** On chat.end — "stop" | "length". */
-  stop_reason?: string | undefined;
-  delta?: string | undefined;
-  content?: string | undefined;
-  /**
-   * The main-chat wire nests the tool-call payload —
-   * `data["tool_call"] = event.tool_call.model_dump()` per
-   * streaming_service.py:_format_sse_frame. `arguments` is a JSON OBJECT
-   * (dict) on the wire, NOT a string; handlers JSON.stringify it to fit
-   * the FE `ToolCall.arguments: string` shape. There are no flat
-   * `tool_call_id`/`name`/`arguments`/`result` keys on this path (the
-   * sub-session path flattens, but that's useSubSessionSSE's wire).
-   */
-  tool_call?:
-    | {
-        id?: string;
-        name?: string;
-        arguments?: Record<string, unknown> | null;
-        call_id?: string | null;
-        result?: string | null;
-      }
-    | undefined;
-  /** Real LM Studio stats on chat.end. */
-  total_output_tokens?: number | undefined;
-  tokens_per_second?: number | undefined;
-  code?: string | undefined;
-  message?: string | undefined;
-  /** 0.0–1.0 progress for model_load.progress / prompt_processing.progress. */
-  progress?: number | undefined;
-  error?: {
-    code?: string;
-    message?: string;
-    cumulative_tool_rounds?: number;
-    hint?: string;
-  };
-  /** Nested payload of the non-terminal `warning` frame. */
-  warning?: {
-    code?: string;
-    message?: string;
-  };
-  /** OOB followups chips — emitted after chat.end completes. */
-  followups?: string[] | undefined;
-  /** Quiet auto-memory-saved count — emitted after chat.end completes. */
-  count?: number | undefined;
-  /** C3 mode-adoption verdict — emitted after chat.end completes. */
-  preset_id?: string | null | undefined;
-}
-
-/**
- * Timing refs — passed from the hook's start() closure.
- * Using a mutable object avoids prop-drilling through handleEvent.
- */
-interface TimingRefs {
-  streamStartMs: number;
-  firstTokenMs: number | null;
-  deltaCount: number;
-}
-
-/**
- * Bridge the wire tool_call.arguments DICT into the FE
- * `ToolCall.arguments: string` shape. Mirrors the BE persistence fold
- * (`_accumulate_tool_call`: success/failure only refresh arguments when the
- * dict is non-empty). Returns null for absent/empty dicts so callers keep
- * the previously accumulated value.
- */
-function stringifyWireToolArgs(
-  args: Record<string, unknown> | null | undefined,
-): string | null {
-  if (args == null || Object.keys(args).length === 0) return null;
-  try {
-    return JSON.stringify(args);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Exhaustiveness guard for handleEvent's switch. Replaces the silent
- * `default: break;` that used to let a new event slip through: a NEW BE-side
- * event landing without an FE-side case now fails the typecheck (this call
- * no longer narrows to `never`) instead of being silently dropped on the
- * floor. Intentionally-ignored lifecycle events get an explicit allow-list
- * `break` above the default.
- */
-function assertNever(x: never): never {
-  throw new Error(
-    `useSSE: unhandled SSE event type ${JSON.stringify(x)} — add a handleEvent ` +
-      "case (or the explicit ignore allow-list) and update " +
-      "web/src/types/sse-event-names.json.",
-  );
-}
-
-function handleEvent(
-  raw: RawEvent,
-  chatId: number,
-  setState: Dispatch<SetStateAction<StreamState>>,
-  channel: BroadcastChannel | null,
-  timing: TimingRefs,
-): void {
-  switch (raw.type) {
-    case "chat.start":
-      if (raw.msg_id !== undefined) storeMsgId(chatId, raw.msg_id);
-      if (channel !== null && raw.msg_id !== undefined) {
-        const msg: StreamLifecycleMsg = {
-          type: "stream_started",
-          chat_id: chatId,
-          msg_id: raw.msg_id,
-        };
-        channel.postMessage(msg);
-      }
-      setState((s) => ({
-        ...s,
-        messageId: raw.msg_id ?? s.messageId,
-        responseId: raw.response_id ?? s.responseId,
-      }));
-      break;
-
-    case "message.delta": {
-      // Track TTFT and running tok/s.
-      const nowMs = performance.now();
-      timing.firstTokenMs ??= nowMs;
-      timing.deltaCount += 1;
-      const elapsedS = (nowMs - timing.streamStartMs) / 1000;
-      const tps = elapsedS > 0 ? timing.deltaCount / elapsedS : null;
-      const ttft = (timing.firstTokenMs - timing.streamStartMs) / 1000;
-      setState((s) => ({
-        ...s,
-        contentDeltas: [...s.contentDeltas, raw.delta ?? raw.content ?? ""],
-        stats: {
-          tokensPerSecond: tps,
-          ttftSeconds: ttft,
-          outputTokens: timing.deltaCount,
-        },
-      }));
-      break;
-    }
-
-    case "reasoning.delta":
-      setState((s) => ({
-        ...s,
-        reasoningDeltas: [...s.reasoningDeltas, raw.delta ?? raw.content ?? ""],
-      }));
-      break;
-
-    // All tool_call.* handlers read the NESTED `raw.tool_call` payload
-    // (CanonicalToolCall.model_dump() on the wire). The fold mirrors the BE
-    // persistence accumulator (streaming_service._accumulate_tool_call) so
-    // live cards and reload-from-DB cards render identically. This case used
-    // to unconditionally APPEND, so a repeated `tool_call.start` for the
-    // SAME id (decoder resend / reconnect) produced a duplicate card — a
-    // real divergence from the BE fold it claims to mirror (which upserts by
-    // id) and from useSubSessionSSE's `sub.tool_call.start` (which already
-    // upserted). Now upsert-by-id via the shared `foldToolCallStart` — see
-    // lib/sseStream.ts.
-    case "tool_call.start": {
-      const tc: ToolCall = {
-        id: raw.tool_call?.id ?? `tc-${String(Date.now())}`,
-        name: raw.tool_call?.name ?? "",
-        arguments: "",
-        status: "pending",
-      };
-      setState((s) => ({
-        ...s,
-        toolCalls: foldToolCallStart(s.toolCalls, tc),
-      }));
-      break;
-    }
-
-    case "tool_call.name":
-      setState((s) => ({
-        ...s,
-        toolCalls: s.toolCalls.map((tc) =>
-          tc.id === raw.tool_call?.id
-            ? { ...tc, name: raw.tool_call.name ?? tc.name }
-            : tc,
-        ),
-      }));
-      break;
-
-    case "tool_call.arguments":
-      // The native decoder re-sends the COMPLETE arguments dict per event
-      // (not a string delta) — REPLACE the stringified value, don't append.
-      setState((s) => ({
-        ...s,
-        toolCalls: s.toolCalls.map((tc) =>
-          tc.id === raw.tool_call?.id
-            ? {
-                ...tc,
-                name: raw.tool_call.name ?? tc.name,
-                arguments: JSON.stringify(raw.tool_call.arguments ?? {}),
-              }
-            : tc,
-        ),
-      }));
-      break;
-
-    case "tool_call.success":
-      setState((s) => ({
-        ...s,
-        toolCalls: s.toolCalls.map((tc) =>
-          tc.id === raw.tool_call?.id
-            ? {
-                ...tc,
-                name: raw.tool_call.name ?? tc.name,
-                arguments:
-                  stringifyWireToolArgs(raw.tool_call.arguments) ??
-                  tc.arguments,
-                status: "success",
-                result: raw.tool_call.result ?? undefined,
-              }
-            : tc,
-        ),
-      }));
-      break;
-
-    case "tool_call.failure":
-      setState((s) => ({
-        ...s,
-        toolCalls: s.toolCalls.map((tc) =>
-          tc.id === raw.tool_call?.id
-            ? {
-                ...tc,
-                name: raw.tool_call.name ?? tc.name,
-                arguments:
-                  stringifyWireToolArgs(raw.tool_call.arguments) ??
-                  tc.arguments,
-                status: "failure",
-                result: raw.tool_call.result ?? undefined,
-              }
-            : tc,
-        ),
-      }));
-      break;
-
-    case "chat.end": {
-      clearMsgId(chatId);
-      if (channel !== null) {
-        const msg: StreamLifecycleMsg = { type: "chat_end", chat_id: chatId };
-        channel.postMessage(msg);
-      }
-      // Finalize stats on chat.end; snap tok/s to authoritative value.
-      const finalTtft =
-        timing.firstTokenMs !== null
-          ? (timing.firstTokenMs - timing.streamStartMs) / 1000
-          : null;
-      const finalElapsedS = (performance.now() - timing.streamStartMs) / 1000;
-      const finalTps =
-        finalElapsedS > 0 && timing.deltaCount > 0
-          ? timing.deltaCount / finalElapsedS
-          : null;
-      setState((s) => ({
-        ...s,
-        status: "complete",
-        loadPhase: null,
-        // Capture WHY the stream ended. "length" (max_output_tokens
-        // truncation) raises the Continue chip; the
-        // truncated_without_terminal OR keeps the EOF-without-terminal
-        // source alive (one chip, one state, two sources).
-        stop_reason: raw.stop_reason ?? null,
-        showContinue:
-          raw.stop_reason === "length" || s.truncated_without_terminal,
-        // LM Studio nests the chain anchor in `chat.end.result.response_id`,
-        // not `chat.start` — the docstring above predates the live wire
-        // probe. Without copying it here `sseState.responseId` stays null,
-        // `storeResponseId` never fires, and every next turn arrives at
-        // LM Studio with no `previous_response_id`. That's the bug behind
-        // "same answer to the same question twice" / "model loses
-        // context after turn 2".
-        responseId: raw.response_id ?? s.responseId,
-        // Prefer REAL LM Studio stats from the chat.end frame (decoded from
-        // native `result.stats` and serialized by _format_sse_frame) over
-        // the FE chunk-count approximation. Fall back to the local
-        // computation when the surface omits them.
-        stats: {
-          tokensPerSecond: raw.tokens_per_second ?? finalTps,
-          ttftSeconds: finalTtft,
-          outputTokens: raw.total_output_tokens ?? timing.deltaCount,
-        },
-      }));
-      break;
-    }
-
-    // Non-terminal advisory frame. The budget gate yields it BEFORE
-    // chat.start (gate runs before the upstream stream opens), so this
-    // handler must not assume any prior lifecycle event arrived. Appends to
-    // `warnings`; status untouched — the stream proceeds normally.
-    case "warning":
-      setState((s) => ({
-        ...s,
-        warnings: [
-          ...s.warnings,
-          {
-            code: raw.warning?.code ?? "warning",
-            message: raw.warning?.message ?? "Stream warning",
-          },
-        ],
-      }));
-      break;
-
-    case "error":
-      clearMsgId(chatId);
-      setState((s) => ({
-        ...s,
-        status: "error",
-        error: {
-          code: raw.error?.code ?? raw.code ?? "unknown",
-          message: raw.error?.message ?? raw.message ?? "stream error",
-          cumulative_tool_rounds: raw.error?.cumulative_tool_rounds,
-          hint: raw.error?.hint,
-        },
-        loadPhase: null,
-      }));
-      break;
-
-    // Model load / prompt processing phase events.
-    case "model_load.start":
-      setState((s) => ({
-        ...s,
-        loadPhase: { phase: "model_load", progress: null },
-      }));
-      break;
-
-    case "model_load.progress":
-      setState((s) => ({
-        ...s,
-        loadPhase: { phase: "model_load", progress: raw.progress ?? null },
-      }));
-      break;
-
-    case "model_load.end":
-      setState((s) => ({
-        ...s,
-        loadPhase: { phase: "generating", progress: null },
-      }));
-      break;
-
-    case "prompt_processing.start":
-      setState((s) => ({
-        ...s,
-        loadPhase: { phase: "prompt_processing", progress: null },
-      }));
-      break;
-
-    case "prompt_processing.progress":
-      setState((s) => ({
-        ...s,
-        loadPhase: {
-          phase: "prompt_processing",
-          progress: raw.progress ?? null,
-        },
-      }));
-      break;
-
-    case "prompt_processing.end":
-      setState((s) => ({
-        ...s,
-        loadPhase: { phase: "generating", progress: null },
-      }));
-      break;
-
-    case "message.start":
-      setState((s) => ({
-        ...s,
-        loadPhase: { phase: "generating", progress: null },
-      }));
-      break;
-
-    // Explicit ignore allow-list: lifecycle markers with no UI-visible
-    // payload (message.end / reasoning.*) and the synthetic pipeline
-    // advisories (tool_call.*_warning) that have no FE surface yet. Listed
-    // by name — NOT folded into default — so the assertNever below stays
-    // exhaustive over CanonicalEventType.
-    // OOB followups frame — arrives after chat.end. Store the chips array
-    // in state so Chat.tsx can render suggestion chips without re-parsing
-    // the main content for an HTML comment (which is no longer emitted).
-    case "followups":
-      setState((s) => ({
-        ...s,
-        followups: Array.isArray(raw.followups) ? (raw.followups) : [],
-      }));
-      break;
-
-    // Quiet auto-memory-saved indicator — arrives after chat.end (and after
-    // followups, when both fire). Only ever sent with count >= 1 (the BE
-    // omits the frame entirely when there's nothing to show), but guard
-    // anyway rather than trust the wire blindly.
-    case "memory.saved": {
-      const count = raw.count ?? 0;
-      const msgId = raw.msg_id;
-      if (count > 0 && msgId !== undefined) {
-        setState((s) => ({
-          ...s,
-          memorySaved: { count, msgId },
-        }));
-      }
-      break;
-    }
-
-    // C3 mode-adoption frame — arrives after chat.end. Store the verdict
-    // (possibly `preset_id: null`) so Chat.tsx's effect can apply it via
-    // useChatPreset. Unlike memory.saved, this is stored even when
-    // preset_id is null — Chat.tsx's effect is what decides null is a
-    // no-op, mirroring how the followups case stores an empty array rather
-    // than omitting state on the empty case.
-    case "mode_adopt": {
-      const msgId = raw.msg_id;
-      if (msgId !== undefined) {
-        setState((s) => ({
-          ...s,
-          modeAdopt: { presetId: raw.preset_id ?? null, msgId },
-        }));
-      }
-      break;
-    }
-
-    case "message.end":
-    case "reasoning.start":
-    case "reasoning.end":
-    case "tool_call.repeat_warning":
-    case "tool_call.failure_streak_warning":
-    case "tool_call.name_warning":
-      break;
-
-    default:
-      // A new BE event without an FE case is a typecheck error here
-      // (raw.type must narrow to `never`) and a loud runtime error instead
-      // of a silently-dropped frame.
-      assertNever(raw.type);
-  }
-}
-
 // ─── Hook ───────────────────────────────────────────────────────────────────
 
-const INITIAL_STATS: StreamStats = {
-  tokensPerSecond: null,
-  ttftSeconds: null,
-  outputTokens: 0,
-};
-
-const INITIAL_STATE: StreamState = {
-  status: "idle",
-  chatId: null,
-  messageId: null,
-  responseId: null,
-  contentDeltas: [],
-  reasoningDeltas: [],
-  toolCalls: [],
-  error: null,
-  stats: INITIAL_STATS,
-  loadPhase: null,
-  truncated_without_terminal: false,
-  stop_reason: null,
-  showContinue: false,
-  warnings: [],
-  followups: [],
-  memorySaved: undefined,
-  modeAdopt: undefined,
-};
-
-export function useSSE(): UseSSEReturn {
-  const [state, setState] = useState<StreamState>(INITIAL_STATE);
-
-  // Abort controller ref — allows stop() to abort mid-stream.
-  const abortRef = useRef<AbortController | null>(null);
-
-  // BroadcastChannel — opened once per hook instance.
-  const channelRef = useRef<BroadcastChannel | null>(null);
-
-  // Track current chat_id for multi-tab messages.
-  const chatIdRef = useRef<number | null>(null);
-
-  // Run-generation guard: discards setState calls from a stream superseded
-  // by a newer start() or an explicit stop(). Only useSubSessionSSE had this
-  // before extraction; generalized to all three SSE hooks (see
-  // lib/sseStream.ts).
-  const runGuardRef = useRef(createRunGuard());
-
-  useEffect(() => {
-    const ch = openChannel();
-    channelRef.current = ch;
-
-    if (ch !== null) {
-      ch.onmessage = (ev: MessageEvent<StreamLifecycleMsg>) => {
-        const msg = ev.data;
-        // Only react to events about the chat this hook instance is tracking.
-        if (chatIdRef.current === null || msg.chat_id !== chatIdRef.current)
-          return;
-
-        if (msg.type === "stream_started") {
-          // Another tab started streaming this chat — show as streaming.
-          // chatId is set here too (msg.chat_id — already confirmed equal
-          // to chatIdRef.current above) so this cross-tab path keeps
-          // state.chatId consistent with the locally-started path; every
-          // chatId-gated consumer relies on it being accurate regardless
-          // of which tab/mechanism last touched this state.
-          setState((s) =>
-            s.status !== "streaming"
-              ? { ...s, status: "streaming", chatId: msg.chat_id, messageId: msg.msg_id }
-              : s,
-          );
-        } else if (msg.type === "chat_end" || msg.type === "aborted") {
-          setState((s) =>
-            s.status === "streaming" ? { ...s, status: "complete" } : s,
-          );
-        }
-      };
-    }
-
-    return () => {
-      ch?.close();
-    };
-  }, []);
+/**
+ * Chat-scoped selector wrapper around `useStreamStore` — see this file's
+ * module doc. `chatId` selects which slot of the store's `streams` record
+ * `state` reads; `stop()`/`reset()` act on that same chatId; `start()`
+ * still takes an explicit chatId argument (may differ from the chatId this
+ * hook was called with — e.g. draining a queued message into its origin
+ * chat from a different chat's view).
+ */
+export function useSSE(chatId: number | null): UseSSEReturn {
+  const state = useStreamStore((s) =>
+    chatId !== null ? (s.streams[chatId] ?? INITIAL_STREAM_STATE) : INITIAL_STREAM_STATE,
+  );
+  const start = useStreamStore((s) => s.start);
+  const storeStop = useStreamStore((s) => s.stop);
+  const storeReset = useStreamStore((s) => s.reset);
 
   const stop = useCallback((): void => {
-    runGuardRef.current.invalidate();
-    abortRef.current?.abort();
-    abortRef.current = null;
-    const chatId = chatIdRef.current;
-    if (chatId !== null) {
-      clearMsgId(chatId);
-      const ch = channelRef.current;
-      if (ch !== null) {
-        const msg: StreamLifecycleMsg = { type: "aborted", chat_id: chatId };
-        ch.postMessage(msg);
-      }
-    }
-    // Transition to "stopped" rather than "idle" so the in-memory partial
-    // (contentDeltas) stays visible with a "Stopped" chip. Chat.tsx's
-    // useEffect watches for "stopped" and triggers the 600ms-delayed refetch
-    // + flush-lag comparison.
-    setState((s) =>
-      s.contentDeltas.length > 0
-        ? { ...s, status: "stopped" }
-        : { ...s, status: "idle" }
-    );
-  }, []);
-
-  const start = useCallback(
-    async (chatId: number, payload: ChatStreamPayload): Promise<void> => {
-      // Abort any in-flight stream before starting a new one.
-      abortRef.current?.abort();
-      const ac = new AbortController();
-      abortRef.current = ac;
-      chatIdRef.current = chatId;
-
-      // New generation — any async continuation from a PRIOR start() (e.g. a
-      // late HTTP-error/fetch-error setState racing this call) becomes a
-      // no-op from here on. The synchronous state reset directly below stays
-      // UNGUARDED: it always applies, nothing could have superseded it yet.
-      const myGen = runGuardRef.current.start();
-      const guardedSetState: Dispatch<SetStateAction<StreamState>> = (
-        updater,
-      ) => {
-        if (!runGuardRef.current.isCurrent(myGen)) return;
-        setState(updater);
-      };
-
-      // Initialize timing for live stats.
-      const timing: TimingRefs = {
-        streamStartMs: performance.now(),
-        firstTokenMs: null,
-        deltaCount: 0,
-      };
-
-      setState({
-        status: "streaming",
-        chatId,
-        messageId: null,
-        responseId: null,
-        contentDeltas: [],
-        reasoningDeltas: [],
-        toolCalls: [],
-        error: null,
-        stats: INITIAL_STATS,
-        loadPhase: null,
-        truncated_without_terminal: false,
-        stop_reason: null,
-        showContinue: false,
-        warnings: [],
-        followups: [],
-        memorySaved: undefined,
-        modeAdopt: undefined,
-      });
-
-      const ch = channelRef.current;
-
-      try {
-        const response = await fetch("/api/chat/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, payload }),
-          credentials: "same-origin",
-          signal: ac.signal,
-        });
-
-        if (!response.ok) {
-          const body = (await response.json().catch(() => ({}))) as {
-            detail?: unknown;
-          };
-          const detail =
-            typeof body.detail === "string"
-              ? body.detail
-              : typeof body.detail === "object" && body.detail !== null
-                ? JSON.stringify(body.detail)
-                : response.statusText;
-          guardedSetState((s) => ({
-            ...s,
-            status: "error",
-            error: { code: `http_${String(response.status)}`, message: detail },
-          }));
-          return;
-        }
-
-        if (response.body === null) {
-          guardedSetState((s) => ({
-            ...s,
-            status: "error",
-            error: { code: "no_body", message: "Response body was null" },
-          }));
-          return;
-        }
-
-        // `error` is terminal. `chat.end` marks the ANSWER complete but is
-        // NOT the end of the stream: up to three optional out-of-band
-        // frames follow it, always yielded in this order — `followups`
-        // (chips), `mode_adopt` (C3 role adoption), then `memory.saved`
-        // (the quiet auto-memory indicator, gated on the BE's own bounded
-        // wait on the detached distillation task) — none of them delay
-        // the visible answer (see streaming_service
-        // `_generate_followups_oob` / `_infer_mode_oob` /
-        // `_MEMORY_SAVED_FRAME_WAIT_SEC`). Keep reading past `chat.end`
-        // until the LAST possible OOB frame arrives, or the server closes
-        // the stream (readSseStream's `done`, e.g. all OOB frames
-        // skipped/disabled this turn). `memory.saved` is always yielded
-        // last of the three when it fires, so it — not `followups` or
-        // `mode_adopt` — is the stop trigger; stopping on an earlier OOB
-        // frame here would cancel the reader (and the underlying
-        // connection) before the BE ever gets to yield the later ones,
-        // silently losing them. A new message / unmount aborts any
-        // lingering read via `abortRef`, so this never holds a connection
-        // past its use.
-        const { exhausted } = await readSseStream(response.body, (frame) => {
-          let raw: RawEvent;
-          try {
-            raw = JSON.parse(frame.data ?? "") as RawEvent;
-          } catch {
-            // Malformed data line — skip; don't crash the stream.
-            return "continue";
-          }
-
-          handleEvent(raw, chatId, guardedSetState, ch, timing);
-
-          if (raw.type === "error" || raw.type === "memory.saved") {
-            return "stop";
-          }
-          return "continue";
-        });
-
-        if (!exhausted) return;
-
-        // Reader exhausted without a chat.end or error terminal. Two cases
-        // to distinguish:
-        //   (a) zero content deltas arrived → the BE silently dropped the
-        //       stream (typical: a streaming_service.py stall leak, or LM
-        //       Studio collapsing on context overflow). Surface as
-        //       `status: "error"` with code `stream_truncated` so the user
-        //       sees something actionable instead of a vanished indicator —
-        //       which was the exact reported symptom.
-        //   (b) content deltas arrived but no terminal → legitimate truncation
-        //       (rare; cleanly-cut SSE mid-token). Keep `complete` but flag
-        //       `truncated_without_terminal` for the Continue chip.
-        guardedSetState((s) => {
-          if (s.status !== "streaming") return s;
-          if (s.contentDeltas.length === 0) {
-            return {
-              ...s,
-              status: "error",
-              error: {
-                code: "stream_truncated",
-                message:
-                  "The model stopped sending before any reply arrived. " +
-                  "Often this means the request exceeded the model's " +
-                  "context window or the upstream connection dropped. " +
-                  "Try again with fewer tools enabled or a model with a " +
-                  "larger context window.",
-              },
-              loadPhase: null,
-            };
-          }
-          return {
-            ...s,
-            status: "complete",
-            loadPhase: null,
-            truncated_without_terminal: true,
-            // EOF-without-terminal is the second source for the unified
-            // Continue affordance.
-            showContinue: true,
-          };
-        });
-      } catch (err: unknown) {
-        if ((err as Error).name === "AbortError") {
-          // User-initiated stop — state already set to idle by stop().
-          return;
-        }
-        const msg =
-          err instanceof Error ? err.message : "unknown streaming error";
-        guardedSetState((s) => ({
-          ...s,
-          status: "error",
-          error: { code: "fetch_error", message: msg },
-        }));
-      }
-    },
-    [],
-  );
+    if (chatId !== null) storeStop(chatId);
+  }, [chatId, storeStop]);
 
   const reset = useCallback((): void => {
-    setState((s) => ({
-      ...s,
-      status: "idle",
-      chatId: null,
-      contentDeltas: [],
-      reasoningDeltas: [],
-      toolCalls: [],
-      error: null,
-      messageId: null,
-      responseId: null,
-      stats: INITIAL_STATS,
-      loadPhase: null,
-      truncated_without_terminal: false,
-      stop_reason: null,
-      showContinue: false,
-      warnings: [],
-      followups: [],
-      memorySaved: undefined,
-      modeAdopt: undefined,
-    }));
-  }, []);
+    if (chatId !== null) storeReset(chatId);
+  }, [chatId, storeReset]);
+
+  // Cross-tab BroadcastChannel LISTENER. Posting (on chat.start/chat.end/
+  // stop()) lives in streamStore.ts, which also owns the single
+  // page-lifetime channel instance both sides share — see that module's
+  // doc for why listening and posting deliberately use ONE
+  // BroadcastChannel object (preserves the browser's non-self-delivery
+  // guarantee the original single-`channelRef` hook relied on).
+  //
+  // Filtered to `chatId` — the chat THIS hook instance is currently
+  // viewing — the same scoping the pre-refactor `chatIdRef`-filtered
+  // listener had, just sourced from an explicit argument instead of an
+  // imperative ref (there's no local `useState` left to filter for).
+  // A peer-tab message about a chat that ISN'T on screen is not applied
+  // to any slot by this hook; making the listener react to ALL chat_ids
+  // regardless of what's on screen is a further step, out of scope here.
+  useEffect(() => {
+    const ch = getStreamChannel();
+    if (ch === null || chatId === null) return;
+    ch.onmessage = (ev: MessageEvent<StreamLifecycleMsg>) => {
+      const msg = ev.data;
+      if (msg.chat_id !== chatId) return;
+      useStreamStore.getState().receiveCrossTabMessage(msg);
+    };
+    return () => {
+      ch.onmessage = null;
+    };
+  }, [chatId]);
 
   return { state, start, stop, reset };
 }

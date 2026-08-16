@@ -17,6 +17,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useSSE } from "@/hooks/useSSE";
+import { __resetStreamStoreForTests } from "@/stores/streamStore";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -56,6 +57,13 @@ class StubChannel {
 describe("useSSE", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // streamStore holds its BroadcastChannel/AbortController/run-guard
+    // singletons at module scope (page-lifetime, not per-hook-mount) — a
+    // channel cached from an earlier test in this file would otherwise
+    // survive the `global.BroadcastChannel` stub swap below and this
+    // file's own StubChannel.instances reset, since getStreamChannel()'s
+    // `??=` cache never re-creates it. See the function's own doc.
+    __resetStreamStoreForTests();
     StubChannel.instances = [];
     // Override the global BroadcastChannel with our stub for this test.
     // @ts-expect-error -- stub BroadcastChannel globally
@@ -72,7 +80,7 @@ describe("useSSE", () => {
   });
 
   it("initial state is idle", () => {
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     expect(result.current.state.status).toBe("idle");
     expect(result.current.state.contentDeltas).toHaveLength(0);
     expect(result.current.state.reasoningDeltas).toHaveLength(0);
@@ -89,7 +97,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     expect(result.current.state.status).toBe("idle");
 
     await act(async () => {
@@ -117,7 +125,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
     });
@@ -146,7 +154,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
     });
@@ -166,7 +174,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
     });
@@ -184,7 +192,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
     });
@@ -203,7 +211,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
     });
@@ -220,7 +228,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
@@ -239,7 +247,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
@@ -255,7 +263,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
@@ -272,7 +280,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
@@ -293,7 +301,7 @@ describe("useSSE", () => {
       })
     );
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
@@ -329,7 +337,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
@@ -355,7 +363,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(10));
 
     await act(async () => {
       await result.current.start(10, { input: [] });
@@ -374,7 +382,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(10));
 
     await act(async () => {
       await result.current.start(10, { input: [] });
@@ -397,7 +405,7 @@ describe("useSSE", () => {
       new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } })
     );
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     // Start the stream — don't await; it hangs until we close the stream.
     const startPromise = result.current.start(42, { input: [] });
@@ -435,7 +443,7 @@ describe("useSSE", () => {
     });
     global.fetch = vi.fn().mockResolvedValue(nullBodyResponse);
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     await act(async () => {
       await result.current.start(42, { input: [] });
@@ -466,7 +474,7 @@ describe("useSSE", () => {
       new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } })
     );
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     await act(async () => {
       await result.current.start(42, { input: [] });
@@ -491,7 +499,7 @@ describe("useSSE", () => {
       frame("message.delta", { msg_id: 8, delta: "partial" });
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [] });
     });
@@ -514,7 +522,7 @@ describe("useSSE", () => {
       frame("chat.end", { msg_id: 21, stop_reason: "length" });
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [] });
     });
@@ -531,7 +539,7 @@ describe("useSSE", () => {
       frame("chat.end", { msg_id: 22, stop_reason: "stop" });
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [] });
     });
@@ -554,7 +562,7 @@ describe("useSSE", () => {
       });
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [] });
     });
@@ -574,7 +582,7 @@ describe("useSSE", () => {
       frame("chat.end", { msg_id: 31 });
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [] });
     });
@@ -591,7 +599,7 @@ describe("useSSE", () => {
       frame("chat.end", { msg_id: 23 });
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [] });
     });
@@ -609,7 +617,7 @@ describe("useSSE", () => {
     const frames = frame("chat.start", { msg_id: 9, response_id: "rid-9" });
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
     await act(async () => {
       await result.current.start(42, { input: [] });
     });
@@ -623,7 +631,7 @@ describe("useSSE", () => {
   it("transitions to error on fetch() rejection (network error)", async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error("network failure"));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     await act(async () => {
       await result.current.start(42, { input: [] });
@@ -648,7 +656,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(5));
 
     await act(async () => {
       await result.current.start(5, { input: [{ type: "text" as const, content: "say OK" }] });
@@ -671,7 +679,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(20));
 
     await act(async () => {
       await result.current.start(20, { input: [] });
@@ -703,7 +711,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
@@ -730,7 +738,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
@@ -765,7 +773,7 @@ describe("useSSE", () => {
 
     global.fetch = vi.fn().mockResolvedValue(sseResponse(frames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
@@ -802,7 +810,7 @@ describe("useSSE", () => {
       .mockResolvedValueOnce(sseResponse(firstFrames))
       .mockResolvedValueOnce(sseResponse(secondFrames));
 
-    const { result } = renderHook(() => useSSE());
+    const { result } = renderHook(() => useSSE(42));
 
     await act(async () => {
       await result.current.start(42, { input: [{ type: "text" as const, content: "hi" }] });
