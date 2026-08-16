@@ -328,6 +328,25 @@ MISMATCH=0
   || die "version-declaration files don't all say $VERSION — bump pyproject.toml, src/lmchat/__init__.py, web/package.json (and run 'uv lock') in a commit first"
 note "pyproject.toml / __init__.py / package.json all say $VERSION: OK"
 
+# --- regenerate the derived OpenAPI spec ------------------------------------------
+#
+# docs/api/openapi.yaml is a GITIGNORED derived artifact, and its info.version
+# is read from the code we just confirmed says $VERSION.  So immediately after
+# any version bump it is stale BY DEFINITION, and `make gates`' drift check
+# fails on a one-line version diff — noise, not a real finding.  That check
+# exists to catch a route or schema change nobody regenerated; it cannot
+# usefully police a field it is guaranteed to invalidate.
+#
+# This has now broken a release twice (1.0.3 and 1.0.4).  Emitting here — after
+# the version preflight passes, before gates run — removes the failure mode
+# without weakening the check: a genuine route/schema drift still fails, since
+# emitting reflects the code either way.  Nothing to commit; the file is
+# gitignored.  Also note a fresh clone has no such file at all, so gates
+# without this step depend on a locally-emitted leftover.
+note "regenerating docs/api/openapi.yaml (gitignored, derived — version bump always invalidates it)..."
+make emit-openapi >/dev/null
+note "openapi spec: regenerated at $VERSION"
+
 # --- gates -----------------------------------------------------------------------
 
 if [ "$SKIP_GATES" -eq 1 ]; then
