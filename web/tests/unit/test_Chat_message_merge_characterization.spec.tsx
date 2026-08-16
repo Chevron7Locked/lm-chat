@@ -192,7 +192,9 @@ let mockMessages: MessageRecord[] = [];
 // is reassigned (matching react-query's actual behavior: the query result
 // object is stable across re-renders when the underlying data hasn't
 // changed).
-const mockRefetchMessages = vi.fn();
+// Must return a thenable — the stream-complete effect in Chat.tsx chains
+// `.then()` off it to clear the resend/regenerate optimistic bubble.
+const mockRefetchMessages = vi.fn(() => Promise.resolve());
 let _cachedMessagesArr: MessageRecord[] | null = null;
 let _cachedMessagesData: { messages: MessageRecord[] } | null = null;
 function getMessagesData(): { messages: MessageRecord[] } {

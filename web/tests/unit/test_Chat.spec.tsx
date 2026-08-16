@@ -17,6 +17,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { createElement } from "react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ChatSummary, MessageRecord, RegenerateResult } from "@/hooks/useChats";
 
 // jsdom doesn't implement scrollIntoView; Chat's auto-scroll effect crashes
 // without this stub.
@@ -134,9 +135,28 @@ vi.mock("@/hooks/useModelList", () => ({
   }),
 }));
 
+// Resend-disappears regression (see "Chat (resend disappears bug)" below):
+// mutable so a single test can seed a real chat + message and drive the
+// regenerate mutation's onSuccess directly, instead of the static empty
+// stubs every other describe block in this file relies on.
+const mockChatsData = vi.hoisted(() => ({ data: [] as ChatSummary[] }));
+const mockMessagesData = vi.hoisted(() => ({
+  data: { messages: [] as MessageRecord[] },
+}));
+const mockRegenerateMutate = vi.hoisted(() => vi.fn());
+// Stable reference across renders — a fresh vi.fn() every useMessages()
+// call would make the stream-complete effect's dep array (`refetchMessages`
+// is one of its deps) see a "changed" function on every render and re-fire
+// forever once `.then()` schedules a state update. The real useQuery
+// `refetch` is stable per query; this mirrors that.
+const mockRefetchMessages = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+
 vi.mock("@/hooks/useChats", () => ({
-  useChatsDirect: () => ({ data: [], isLoading: false, isError: false }),
-  useMessages: () => ({ data: { messages: [] }, refetch: vi.fn() }),
+  useChatsDirect: () => ({ data: mockChatsData.data, isLoading: false, isError: false }),
+  // refetch must return a thenable — the stream-complete effect in
+  // Chat.tsx chains `.then()` off it to clear the resend/regenerate
+  // optimistic bubble (see "Chat (resend disappears bug)" below).
+  useMessages: () => ({ data: mockMessagesData.data, refetch: mockRefetchMessages }),
   useUpdateChat: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   useDeleteChat: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   useClearChatMessages: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
@@ -145,7 +165,7 @@ vi.mock("@/hooks/useChats", () => ({
   useAppendMessage: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   useCreateChat: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   useEditMessage: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
-  useRegenerateMessage: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
+  useRegenerateMessage: () => ({ mutate: mockRegenerateMutate, mutateAsync: vi.fn(), isPending: false }),
   useDeleteMessage: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   useGenerateTitle: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   chatKeys: { messages: (id: number) => ["messages", id] },
@@ -225,10 +245,42 @@ vi.mock("@/components/Composer", () => ({
       createElement("textarea", { "aria-label": "Message" }),
       createElement("button", { "aria-label": "Send message", type: "button" }, "Send"),
     ),
+  // submitTurn (Chat.tsx) calls this directly when no explicit integrations
+  // are passed — the regenerate/resend/edit path. No test here exercises
+  // stored per-chat integrations, so a stubbed "none configured" is enough.
+  resolveChatIntegrationsField: () => undefined,
 }));
 
+// Resend-disappears regression needs the real message content/role and the
+// onResend wiring to reach the DOM — every other describe block only checks
+// for the mock's presence, so widening the mock stays backward compatible.
 vi.mock("@/components/ChatMessage", () => ({
-  ChatMessage: () => createElement("div", { "data-testid": "mock-chatmessage" }),
+  ChatMessage: (props: {
+    message: { id: number | string; role: string; content: string };
+    onResend?: (messageId: number) => void;
+  }) =>
+    createElement(
+      "div",
+      {
+        "data-testid": "mock-chatmessage",
+        "data-role": props.message.role,
+        "data-content": props.message.content,
+      },
+      props.message.content,
+      props.onResend !== undefined && typeof props.message.id === "number"
+        ? createElement(
+            "button",
+            {
+              type: "button",
+              "data-testid": `mock-resend-${String(props.message.id)}`,
+              onClick: () => {
+                props.onResend?.(props.message.id as number);
+              },
+            },
+            "resend",
+          )
+        : null,
+    ),
 }));
 
 vi.mock("@/components/ABCompareView", () => ({
@@ -588,5 +640,150 @@ describe("Chat (Bug 3 — RAG smart-default)", () => {
       },
       { timeout: 500 },
     );
+  });
+});
+
+describe("Chat (resend disappears bug)", () => {
+  // Regression for: "when i resend a message, it disappears while the
+  // model works". Root cause: submitTurn() — the shared turn-dispatch
+  // primitive behind regenerate/resend/edit — never set `pendingUser`
+  // (Chat.tsx ~926), unlike handleSubmit's normal send path (~842). Both
+  // delete_from_user_message_for_resend and delete_assistant_turn_for_
+  // regenerate delete the boundary row itself server-side (at least 1 row,
+  // see message_service.py's delete_from_user_message_for_resend
+  // docstring), so once the messages refetch drops it there was nothing —
+  // no persisted row, no optimistic bubble — to render it until the
+  // replayed turn's new row landed at stream-complete.
+  beforeEach(() => {
+    mockAuthState.user = { id: 1, username: "test", is_admin: false };
+    mockAuthState.isInitializing = false;
+    mockSSEState = { ..._idleSSEState };
+    mockChatsData.data = [
+      {
+        id: 1,
+        title: "test chat",
+        folder: null,
+        pinned: false,
+        updated_at: new Date(0).toISOString(),
+        model_id: "test-model",
+        display_order: 0,
+        tags: [],
+        archived_at: null,
+      },
+    ];
+    mockMessagesData.data = {
+      messages: [
+        {
+          id: 10,
+          chat_id: 1,
+          role: "user",
+          content: "hello",
+          reasoning_content: null,
+          created_at: new Date(0).toISOString(),
+        },
+      ],
+    };
+    vi.clearAllMocks();
+    mockRegenerateMutate.mockReset();
+  });
+
+  it("keeps the resent message visible via the optimistic bubble while the replayed turn streams", () => {
+    const { rerender } = renderChat("/chats/1");
+
+    // Starting state: the persisted user message with a resend affordance.
+    expect(screen.getByTestId("mock-resend-10")).toBeTruthy();
+    expect(
+      document.querySelector('[data-role="user"][data-content="hello"]'),
+    ).not.toBeNull();
+
+    // Drive the regenerate mutation the way the real
+    // onSuccess -> submitTurn chain does (useMessageActions.ts
+    // handleRegenerateClick): the backend deleted the boundary row and
+    // handed back its content to replay as a fresh turn.
+    mockRegenerateMutate.mockImplementation(
+      (
+        _vars: { messageId: number; confirm: boolean },
+        opts: { onSuccess?: (result: RegenerateResult) => void },
+      ) => {
+        opts.onSuccess?.({ deleted: 1, chat_id: 1, prior_user_content: "hello" });
+      },
+    );
+    fireEvent.click(screen.getByTestId("mock-resend-10"));
+
+    // Simulate what lands next in production: the messages refetch reflects
+    // the delete (row gone), and the replayed turn is now streaming — "while
+    // the model works".
+    mockMessagesData.data = { messages: [] };
+    mockSSEState = { ..._idleSSEState, status: "streaming", chatId: 1 };
+    rerender(chatRouteTree("/chats/1"));
+
+    // The resent text must still be on screen for the whole generation, not
+    // just before/after it.
+    expect(
+      document.querySelector('[data-role="user"][data-content="hello"]'),
+    ).not.toBeNull();
+  });
+
+  it("clears the optimistic bubble once the replayed turn's refetch lands, without a stuck duplicate", async () => {
+    const { rerender } = renderChat("/chats/1");
+
+    // A plain Regenerate (or a Resend with a reply after it) deletes >= 2
+    // rows — the boundary row(s) ITSELF, not just what follows (see
+    // delete_assistant_turn_for_regenerate / delete_from_user_message_for_
+    // resend) — while the replay always adds back exactly 2 (user +
+    // assistant). A length-based "count > baseline" auto-clear can never
+    // fire here (final count == starting count) — this is what the
+    // stream-complete effect's explicit clear exists to handle.
+    mockRegenerateMutate.mockImplementation(
+      (
+        _vars: { messageId: number; confirm: boolean },
+        opts: { onSuccess?: (result: RegenerateResult) => void },
+      ) => {
+        opts.onSuccess?.({ deleted: 2, chat_id: 1, prior_user_content: "hello" });
+      },
+    );
+    fireEvent.click(screen.getByTestId("mock-resend-10"));
+
+    mockMessagesData.data = { messages: [] };
+    mockSSEState = { ..._idleSSEState, status: "streaming", chatId: 1 };
+    rerender(chatRouteTree("/chats/1"));
+    expect(
+      document.querySelector('[data-role="user"][data-content="hello"]'),
+    ).not.toBeNull();
+
+    // The replayed turn's refetch resolves with the new persisted rows.
+    mockMessagesData.data = {
+      messages: [
+        {
+          id: 20,
+          chat_id: 1,
+          role: "user",
+          content: "hello",
+          reasoning_content: null,
+          created_at: new Date(0).toISOString(),
+        },
+        {
+          id: 21,
+          chat_id: 1,
+          role: "assistant",
+          content: "hi",
+          reasoning_content: null,
+          created_at: new Date(0).toISOString(),
+        },
+      ],
+    };
+    mockSSEState = {
+      ..._idleSSEState,
+      status: "complete",
+      chatId: 1,
+      contentDeltas: ["hi"],
+    };
+    rerender(chatRouteTree("/chats/1"));
+
+    await waitFor(() => {
+      expect(
+        document.querySelectorAll('[data-role="user"][data-content="hello"]'),
+      ).toHaveLength(1);
+    });
   });
 });

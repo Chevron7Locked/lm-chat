@@ -1692,9 +1692,20 @@ export interface paths {
          *     * **Assistant** (existing behaviour): deletes the boundary assistant
          *       turn, its triggering user prompt, and all later messages.  The
          *       frontend resubmits the prior user prompt content as a fresh turn.
-         *     * **User** (Resend): deletes every message AFTER the boundary user
-         *       turn (the user message itself is kept).  The frontend resubmits
-         *       the kept user message content as a fresh turn.
+         *     * **User** (Resend): deletes the boundary user turn **and** every
+         *       message after it.  The content is captured before the delete and
+         *       returned as ``prior_user_content``; the frontend resubmits it as a
+         *       fresh turn, so the replayed message gets a NEW row rather than the
+         *       old one surviving beside a duplicate.  See
+         *       ``MessageService.delete_from_user_message_for_resend``, whose
+         *       ``deleted_count`` is always >= 1 (the boundary message itself).
+         *
+         *       This docstring previously claimed "the user message itself is kept",
+         *       which was false and — because it is the source of the published
+         *       OpenAPI contract — is what caused the resend-disappears bug: the
+         *       frontend, written against that contract, saw no reason to render an
+         *       optimistic bubble, so the message vanished from the DOM for the whole
+         *       generation.  Keep this description true to the service.
          *
          *     Two-step confirmation contract:
          *
@@ -2435,7 +2446,7 @@ export interface paths {
         };
         /**
          * Live LM Studio reachability probe
-         * @description Returns a real-time reachability snapshot from the ModelsService 5-second-TTL probe.  ``reachable`` is ``false`` when LM Studio is not responding (connection refused / timeout); ``auth_failed`` is ``true`` when the upstream returns 401.  Rate-limited by the existing 5-second TTL — this endpoint does NOT hammer LM Studio.
+         * @description Returns a real-time reachability snapshot from the ModelsService 30-second-TTL probe.  ``reachable`` is ``false`` when LM Studio is not responding (connection refused / timeout); ``auth_failed`` is ``true`` when the upstream returns 401.  Rate-limited by a 30-second TTL dedicated to this endpoint (independent of the 5-second TTL chat turns use to resolve a loaded model) — the FE badge polls every 10 s, so at most 1 in 3 polls reaches LM Studio; this endpoint does NOT hammer LM Studio.
          */
         get: operations["get_lmstudio_health_api_lmstudio_health_get"];
         put?: never;

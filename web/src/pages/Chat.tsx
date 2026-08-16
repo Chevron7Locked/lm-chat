@@ -517,7 +517,24 @@ export default function Chat() {
       recentlyStreamedIdRef.current = sseState.messageId;
     }
     // Refresh messages to load the finalized message from the server.
-    void refetchMessages();
+    //
+    // The regenerate/resend/edit path (submitTurn) sets `pendingUser` the
+    // same as a normal send, but the length-based auto-clear effect below
+    // (`count > pendingUser.baseline`) can't track it reliably: delete_from_
+    // user_message_for_resend / delete_assistant_turn_for_regenerate delete
+    // the boundary row(s) THEMSELVES before this turn replays, so the
+    // message count can dip and only return to (or fall short of) its
+    // starting value once the replayed turn lands — "count > baseline"
+    // never fires when the delete removed as many rows as the replay adds
+    // back (the common case: a plain Regenerate always deletes >= 2 rows
+    // for exactly 2 replayed back), leaving pendingUser stuck and the
+    // optimistic bubble duplicating the now-persisted row. Clearing it
+    // explicitly once THIS refetch (the one that lands the replayed turn)
+    // resolves sidesteps the count math entirely and is exact regardless of
+    // how many rows the turn deleted.
+    void refetchMessages().then(() => {
+      setPendingUser(null);
+    });
     void qc.invalidateQueries({ queryKey: chatKeys.messages(chatId) });
   }, [
     sseState.status,
@@ -942,11 +959,30 @@ export default function Chat() {
         model,
         ...(integrations !== undefined && { integrations }),
       };
+      // Optimistic user bubble — mirrors handleSubmit's pendingUser (consumed
+      // by deriveMessageList's optimisticUserMessages). Without this,
+      // regenerate/resend/edit callers of submitTurn went straight to
+      // startStream with no optimistic row: the caller just deleted the
+      // boundary user message server-side (delete_from_user_message_for_resend
+      // / delete_assistant_turn_for_regenerate both delete the boundary row
+      // itself, not just what follows it), the messages refetch dropped it
+      // from serverMessages, and nothing replaced it until the replayed
+      // turn's new row was refetched at stream-complete — the resent/
+      // regenerated message vanished for the full duration of generation.
+      // Baseline is the current (pre-turn) count, same as handleSubmit —
+      // the stream-complete effect's explicit `setPendingUser(null)` after
+      // its refetch (not this baseline) is what actually clears the bubble
+      // for this path; see that effect's comment for why a delete-aware
+      // baseline can't be made to work with the length-comparison check.
+      setPendingUser({
+        text: inputText,
+        baseline: (messagesData?.messages ?? []).length,
+      });
       // Re-arms auto-stick so this turn snaps to the bottom.
       autoStickRef.current = true;
       void startStream(turnChatId, payload);
     },
-    [resolveTurnModel, startStream, push],
+    [resolveTurnModel, startStream, push, messagesData],
   );
 
   // Message-action handlers — regenerate/resend/edit/retry, plus the
