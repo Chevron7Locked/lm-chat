@@ -4,11 +4,15 @@
 # =============================================================================
 #
 # What this script does, in full: validate, create one annotated+signed tag,
-# push that one tag. Nothing else. The GitHub Actions workflow
-# `.github/workflows/release.yml` triggers on `push: tags: v*` and owns
-# everything downstream — building the multi-arch image, pushing it to GHCR,
-# scanning it with Trivy, and creating the GitHub Release with auto-generated
-# notes. This script's job ends the moment the tag lands on the remote.
+# fast-forward the repo's default branch to the released commit, then push
+# that tag. The branch push happens BEFORE the tag push — the tag push is
+# what triggers CI, so the default branch must already be caught up by the
+# time that happens, not after. Nothing else changes. The GitHub Actions
+# workflow `.github/workflows/release.yml` triggers on `push: tags: v*` and
+# owns everything downstream — building the multi-arch image, pushing it to
+# GHCR, scanning it with Trivy, and creating the GitHub Release with
+# auto-generated notes. This script's job ends the moment the tag lands on
+# the remote.
 #
 # Usage:
 #   scripts/release.sh <version> [--dry-run] [--skip-gates] [--message MSG]
@@ -23,14 +27,24 @@
 #                  the matching CHANGELOG.md section).
 #
 # Hard constraints (non-negotiable, not configurable by any flag):
-#   - Never force-pushes anything.
-#   - Never pushes a branch — only ever `git push origin refs/tags/<tag>`.
+#   - Never force-pushes anything (no --force, no --force-with-lease, no
+#     `+refspec`).
+#   - Advances the default branch (DEFAULT_BRANCH below) by fast-forward
+#     ONLY — a plain `git push origin HEAD:refs/heads/<default>`. If that
+#     branch is not an ancestor of HEAD (it has diverged), the script ABORTS
+#     before pushing anything and says so; it never merges, rebases, or
+#     forces to make the fast-forward possible. Reconciling a diverged
+#     default branch is a human decision, not this script's.
 #   - Never deletes a tag, release, or branch.
 #   - Never rewrites history.
 #   If a real need for any of that ever comes up, it belongs in a separate,
 #   deliberate, human-run command — not in this script. This script exists
-#   because the previous one did all four of those things routinely and that
-#   is precisely why it had to be deleted.
+#   because the previous one force-pushed a squashed commit over the default
+#   branch routinely, and that is precisely why it had to be deleted. The
+#   lesson from that incident is "advance the default branch only by
+#   fast-forward, never by force" — not "never advance it at all", which is
+#   what an earlier version of this script did instead, and which silently
+#   left the default branch behind every tagged release as a result.
 #
 # Why gates run by default:
 #   No CI workflow in .github/workflows/ currently runs the backend test
@@ -151,8 +165,19 @@ EXPECTED_BRANCH="v1"
 REMOTE="origin"
 CHANGELOG="CHANGELOG.md"
 
+# The branch releases are cut FROM (EXPECTED_BRANCH, 'v1') and the branch
+# this script fast-forwards TO (DEFAULT_BRANCH, normally 'main') are
+# deliberately different here — so DEFAULT_BRANCH is looked up rather than
+# assumed. Falls back to 'main' if `gh` isn't available/authed.
+DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || true)"
+if [ -z "$DEFAULT_BRANCH" ]; then
+  DEFAULT_BRANCH="main"
+  warn "could not determine the default branch via 'gh repo view' — falling back to '$DEFAULT_BRANCH'. Confirm this is actually correct (check gh auth status / network) before proceeding."
+fi
+
 note "repo root: $REPO_ROOT"
 note "target version: $VERSION (tag: $TAG)"
+note "default branch: $DEFAULT_BRANCH"
 [ "$DRY_RUN" -eq 1 ] && note "DRY RUN — no changes will be made"
 
 # --- preflight: version format -------------------------------------------------
@@ -269,6 +294,22 @@ else
   warn "$REMOTE/$EXPECTED_BRANCH does not exist (no remote counterpart for '$EXPECTED_BRANCH') — 'not behind remote' cannot be checked and is being SKIPPED, not assumed true. Confirm independently that this is expected before proceeding."
 fi
 
+# --- preflight: default branch is fast-forwardable to HEAD -----------------------
+
+# This script advances $DEFAULT_BRANCH to HEAD by fast-forward only (see the
+# push step below), which is only possible if $DEFAULT_BRANCH doesn't contain
+# any commit HEAD doesn't already have — i.e. $REMOTE/$DEFAULT_BRANCH must be
+# an ancestor of HEAD. Checked here, before gates run and before anything is
+# pushed, so a diverged default branch fails fast and cheap instead of after
+# a 10+ minute gates run and the confirmation prompt.
+if git rev-parse --verify -q "refs/remotes/$REMOTE/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+  git merge-base --is-ancestor "$REMOTE/$DEFAULT_BRANCH" HEAD \
+    || die "$REMOTE/$DEFAULT_BRANCH has commit(s) that HEAD does not — it has diverged from '$EXPECTED_BRANCH' and a fast-forward push is not possible. This script will not merge, rebase, or force-push to fix that; reconcile $DEFAULT_BRANCH by hand (e.g. 'git log --oneline HEAD..$REMOTE/$DEFAULT_BRANCH' to see what it has that HEAD doesn't) before releasing."
+  note "$REMOTE/$DEFAULT_BRANCH is an ancestor of HEAD — fast-forwarding it is legal: OK"
+else
+  die "$REMOTE/$DEFAULT_BRANCH not found even after fetching — cannot verify a fast-forward push to '$DEFAULT_BRANCH' is safe. Confirm '$DEFAULT_BRANCH' is really $REMOTE's default branch."
+fi
+
 # --- preflight: version-declaration files agree with the tag being cut -----------
 
 PYPROJECT_VERSION="$(grep -m1 '^version = "' pyproject.toml | sed -E 's/^version = "([^"]+)".*/\1/')" \
@@ -325,17 +366,21 @@ echo "=================================================================="
 echo "  tag:            $TAG"
 echo "  commit:         $HEAD_SHA ($HEAD_SHORT)"
 echo "  branch:         $CURRENT_BRANCH"
+echo "  default branch: $DEFAULT_BRANCH (fast-forwards to $HEAD_SHORT)"
 echo "  remote:         $REMOTE ($REMOTE_URL)"
 echo "  gates:          $([ "$SKIP_GATES" -eq 1 ] && echo 'SKIPPED' || echo 'passed')"
 echo ""
-echo "  will run:"
+echo "  will run, in order:"
 echo "    git tag -s -a \"$TAG\" -m <message below> \"$HEAD_SHA\""
+echo "    git push \"$REMOTE\" \"HEAD:refs/heads/$DEFAULT_BRANCH\"   (fast-forward only; skipped if already up to date)"
 echo "    git push \"$REMOTE\" \"refs/tags/$TAG\""
 echo ""
 echo "  tag message:"
 echo "$TAG_MESSAGE" | sed 's/^/    /'
 echo ""
-echo "  this pushes ONLY the tag — no branch, no force, no deletions."
+echo "  branch push is fast-forward ONLY — no force, no merge, no rebase; it"
+echo "  aborts before pushing anything if $DEFAULT_BRANCH has diverged. No"
+echo "  deletions, no rewritten history, anywhere in this script."
 echo "=================================================================="
 echo ""
 
@@ -346,7 +391,7 @@ fi
 
 # --- confirm -------------------------------------------------------------------
 
-read -r -p "Type '$TAG' to confirm and push it to $REMOTE: " CONFIRM
+read -r -p "Type '$TAG' to confirm — this fast-forwards $DEFAULT_BRANCH and pushes $TAG to $REMOTE: " CONFIRM
 [ "$CONFIRM" = "$TAG" ] || die "confirmation did not match '$TAG' — aborted, nothing was tagged or pushed"
 
 # --- do it -----------------------------------------------------------------------
@@ -354,13 +399,45 @@ read -r -p "Type '$TAG' to confirm and push it to $REMOTE: " CONFIRM
 note "creating annotated, signed tag $TAG at $HEAD_SHORT..."
 git tag -s -a "$TAG" -m "$TAG_MESSAGE" "$HEAD_SHA"
 
+# Branch first, tag second. The tag push is what triggers the release
+# workflow (build + GHCR push + GitHub Release) — if the tag went first, CI
+# would build and publish the release while $DEFAULT_BRANCH was still
+# behind, which is exactly the mess this script exists to prevent. Pushing
+# the branch first means "branch push succeeds, tag push then fails" is
+# trivially recoverable (just re-run); the reverse is not.
+#
+# Live remote state, not the fetch from earlier in the script — gates and
+# the confirmation prompt can take a while, enough for $DEFAULT_BRANCH to
+# have moved on $REMOTE since.
+note "checking $REMOTE/$DEFAULT_BRANCH's live state..."
+REMOTE_DEFAULT_SHA="$(git ls-remote "$REMOTE" "refs/heads/$DEFAULT_BRANCH" | cut -f1)" \
+  || die "could not read $REMOTE/$DEFAULT_BRANCH via git ls-remote — cannot safely push. The local tag $TAG still exists and was NOT pushed; remove it with 'git tag -d $TAG' before investigating."
+[ -n "$REMOTE_DEFAULT_SHA" ] \
+  || die "git ls-remote returned nothing for $REMOTE/$DEFAULT_BRANCH — does that branch still exist on $REMOTE? The local tag $TAG still exists and was NOT pushed; remove it with 'git tag -d $TAG' before investigating."
+
+if [ "$REMOTE_DEFAULT_SHA" = "$HEAD_SHA" ]; then
+  note "$REMOTE/$DEFAULT_BRANCH is already at $HEAD_SHORT — nothing to fast-forward, skipping the branch push."
+else
+  note "fast-forwarding $DEFAULT_BRANCH to $HEAD_SHORT on $REMOTE (plain push, no force)..."
+  if ! git push "$REMOTE" "HEAD:refs/heads/$DEFAULT_BRANCH"; then
+    echo "" >&2
+    echo "release.sh: ERROR: fast-forward push of $DEFAULT_BRANCH to $HEAD_SHORT failed." >&2
+    echo "release.sh: this is expected and safe to hit if $DEFAULT_BRANCH moved on $REMOTE just now — this script never merges, rebases, or forces past that; reconcile by hand." >&2
+    echo "release.sh: the local tag $TAG still exists and was NOT pushed, so no workflow has been triggered." >&2
+    echo "release.sh: remove the local tag with: git tag -d $TAG" >&2
+    echo "release.sh: then resolve whatever the push error above says and re-run." >&2
+    exit 1
+  fi
+  note "$DEFAULT_BRANCH fast-forwarded to $HEAD_SHORT on $REMOTE."
+fi
+
 # Re-check immediately before pushing: the earlier remote-tag check ran before
 # gates and the confirmation prompt, minutes ago — enough time for someone
 # else (or another session) to have pushed $TAG in the meantime. Catch that
 # now rather than pushing blind.
 note "re-checking $TAG still doesn't exist on $REMOTE..."
 if git ls-remote --exit-code --tags "$REMOTE" "refs/tags/$TAG" >/dev/null 2>&1; then
-  die "$TAG now exists on $REMOTE (created since the earlier check). The local tag $TAG was already created here and was NOT pushed — remove it with 'git tag -d $TAG' before investigating what pushed $TAG upstream."
+  die "$TAG now exists on $REMOTE (created since the earlier check). The local tag $TAG was already created here and was NOT pushed — remove it with 'git tag -d $TAG' before investigating what pushed $TAG upstream. Note: $DEFAULT_BRANCH may already have been fast-forwarded above — that's fine and doesn't need to be undone."
 fi
 
 note "pushing $TAG to $REMOTE (this ref only)..."
@@ -368,13 +445,14 @@ if ! git push "$REMOTE" "refs/tags/$TAG"; then
   echo "" >&2
   echo "release.sh: ERROR: push of $TAG to $REMOTE failed." >&2
   echo "release.sh: the local tag $TAG still exists — it was NOT pushed, so no workflow has been triggered." >&2
+  echo "release.sh: $DEFAULT_BRANCH may already have been fast-forwarded above — that's fine and doesn't need to be undone." >&2
   echo "release.sh: remove it with: git tag -d $TAG" >&2
   echo "release.sh: then resolve whatever the push error above says and re-run." >&2
   exit 1
 fi
 
 echo ""
-note "$TAG pushed. The 'Release' workflow (.github/workflows/release.yml) is now building:"
+note "$DEFAULT_BRANCH and $TAG are both on $REMOTE now. The 'Release' workflow (.github/workflows/release.yml) is building:"
 note "  - multi-arch image (linux/amd64, linux/arm64) -> ghcr.io/${OWNER_REPO,,}"
 note "  - Trivy scan of the built image"
 note "  - a GitHub Release at $TAG with auto-generated notes"
