@@ -3,6 +3,55 @@
 All notable changes to LM Chat are documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.4
+
+A bug-fix release. Several limits in 1.0.3 assumed less of the model than it
+was capable of, and cut real work short. None of them were argued for; most
+had not been revisited since 1.0.
+
+### Fixed
+
+- Resending or regenerating a message no longer makes it disappear from the
+  conversation while the new answer streams. The message stays on screen for
+  the whole turn.
+- Sending a message in one chat no longer cancels a response still generating
+  in another. Each chat now has its own stream, so work in a background chat
+  survives whatever you do elsewhere.
+- Retrieved context is now sized from the model's real context window. It was
+  previously derived from a small built-in table of model names, so any model
+  not listed there — most of them — had its retrieved context capped as if it
+  were a 16k model, however large it actually was. On a large-context model
+  this cut the supporting evidence to a fraction of what it could hold, on
+  every turn.
+- Timeouts that end a turn are now 30 minutes rather than 5. A local model
+  thinking for several minutes on a long conversation is expected, not a
+  fault, and turns were being cut off mid-answer. This includes the transport
+  timeout underneath them, which was separately capped at 10 minutes.
+- The tool-call budget for a single turn is now 256 rounds, up from 8 on the
+  agentic path and 50 locally. Research-shaped turns that legitimately need
+  many steps were being stopped early.
+- A tool call retried after a *failure* no longer counts toward the
+  stuck-in-a-loop cutoff. Retrying a failed call with the same arguments is
+  normal behaviour, and a flaky tool could end the turn.
+- Web search may now return up to 25 results per call, up from a hard limit of
+  10, and the limit is configurable.
+- Sampler settings you set yourself — temperature, top_p and the rest — are no
+  longer overwritten by a built-in profile for recognised models. The profile
+  now only fills in values you left alone.
+- The LM Studio connection indicator no longer re-queries the server on every
+  poll. An idle browser tab was issuing roughly six catalogue requests a
+  minute; it now issues about two.
+- The API documentation for regenerating a message described the opposite of
+  what the server does. It stated the original message was kept when it is in
+  fact replaced.
+
+### Changed
+
+- `LM_CHAT_MAX_AGENTIC_ROUNDS` and `LM_CHAT_WEB_SEARCH_MAX_TOP_N` are new
+  environment overrides. `LM_CHAT_STREAM_IDLE_TIMEOUT_SEC`,
+  `LM_CHAT_MCP_TOOL_CALL_TIMEOUT_SEC` and `LM_CHAT_AUX_MODEL_TIMEOUT_SEC` now
+  default to 1800 seconds.
+
 ## 1.0.3
 
 ### Added
