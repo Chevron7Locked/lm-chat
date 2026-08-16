@@ -34,7 +34,7 @@ import {
 import {
   classifyFleet,
   configureLmStudio,
-  assertNoLogLine,
+  countLogLines,
 } from "./_dogfood-helpers";
 
 // This IS the model-gated ceiling under test — deliberately the same
@@ -88,6 +88,15 @@ test(
       { timeout: 30_000 },
     );
 
+    // Baseline BEFORE this turn — stream.idle_timeout logs only msg_id, not
+    // chat_id, so it can't be scoped to THIS chat by substring match. The
+    // backend log is cumulative across the whole (serial, workers:1) run;
+    // a before/after diff is what correctly attributes any occurrence to
+    // this journey's own turn instead of vacuously matching nothing (a
+    // chat_id needle here would silently never match at all) or false-
+    // flagging on an unrelated earlier journey.
+    const idleTimeoutBaseline = countLogLines(backendLogPath, ["stream.idle_timeout"]);
+
     const composer = page.getByPlaceholder(/Message/);
     await composer.waitFor({ state: "visible", timeout: 15_000 });
     const t0 = Date.now();
@@ -114,17 +123,18 @@ test(
         `firstTokenToDone=${String(tDone - tFirstToken)}ms`,
     });
 
-    // GREY-BOX — the idle-timeout WARNING marker never fired for this chat.
-    // Reliably teed (WARNING-level, see j6's log-level note); firing here
+    // GREY-BOX — the idle-timeout WARNING marker never fired DURING this
+    // turn (before/after diff, see the baseline comment above). Reliably
+    // teed (WARNING-level, see j6's log-level note); a nonzero diff here
     // means idle_s exceeded lm_chat_stream_idle_timeout_sec mid-turn — the
     // exact regression signature of the shipped 300s defect.
-    assertNoLogLine(
-      backendLogPath,
-      ["stream.idle_timeout", `chat_id=${String(chatId)}`],
-      "the main-chat stream idle timeout fired on the slow model's primary turn — " +
+    const idleTimeoutAfter = countLogLines(backendLogPath, ["stream.idle_timeout"]);
+    expect(
+      idleTimeoutAfter - idleTimeoutBaseline,
+      "the main-chat stream idle timeout fired during the slow model's primary turn — " +
         "lm_chat_stream_idle_timeout_sec (or the underlying httpx read timeout) is too " +
         "tight for real local-model inter-token gaps",
-    );
+    ).toBe(0);
 
     const resp = await page.request.get(`${backendURL}/api/chats/${String(chatId)}`);
     expect(resp.ok(), `GET /api/chats/${String(chatId)} → HTTP ${String(resp.status())}`).toBe(

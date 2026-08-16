@@ -3,7 +3,7 @@
 # the validate-openapi target
 # is the CI gate for the hand-draft openapi.yaml.
 
-.PHONY: help validate-openapi check-adr-consistency check-pyproject-floors check-no-lmstudio-fs check-commit-hygiene install-hooks gates test emit-openapi check-openapi-drift web-codegen web-suite web-gates e2e e2e-stubbed e2e-live dogfood-live security-scan reprobe-surface validate-deploy stress-baseline stress-test stress-postgres-up stress-postgres-down stress-migrate production-gate production-gate-quick soak-test target/gates/.L8-auth-passed mutation-baseline coverage-merged test-flake-scan mutation-gate visual-baseline visual-test
+.PHONY: help validate-openapi check-adr-consistency check-pyproject-floors check-no-lmstudio-fs check-commit-hygiene install-hooks gates test emit-openapi check-openapi-drift web-codegen web-suite web-gates e2e e2e-stubbed e2e-live dogfood-live dogfood-live-fault security-scan reprobe-surface validate-deploy stress-baseline stress-test stress-postgres-up stress-postgres-down stress-migrate production-gate production-gate-quick soak-test target/gates/.L8-auth-passed mutation-baseline coverage-merged test-flake-scan mutation-gate visual-baseline visual-test
 
 mutation-baseline:
 	@echo "[mutation] running cosmic-ray baseline for streaming_client + native + chats"
@@ -27,6 +27,7 @@ help:
 	@echo "  e2e-live                  Playwright live suite (needs running app)"
 	@echo "  e2e                       e2e-stubbed + e2e-live (§3.2)"
 	@echo "  dogfood-live              PRE-SHIP live-model dogfood (real LM Studio; 10-20 min, on-demand only)"
+	@echo "  dogfood-live-fault        J20 ONLY, through a fault-injection proxy (real LM Studio; on-demand)"
 	@echo "  security-scan             bandit (high/critical) + pip-audit + secrets scan"
 	@echo "  validate-deploy           build Docker image, boot compose stack, smoke healthz + source-map leak check (P12g)"
 	@echo "  production-gate           P15 layered gate (L0 static-fast .. L9 gate-report)"
@@ -146,6 +147,43 @@ dogfood-live:
 	node web/scripts/dogfood-preflight.mjs && \
 	( cd web && npm run -s build ) && \
 	( cd web && LMCHAT_REAL_UPSTREAM=1 npx playwright test --config=playwright.dogfood.config.ts )
+
+# Fault-injection dogfood — defect-8 coverage (an upstream HTTP 500 from LM
+# Studio killing an in-flight turn). LM Studio has no supported fault-
+# injection surface and this app must never manage LM Studio's own
+# process/state (operator directive), so this target runs J20 ALONE through
+# a thin reverse proxy (web/scripts/dogfood-fault-proxy.mjs) sitting between
+# the backend and the REAL LM Studio — every request passes through
+# untouched except the ONE the journey arms to fail. Deliberately separate
+# from `dogfood-live`: the routine gate's blast radius and runtime stay
+# unaffected by this proxy even if it has a bug. Opt-in, on-demand, like
+# dogfood-live itself.
+DOGFOOD_FAULT_PROXY_PORT ?= 18234
+
+dogfood-live-fault:
+	@set -a; [ -f .env.local ] && . ./.env.local; set +a; \
+	REAL_LMSTUDIO_URL="$${LMCHAT_DOGFOOD_LMSTUDIO_URL:-$$LM_STUDIO_BASE_URL}"; \
+	REAL_LMSTUDIO_URL="$${REAL_LMSTUDIO_URL:-http://localhost:1234}"; \
+	echo "[dogfood-live-fault] target LM Studio: $$REAL_LMSTUDIO_URL"; \
+	DOGFOOD_FAULT_PROXY_TARGET="$$REAL_LMSTUDIO_URL" \
+	DOGFOOD_FAULT_PROXY_PORT="$(DOGFOOD_FAULT_PROXY_PORT)" \
+	  node web/scripts/dogfood-fault-proxy.mjs & \
+	PROXY_PID=$$!; \
+	cleanup() { \
+	  echo "[dogfood-live-fault] stopping fault proxy (pid $$PROXY_PID)"; \
+	  kill $$PROXY_PID >/dev/null 2>&1 || true; \
+	  wait $$PROXY_PID 2>/dev/null || true; \
+	}; \
+	trap cleanup EXIT INT TERM; \
+	sleep 1; \
+	export LMCHAT_DOGFOOD_LMSTUDIO_URL="http://127.0.0.1:$(DOGFOOD_FAULT_PROXY_PORT)"; \
+	export LMCHAT_DOGFOOD_LMSTUDIO_KEY="$${LMCHAT_DOGFOOD_LMSTUDIO_KEY:-$$LM_STUDIO_API_KEY}"; \
+	export DOGFOOD_FAULT_PROXY_PORT="$(DOGFOOD_FAULT_PROXY_PORT)"; \
+	node web/scripts/dogfood-preflight.mjs && \
+	( cd web && npm run -s build ) && \
+	( cd web && LMCHAT_REAL_UPSTREAM=1 npx playwright test \
+	    --config=playwright.dogfood.config.ts \
+	    flows-dogfood/j20-upstream-500-salvage.spec.ts )
 
 # ---------------------------------------------------------------------------
 # Security scan — P9b Item G

@@ -37,6 +37,7 @@ import {
   setWebSearchProvider,
   sendTurnAndWait,
   assertNoLogLine,
+  countLogLines,
 } from "./_dogfood-helpers";
 
 const TURN_TIMEOUT_MS = 1_800_000;
@@ -129,6 +130,13 @@ test(
       `${String(TOPICS.length)} calls are complete. Topics, in order:\n` +
       TOPICS.map((t, i) => `${String(i + 1)}. ${t}`).join("\n");
 
+    // Baseline BEFORE this turn — agentic.loop.max_rounds_hit logs
+    // max_rounds only, no chat_id, so it can't be scoped to THIS chat by
+    // substring match. The backend log is cumulative across the whole
+    // (serial, workers:1) run; a before/after diff correctly attributes
+    // any occurrence to this journey's own turn.
+    const maxRoundsBaseline = countLogLines(backendLogPath, ["agentic.loop.max_rounds_hit"]);
+
     await sendTurnAndWait(page, instruction, TURN_TIMEOUT_MS);
 
     assertNoLogLine(
@@ -148,45 +156,36 @@ test(
       `J18 RESULT: ${String(dispatchedCount)} tool call(s) dispatched (model=${toolTrained.key})`,
     );
 
-    // HARD, cap-value-independent invariant: if the model was still making
-    // progress (dispatching tool calls) past where the OLD cap would have
-    // cut it off, the loop must not have terminated via the cap. This
-    // holds regardless of whether the model cooperated with the full
-    // 12-call instruction above.
-    if (dispatchedCount > OLD_BROKEN_ROUND_CAP) {
-      assertNoLogLine(
-        backendLogPath,
-        ["agentic.loop.max_rounds_hit"],
-        `${String(dispatchedCount)} tool calls dispatched (past the old broken cap of ` +
-          `${String(OLD_BROKEN_ROUND_CAP)}) but agentic_max_rounds fired anyway — the round ` +
-          "cap regressed to a small value",
-      );
-      assertNoLogLine(
-        backendLogPath,
-        ["stream.tool_loop_cap_hit", `chat_id=${String(chatId)}`],
-        `${String(dispatchedCount)} tool calls dispatched (past the old broken cap of ` +
-          `${String(OLD_BROKEN_ROUND_CAP)}) but tool_loop_cap fired anyway — the round cap ` +
-          "regressed to a small value",
-      );
-    } else {
+    if (dispatchedCount <= OLD_BROKEN_ROUND_CAP) {
       test.info().annotations.push({
         type: "j18-inconclusive",
         description:
           `only ${String(dispatchedCount)} tool call(s) were dispatched — the live model did ` +
           `not cooperate with the forced ${String(TOPICS.length)}-call instruction enough to ` +
-          `exceed the old broken cap of ${String(OLD_BROKEN_ROUND_CAP)}. Cannot confirm the ` +
-          "cap-value regression signal on this run; the cap-not-hit-prematurely check below " +
-          "still applies to whatever depth was reached.",
+          `exceed the old broken cap of ${String(OLD_BROKEN_ROUND_CAP)}. The unconditional ` +
+          "cap-not-hit check below still applies to whatever depth was reached, but the " +
+          "cap-VALUE regression signal (dispatched > 8) is not confirmed on this run.",
       });
     }
 
-    // Always true regardless of depth reached: the cap must never fire
-    // BELOW the old broken value either (an even smaller regression).
+    // HARD, cap-value-independent invariant, unconditional regardless of
+    // depth reached: the loop must never have been cut off by the cap
+    // while tool calls were still succeeding. A cap firing here — at ANY
+    // depth — is a regression signal; the annotation above only qualifies
+    // how STRONG a signal the depth number itself is.
+    const maxRoundsAfter = countLogLines(backendLogPath, ["agentic.loop.max_rounds_hit"]);
+    expect(
+      maxRoundsAfter - maxRoundsBaseline,
+      `agentic_max_rounds fired during this turn (after ${String(dispatchedCount)} dispatched ` +
+        `tool call(s); old broken cap was ${String(OLD_BROKEN_ROUND_CAP)}) — the round cap ` +
+        "regressed to a small value",
+    ).toBe(0);
     assertNoLogLine(
       backendLogPath,
       ["stream.tool_loop_cap_hit", `chat_id=${String(chatId)}`],
-      `tool_loop_cap fired after only ${String(dispatchedCount)} dispatched call(s) — well ` +
-        `under even the old broken cap of ${String(OLD_BROKEN_ROUND_CAP)}`,
+      `tool_loop_cap fired after ${String(dispatchedCount)} dispatched tool call(s) (old ` +
+        `broken cap was ${String(OLD_BROKEN_ROUND_CAP)}) — the round cap regressed to a small ` +
+        "value",
     );
 
     assertNoConsoleErrors(collectErrors(), "j18");

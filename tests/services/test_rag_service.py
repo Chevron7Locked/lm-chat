@@ -1489,3 +1489,63 @@ async def test_trim_uses_threaded_ctx_window_not_static_default(
     assert live_fired is False
     assert live_trimmed == result.context_block
     assert len(live_trimmed) > len(stale_trimmed)
+
+
+async def test_ctx_window_resolves_even_when_rag_disabled(
+    engine: AsyncEngine,
+) -> None:
+    """The live-window probe runs UNCONDITIONALLY (2026-08-15 follow-up) —
+    not only when rag_enabled — because pinned/auto-distilled insights are
+    injected regardless of rag_enabled and still need a real window to
+    budget against. Before this follow-up, a rag_enabled=False chat always
+    got ctx_window=0 (the probe was gated inside ``if rag_enabled:``) even
+    when a live window was fully resolvable, forcing every pinned-only
+    turn onto the unresolved floor for no real reason.
+    """
+    from datetime import UTC, datetime
+
+    from lmchat.services.memory_service import MemoryInsight
+
+    await _insert_user(engine, 1)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT OR IGNORE INTO chats (id, user_id, title, settings, model_id)"
+                " VALUES (:id, :uid, :t, :s, :mid)"
+            ),
+            {
+                "id": 1,
+                "uid": 1,
+                "t": "rag-disabled chat with a pinned fact",
+                "s": '{"rag_enabled": false}',
+                "mid": "some-model-id",
+            },
+        )
+
+    pinned = MemoryInsight(
+        id=1,
+        user_id=1,
+        text="a pinned fact",
+        pinned=True,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    memory_svc = _make_memory_service(recalled=[])
+    memory_svc.list_pinned = AsyncMock(return_value=[pinned])
+    memory_svc.recall_insights = AsyncMock(return_value=[])
+    models_svc = _make_models_service()
+    models_svc.get_max_context_length = AsyncMock(return_value=131_072)
+
+    result = await augment_prompt(
+        chat_id=1,
+        user_id=1,
+        current_message="hello",
+        engine=engine,
+        embedding_client=_make_embedding_client(),
+        models_service=models_svc,
+        memory_service=memory_svc,
+        top_k=5,
+    )
+
+    assert "a pinned fact" in result.context_block
+    assert result.ctx_window == 131_072
+    memory_svc.recall.assert_not_called()  # rag_enabled=False: no semantic recall

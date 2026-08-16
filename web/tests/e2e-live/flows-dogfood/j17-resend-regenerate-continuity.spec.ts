@@ -158,7 +158,7 @@ test(
 
     // Click Resend — this deletes the boundary row server-side and replays
     // it as a fresh (long, slow) turn. THE ACT under test.
-    await page.getByTestId(`chat-message-resend-btn-${String(userMsgId ?? "")}`).click();
+    await page.getByTestId(`chat-message-resend-btn-${userMsgId ?? ""}`).click();
     await expect(
       page.getByTestId("chat-message-stream-caret"),
     ).toBeVisible({ timeout: STREAM_START_TIMEOUT_MS });
@@ -171,8 +171,7 @@ test(
     const finalChat = await getChat(page, backendURL, chatId);
     expect(
       finalChat.messages.map((m) => m.role),
-      `expected [user, assistant] after resend, got: ` +
-        `${JSON.stringify(finalChat.messages.map((m) => m.role))}`,
+      `expected [user, assistant] after resend, got: ${JSON.stringify(finalChat.messages.map((m) => m.role))}`,
     ).toEqual(["user", "assistant"]);
     expect(
       (finalChat.messages[1]?.content ?? "").length,
@@ -212,7 +211,7 @@ test(
     // replay mechanism as Resend — see this file's docstring), so the same
     // vanish window applies to it, not just to Resend.
     await page
-      .getByTestId(`chat-message-regenerate-btn-${String(assistantMsgId ?? "")}`)
+      .getByTestId(`chat-message-regenerate-btn-${assistantMsgId ?? ""}`)
       .click();
     await expect(
       page.getByTestId("chat-message-stream-caret"),
@@ -226,8 +225,7 @@ test(
     const finalChat = await getChat(page, backendURL, chatId);
     expect(
       finalChat.messages.map((m) => m.role),
-      `expected [user, assistant] after regenerate, got: ` +
-        `${JSON.stringify(finalChat.messages.map((m) => m.role))}`,
+      `expected [user, assistant] after regenerate, got: ${JSON.stringify(finalChat.messages.map((m) => m.role))}`,
     ).toEqual(["user", "assistant"]);
     expect(
       (finalChat.messages[1]?.content ?? "").length,
