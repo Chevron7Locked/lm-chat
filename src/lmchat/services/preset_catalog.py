@@ -24,9 +24,13 @@ copied VERBATIM from ``web/src/lib/presets.ts``. There is no shared
 source of truth and no build step that generates one side from the
 other — future edits to a persona's prompt in ``presets.ts`` must be
 manually re-copied here, or the two surfaces will drift. See
-``tests/services/test_preset_catalog.py`` for the drift guard (id-set
-parity; content is spot-checked, not diffed byte-for-byte on every test
-run).
+``tests/services/test_preset_catalog.py`` for the drift guard: id-set
+parity, AND full byte-for-byte equality of every preset's
+``system_prompt`` plus the shared standards block, parsed live out of
+``presets.ts``. Content used to be spot-checked on a single preset,
+which left five of six and the shared block unguarded — a prompt
+improved on one side would silently stop matching the persona the other
+side actually ships.
 
 Only the fields the role-adoption feature needs are mirrored:
 ``id``, ``label``, ``system_prompt``, ``temperature``. The frontend's
