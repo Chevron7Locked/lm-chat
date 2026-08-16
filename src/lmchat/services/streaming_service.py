@@ -3329,13 +3329,33 @@ class StreamingService:
                 supports_reasoning=_caps.reasoning is not None if _caps else False,
             )
             if _profile is not None:
-                reasoning_payload = reasoning_payload.model_copy(update=_profile)
+                # Fill only the fields the caller left unset. Every sampler
+                # field on the payload is ``X | None = None``, so a non-None
+                # value is a CHOICE — from the per-chat numeric rail, the
+                # active preset, or whatever the operator configured — and a
+                # vendor default must not silently overwrite it. Before this,
+                # model_copy(update=_profile) clobbered the lot: set
+                # temperature to 0.2 deliberately and a profiled model
+                # replaced it, with nothing but a server-side log to show for
+                # it. The escape hatches were renaming the model to end in
+                # "-scar" or killing profiles process-wide with
+                # LM_CHAT_DISABLE_SAMPLER_PROFILES — neither of which is a
+                # per-chat opt-out.
+                _applied = {
+                    _k: _v
+                    for _k, _v in _profile.items()
+                    if getattr(reasoning_payload, _k, None) is None
+                }
+                _respected = sorted(set(_profile) - set(_applied))
+                if _applied:
+                    reasoning_payload = reasoning_payload.model_copy(update=_applied)
                 log.info(
                     "sampler_profile_applied",
                     chat_id=chat_id,
                     msg_id=msg_id,
                     model_id=model_id,
-                    profile_keys=list(_profile.keys()),
+                    profile_keys=list(_applied.keys()),
+                    respected_caller_keys=_respected,
                 )
 
         return reasoning_payload

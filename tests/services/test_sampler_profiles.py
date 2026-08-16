@@ -250,6 +250,126 @@ async def test_default_new_chat_turn_applies_thinking_profile_for_reasoning_mode
     )
 
 
+@pytest.mark.asyncio
+async def test_sampler_profile_does_not_overwrite_an_explicit_temperature() -> None:
+    """A temperature the caller actually chose must survive a profiled model.
+
+    RED-ON-REVERT: ``_assemble_system_prompt`` used to apply the profile as
+    ``reasoning_payload.model_copy(update=_profile)`` — unconditional, with
+    no check for whether the field already carried a value. Every sampler
+    field on the payload is ``X | None = None``, so a non-None value is a
+    CHOICE: the per-chat numeric rail exposes temperature/top_p/top_k/min_p/
+    repeat_penalty directly, and the active preset puts its own temperature
+    on the payload before send. Under the old code a profiled model silently
+    replaced all of it, leaving nothing but a server-side log line — no
+    warning frame, unlike the tools-trimmed path one function away.
+
+    Reverting the fix makes this assert PROFILE_THINKING_GENERAL's 1.0
+    instead of the caller's 0.2.
+    """
+    from collections.abc import AsyncIterator
+    from unittest.mock import AsyncMock, MagicMock
+
+    from sqlalchemy import insert
+    from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+    from lmchat.db.schema import chats, metadata
+    from lmchat.lmstudio.types import (
+        CanonicalChatRequest,
+        CanonicalEvent,
+        CanonicalInputBlock,
+    )
+    from lmchat.services.models_service import Capabilities, ReasoningCapability
+    from lmchat.services.streaming_service import ChatStreamRequest, StreamingService
+
+    model_id = "Qwen3.6-35B-A3B"  # profiled per is_profiled_model
+    chosen_temperature = 0.2
+
+    engine: AsyncEngine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(metadata.create_all)
+        await conn.execute(insert(chats).values(user_id=1, title="test"))
+
+    captured: dict[str, Any] = {}
+
+    async def _fake_stream(*args: Any, **kwargs: Any) -> AsyncIterator[CanonicalEvent]:
+        captured["request"] = kwargs.get("request") or (args[0] if args else None)
+        for ev in (
+            CanonicalEvent(type="chat.start", response_id="rid-1"),
+            CanonicalEvent(type="message.start"),
+            CanonicalEvent(type="message.delta", content="hi"),
+            CanonicalEvent(type="message.end"),
+            CanonicalEvent(type="chat.end", response_id="rid-1"),
+        ):
+            yield ev
+
+    lm_client = MagicMock()
+    lm_client.stream = _fake_stream
+
+    memory_mock = AsyncMock()
+    memory_mock.index_message = AsyncMock(return_value=None)
+
+    models_service = AsyncMock()
+    models_service.auth_failed = False
+    res = MagicMock(wire_id=model_id, substituted=False)
+    models_service.resolve_to_loaded_or_fallback = AsyncMock(return_value=res)
+    models_service.get_capabilities = AsyncMock(
+        return_value=Capabilities(
+            vision=False,
+            trained_for_tool_use=True,
+            reasoning=ReasoningCapability(
+                allowed_options=["off", "low", "medium", "high"], default="medium"
+            ),
+        )
+    )
+    models_service.get_max_context_length = AsyncMock(return_value=0)
+
+    svc = StreamingService(
+        engine=engine,
+        lm_client=lm_client,
+        memory_service=memory_mock,
+        chat_locks={},
+        models_service=models_service,
+    )
+
+    from tests.services.conftest import make_disconnect_receive
+
+    request = AsyncMock()
+    request.receive = make_disconnect_receive(False)
+    user = MagicMock()
+    user.id = 1
+
+    async for _ in svc.stream_chat(
+        chat_id=1,
+        user=user,
+        payload=ChatStreamRequest(
+            chat_id=1,
+            payload=CanonicalChatRequest(
+                model=model_id,
+                input=[CanonicalInputBlock(type="text", content="hi")],
+                temperature=chosen_temperature,
+            ),
+        ),
+        request=request,
+    ):
+        pass
+
+    await engine.dispose()
+
+    sent = captured.get("request")
+    assert sent is not None, "lm_client.stream was never called"
+    assert sent.temperature == chosen_temperature, (
+        "an explicitly-chosen temperature must survive a profiled model; the "
+        f"sampler profile overwrote {chosen_temperature} with {sent.temperature}"
+    )
+    # The profile must still fill fields the caller left unset — this is a
+    # "don't clobber a choice" fix, not a "disable sampler profiles" one.
+    assert sent.top_p == sampler_profiles.PROFILE_THINKING_GENERAL["top_p"], (
+        "fields the caller left unset must still receive the vendor profile; "
+        f"top_p is {sent.top_p}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Hot-reload tests
 # ---------------------------------------------------------------------------
