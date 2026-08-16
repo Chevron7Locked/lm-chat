@@ -19,12 +19,17 @@ peerDependencyRules:
 #   brace-expansion 2.1.3/5.0.8 → GHSA-rgw5-rvv9-x895 (ReDoS)
 #   fast-uri        3.1.4       → GHSA-7p8r-x3mc-p8w7
 #   js-yaml         4.3.0       → GHSA-5p4m-2wfm-xmqj (HIGH)
-#   nanoid          3.3.16      → GHSA-2v37-7h3g-55p8 (HIGH)
+#   nanoid          3.3.17      → GHSA-2v37-7h3g-55p8 (HIGH). Pinned to 3.3.17
+#                               first; the advisory later moved its fixed
+#                               version to 3.3.18 (introduced:0, fixed:3.3.18),
+#                               so the old pin held the vulnerable line and CI
+#                               went red on 2026-08-16. A pin can go stale when
+#                               an advisory is revised — bump, don't ignore.
 #   qs              6.15.1      → GHSA-q8mj-m7cp-5q26
 overrides:
   brace-expansion@2: 2.1.4
   brace-expansion@5: 5.0.9
   fast-uri: 3.1.5
   js-yaml@4: 4.3.1
-  nanoid@3: 3.3.17
+  nanoid@3: 3.3.18
   qs: 6.15.2
